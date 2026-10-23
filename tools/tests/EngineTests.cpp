@@ -918,6 +918,42 @@ int main (int argc, char** argv)
                    "the 7 reverb types sound clearly different", "closest pair " + closest + ": " + String (minDist, 1));
         }
 
+        // Shimmer with a long held note: the octave-up feedback must not pile up into a harsh,
+        // ever-brighter whistle. Compare the top-end share and the level early vs. late.
+        {
+            String report;
+            bool ok = true;
+            for (float decayNorm : { 0.4f, 0.75f, 1.0f })
+            {
+                auto rv = makeModule (Type::reverb, 1, SR);
+                setMode (rv, 6);   // Shimmer
+                rv.norm[1] = decayNorm;
+                rv.norm[6] = 1.0f;   // wet only
+                auto in = tone (220, 15.0, 0.3f);   // a note held for 15 seconds
+                auto out = runFx (rv, in);
+                auto hfShare = [&] (double from, double to)
+                {
+                    // energy of the 2nd difference (strongly weights high frequencies) vs. the signal
+                    double hf = 0, all = 0;
+                    for (size_t i = (size_t) (from * SR) + 2; i < (size_t) (to * SR); ++i)
+                    {
+                        const double d2 = (double) out[i] - 2.0 * out[i - 1] + out[i - 2];
+                        hf += d2 * d2;
+                        all += (double) out[i] * out[i];
+                    }
+                    return 10.0 * std::log10 (hf / (all + 1e-12) + 1e-12);
+                };
+                const double hfEarly = hfShare (1.0, 3.0), hfLate = hfShare (12.0, 15.0);
+                const double lvEarly = level (out, (size_t) (SR * 1.0), (size_t) (SR * 3.0));
+                const double lvLate = level (out, (size_t) (SR * 12.0), (size_t) (SR * 15.0));
+                const bool good = hfLate < hfEarly + 3.0 && lvLate < lvEarly * 2.0 && lvLate < 1.0;
+                ok = ok && good;
+                report << "decay " << String (rv.value (1), 1) << "s: top " << String (hfEarly, 1) << ">" << String (hfLate, 1)
+                       << " dB, level " << String (lvEarly, 3) << ">" << String (lvLate, 3) << (good ? "" : " BAD") << "  ";
+            }
+            check (ok, "shimmer stays smooth with a long held note", report);
+        }
+
         // Every reverb type stays stable at maximum size and decay (Shimmer feeds itself).
         {
             String unstable;

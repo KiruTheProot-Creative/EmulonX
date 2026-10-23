@@ -59,9 +59,9 @@ public:
             for (auto& d : s.disp) d = {};
             s.lp = s.hp = s.inLp = s.inHp = 0;
         }
-        pitch.assign (4096, 0.0f);
-        pw = 0; phase = 0;
-        w = pwi = ewi = 0; ph = hl = hr = inLp = shimmerLp = 0;
+        for (int k = 0; k < numShifters; ++k)
+            shifters[k].reset (k * 0.37);
+        w = pwi = ewi = 0; ph = hl = hr = inLp = 0;
         std::fill (std::begin (y), std::end (y), 0.0);
     }
 
@@ -93,7 +93,7 @@ private:
             {   0.30, 0.10, 0.50, 0.50, 2,   1.10, 0.22, 0.60, 0.25, 0.8,  1.20, 2 },   // ambience
             {   2.10, 1.60, 0.17, 0.72, 4,   0.22, 1.15, 0.55, 1.7,  30.0, 1.55, 3 },   // cathedral
             {   1.00, 0.00, 0.00, 0.00, 0,   0.00, 1.00, 1.00, 1.0,  20.0, 1.00, -1 },  // spring (own path)
-            {   1.20, 1.10, 0.25, 0.72, 4,   0.25, 1.00, 1.10, 1.3,  30.0, 1.35, 1 },   // shimmer
+            {   1.20, 1.10, 0.25, 0.72, 4,   0.25, 1.00, 1.10, 1.3,  30.0, 1.60, 1 },   // shimmer
         };
         return defs[juce::jlimit (0, numModes - 1, m)];
     }
@@ -142,6 +142,12 @@ private:
         }
         const double dc = onePole (damp * M.dampMul, sr), lc = 1.0 - std::exp (-twoPi * lo / sr);
         const double inC = mode == plate ? 1.0 : onePole (juce::jmin (sr * 0.45, damp * 1.3), sr);
+        if (mode == shimmer)
+        {
+            shimInC = onePole (juce::jmin (sr * 0.2, juce::jmin (4500.0, damp)), sr);
+            shimOutC = onePole (juce::jmin (sr * 0.4, juce::jmin (8000.0, damp * 1.5)), sr);
+            shimHpC = 1.0 - std::exp (-twoPi * 160.0 / sr);
+        }
         const int plen = (int) pre.size();
         const int pd = juce::jlimit (1, plen - 1, (int) std::round (v[2] * 0.001 * sr));
         ph += N / sr;
@@ -203,12 +209,21 @@ private:
                 y[j] = yy;
                 sum += yy;
             }
-            double shim = 0;
-            if (mode == shimmer)
-                shim = shimmerTap (sum * 0.25) * 0.32;
             sum *= 0.25;
+            double fbv[8];
             for (int j = 0; j < 8; ++j)
-                lines[j].b[(size_t) w] = (float) (y[j] - sum + ((j & 1) ? -d : d) * 0.5 + shim);
+                fbv[j] = y[j] - sum;   // Householder mix (energy preserving)
+            if (mode == shimmer)
+            {
+                // Swap part of four lines for their octave-up copies instead of adding the copies on
+                // top: the feedback can then never come back louder than it went in, so the loop
+                // stays stable at any decay. The shifters' inputs and outputs are band-limited, so
+                // octaves stacked on octaves fade out instead of piling up into a whistle.
+                for (int k = 0; k < numShifters; ++k)
+                    fbv[k] += shimmerAmount * (shifters[k].tap (fbv[k], shimInC, shimOutC, shimHpC) - fbv[k]);
+            }
+            for (int j = 0; j < 8; ++j)
+                lines[j].b[(size_t) w] = (float) (fbv[j] + ((j & 1) ? -d : d) * 0.5);
             if (++w >= mx) w = 0;
 
             double ol = (y[0] + y[2] + y[4] + y[6]) * M.outGain * M.lateLevel + el * M.erLevel * 0.6;
@@ -220,26 +235,6 @@ private:
             L[i] = (float) (xl * (1 - mix) + ol * mix);
             R[i] = (float) (xr * (1 - mix) + orr * mix);
         }
-    }
-
-    /** Octave-up pitch shifter (two crossfading read heads) for the Shimmer tail. */
-    double shimmerTap (double x) noexcept
-    {
-        const int W = (int) pitch.size();
-        pitch[(size_t) pw] = (float) x;
-        phase -= 1.0 / (W - 8);
-        if (phase < 0) phase += 1.0;
-        double out = 0;
-        for (int h = 0; h < 2; ++h)
-        {
-            double p = phase + 0.5 * h;
-            if (p >= 1.0) p -= 1.0;
-            const double win = std::sin (pi * p);
-            out += win * win * readCirc (pitch, pw, 2.0 + p * (W - 8));
-        }
-        if (++pw >= W) pw = 0;
-        shimmerLp += (out - shimmerLp) * 0.35;   // soften the top end
-        return shimmerLp;
     }
 
     //== Spring: a delay line with a chain of dispersive all-passes ("boing")
@@ -293,6 +288,48 @@ private:
     static constexpr int maxDiffusers = 6;
     static constexpr double apMs[maxDiffusers] { 4.7, 3.6, 12.7, 9.3, 2.1, 7.4 };
     static constexpr double dispersion = 0.62;
+    static constexpr double shimmerAmount = 0.6;
+    static constexpr int numShifters = 4;
+
+    /** Octave-up pitch shifter (two crossfading read heads) for the Shimmer tail. */
+    struct Shifter
+    {
+        std::vector<float> buf;
+        int pw = 0;
+        double phase = 0, i1 = 0, i2 = 0, o1 = 0, o2 = 0, hp = 0;
+
+        void reset (double startPhase)
+        {
+            buf.assign (4096, 0.0f);
+            pw = 0; phase = startPhase; i1 = i2 = o1 = o2 = hp = 0;
+        }
+        double tap (double x, double inC, double outC, double hpC) noexcept
+        {
+            // keep the top end out of the shifter (it would come back an octave higher)
+            i1 += (x - i1) * inC;
+            i2 += (i1 - i2) * inC;
+            const int W = (int) buf.size();
+            buf[(size_t) pw] = (float) i2;
+            phase -= 1.0 / (W - 8);
+            if (phase < 0) phase += 1.0;
+            double out = 0;
+            for (int h = 0; h < 2; ++h)
+            {
+                double p = phase + 0.5 * h;
+                if (p >= 1.0) p -= 1.0;
+                const double win = std::sin (pi * p);
+                out += win * win * readCirc (buf, pw, 2.0 + p * (W - 8));
+            }
+            if (++pw >= W) pw = 0;
+            // soften the shifted top end and drop the rumble the crossfading heads can leave behind
+            o1 += (out - o1) * outC;
+            o2 += (o1 - o2) * outC;
+            hp += (o2 - hp) * hpC;
+            const double r = o2 - hp;
+            return std::isfinite (r) ? r : 0.0;
+        }
+    };
+    Shifter shifters[numShifters];
     struct Line { std::vector<float> b; double lp = 0; };
     struct AllPass { std::vector<float> b; int i = 0; };
     struct Disp { double x1 = 0, y1 = 0; };
@@ -300,9 +337,9 @@ private:
     Line lines[8];
     AllPass ap[maxDiffusers];
     Spring springs[2];
-    std::vector<float> pre, er, pitch;
-    int mx = 0, w = 0, pwi = 0, ewi = 0, pw = 0;
-    double ph = 0, hl = 0, hr = 0, y[8] {}, inLp = 0, phase = 0, shimmerLp = 0;
+    std::vector<float> pre, er;
+    int mx = 0, w = 0, pwi = 0, ewi = 0;
+    double ph = 0, hl = 0, hr = 0, y[8] {}, inLp = 0, shimInC = 0.5, shimOutC = 0.5, shimHpC = 0.02;
 };
 
 //== Compressor / Limiter / OTT ==================================================
