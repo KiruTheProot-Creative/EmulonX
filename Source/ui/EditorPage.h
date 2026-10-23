@@ -126,9 +126,13 @@ private:
     ValueControl attack { "Attack", ValueControl::Style::fader, 84 }, decay { "Decay", ValueControl::Style::fader, 84 },
                  sustain { "Sustain", ValueControl::Style::fader, 84 }, release { "Release", ValueControl::Style::fader, 84 };
 
+    // Voice mode (whole preset)
+    juce::TextButton polyButton { "POLY" }, monoButton { "MONO" }, legatoButton { "LEGATO" };
+    ValueControl glide { "Glide", ValueControl::Style::knob };
+
     KeymapView keymap;
 
-    juce::Rectangle<float> topArea, sampleArea, waveArea, mapArea, pitchArea, ampArea, envArea, keyArea, keyInset;
+    juce::Rectangle<float> topArea, sampleArea, waveArea, mapArea, pitchArea, ampArea, envArea, voiceArea, keyArea, keyInset;
     juce::Rectangle<float> labelStart, labelEnd, labelFade;
 };
 } // namespace emx

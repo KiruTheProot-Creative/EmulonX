@@ -8,6 +8,7 @@
 #include "engine/SampleLoader.h"
 #include "engine/ReleasePool.h"
 #include "fx/FxEngine.h"
+#include "engine/Arpeggiator.h"
 #include "Settings.h"
 
 namespace emx
@@ -25,6 +26,33 @@ struct ModelZone
     ZoneParams params;
     int order = 0;
     fx::Chain fx;   // this zone's own FX channel (runs before the whole-preset chain)
+};
+
+/** Mono / poly playing, saved with the preset. */
+struct VoiceSettings
+{
+    bool mono = false, legato = true;
+    float glide = 0.0f;   // seconds
+
+    juce::var toJson() const
+    {
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("mode", mono ? "mono" : "poly");
+        o->setProperty ("legato", legato);
+        o->setProperty ("glide", glide);
+        return juce::var (o);
+    }
+    static VoiceSettings fromJson (const juce::var& j)
+    {
+        VoiceSettings v;
+        if (j.isObject())
+        {
+            v.mono = j["mode"].toString() == "mono";
+            v.legato = j.hasProperty ("legato") ? (bool) j["legato"] : true;
+            v.glide = juce::jlimit (0.0f, 5.0f, (float) (double) j["glide"]);
+        }
+        return v;
+    }
 };
 
 struct BankEntry
@@ -144,6 +172,13 @@ public:
     int getLearnMacro() const noexcept { return learnMacro; }
     void setLearnMacro (int index);
 
+    //== Arpeggiator and voice mode =============================================
+    const ArpSettings& getArpSettings() const noexcept { return arpSettings; }
+    void setArpSettings (const ArpSettings&);
+    const VoiceSettings& getVoiceSettings() const noexcept { return voiceSettings; }
+    void setVoiceSettings (const VoiceSettings&);
+    Arpeggiator& getArp() noexcept { return arp; }
+
     /** Where the newest voice of each zone is playing (for the waveform). */
     int getPlayheads (SamplerEngine::Playhead* out, int maxCount) const noexcept;
 
@@ -199,7 +234,8 @@ private:
     void applyFxJson (const juce::var& fxJson, const std::vector<juce::var>& zoneChainsJson, bool applyVolume);
     fx::Chain copyChainWithNewIds (const fx::Chain&);
 
-    struct UndoState { std::vector<ModelZone> zones; Interp interp; int selected; fx::Setup fx; };
+    struct UndoState { std::vector<ModelZone> zones; Interp interp; int selected; fx::Setup fx; ArpSettings arp; VoiceSettings voice; };
+    void publishPlayModes();
     /** Remembers the zones before a change. Repeated changes with the same tag within a
         moment (one knob drag) become one undo step. */
     void pushUndo (const juce::String& tag);
@@ -221,6 +257,8 @@ private:
     juce::String presetName { "Init" }, lastMessage, bankName { "My Bank" };
     juce::File presetFile;
     fx::Setup fxSetup;
+    ArpSettings arpSettings;
+    VoiceSettings voiceSettings;
     int nextFxId = 1, fxStructure = 0, learnMacro = -1;
     std::vector<BankEntry> bank;
 
@@ -234,6 +272,8 @@ private:
     std::shared_ptr<const ZoneSet> pendingSnapshot, audioSnapshot;
     std::shared_ptr<const SampleData> pendingPreview, audioPreview;
     std::shared_ptr<const fx::Snapshot> pendingFx, audioFx;
+    ArpSettings pendingArp;
+    bool arpChanged = false;
     bool previewChanged = false;
     double previewPos = 0.0;
     ReleasePool releasePool;
@@ -247,10 +287,14 @@ private:
     std::atomic<int> setMaxVoices { 64 }, setMidiChannel { 0 }, setVelocityCurve { 1 }, setBendRange { 2 };
     std::atomic<float> setCpuLimit { 0.85f }, setTuneCents { 0.0f };
     std::atomic<bool> setStealQuietest { false }, panicRequested { false };
+    std::atomic<bool> setMono { false }, setLegato { true };
+    std::atomic<float> setGlide { 0.0f };
 
     // Audio
     SamplerEngine engine;
     fx::Engine fxEngine;
+    Arpeggiator arp;
+    juce::MidiBuffer processedMidi, arpMidi;
     static constexpr int subBlock = 64, maxBuses = 32;
     float busData[maxBuses][2][subBlock] {};
     float mixL[subBlock] {}, mixR[subBlock] {};

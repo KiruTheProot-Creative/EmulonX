@@ -305,6 +305,47 @@ String EmulonXProcessor::describeTarget (fx::Target t) const
     return (prefix + name + " - " + (sp != nullptr ? String (sp->label) : String ("?"))).toUpperCase();
 }
 
+//== Arpeggiator and voice mode ======================================================
+void EmulonXProcessor::publishPlayModes()
+{
+    {
+        const SpinLock::ScopedLockType sl (snapshotLock);
+        pendingArp = arpSettings;
+        arpChanged = true;
+    }
+    setMono = voiceSettings.mono;
+    setLegato = voiceSettings.legato;
+    setGlide = voiceSettings.glide;
+}
+
+void EmulonXProcessor::setArpSettings (const ArpSettings& a)
+{
+    if (a == arpSettings)
+        return;
+    pushUndo (a.enabled != arpSettings.enabled ? "arpon" : "arp");
+    arpSettings = a;
+    publishPlayModes();
+    apvts.state.setProperty ("arp", JSON::toString (arpSettings.toJson(), true), nullptr);
+    {
+        const ScopedLock sl (embedLock);
+        embedDirty = true;
+    }
+    sendChangeMessage();
+}
+
+void EmulonXProcessor::setVoiceSettings (const VoiceSettings& v)
+{
+    pushUndo (v.mono != voiceSettings.mono ? "voicemode" : "voice");
+    voiceSettings = v;
+    publishPlayModes();
+    apvts.state.setProperty ("voice", JSON::toString (voiceSettings.toJson(), true), nullptr);
+    {
+        const ScopedLock sl (embedLock);
+        embedDirty = true;
+    }
+    sendChangeMessage();
+}
+
 void EmulonXProcessor::setLearnMacro (int index)
 {
     learnMacro = index;

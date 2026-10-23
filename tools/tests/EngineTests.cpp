@@ -5,6 +5,7 @@
 #include "engine/SamplerEngine.h"
 #include "engine/SampleLoader.h"
 #include "fx/FxEngine.h"
+#include "engine/Arpeggiator.h"
 
 using namespace emx;
 using namespace juce;
@@ -435,6 +436,133 @@ int main (int argc, char** argv)
                "file types are recognised (.emxp / .emxb)");
     }
     tmp.deleteRecursively();
+
+    //== Arpeggiator ================================================================
+    {
+        struct Ev { juce::int64 t; int note; bool on; };
+        // Runs the arp for `secs`; `inEvents` are (sample, note, on). hostStart >= 0: host playing from that beat.
+        auto runArp = [&] (ArpSettings a, std::vector<std::tuple<juce::int64, int, bool>> inEvents, double secs, double hostStart = -1.0)
+        {
+            Arpeggiator arp;
+            arp.prepare (SR);
+            arp.setSettings (a);
+            std::vector<Ev> outEv;
+            const int N = 512;
+            MidiBuffer in, out;
+            for (juce::int64 b = 0; b * N < (juce::int64) (secs * SR); ++b)
+            {
+                in.clear();
+                for (auto& [t, note, on] : inEvents)
+                    if (t >= b * N && t < (b + 1) * N)
+                        in.addEvent (on ? MidiMessage::noteOn (1, note, (uint8) 100) : MidiMessage::noteOff (1, note), (int) (t - b * N));
+                std::optional<double> ppq;
+                if (hostStart >= 0) ppq = hostStart + (double) (b * N) / SR * 2.0;   // 120 BPM = 2 beats per second
+                arp.process (in, out, N, 120.0, ppq);
+                for (const auto meta : out)
+                {
+                    const auto m = meta.getMessage();
+                    if (m.isNoteOn() || m.isNoteOff())
+                        outEv.push_back ({ b * N + meta.samplePosition, m.getNoteNumber(), m.isNoteOn() });
+                }
+            }
+            return outEv;
+        };
+        auto ons = [] (const std::vector<Ev>& ev) { std::vector<Ev> r; for (auto& e : ev) if (e.on) r.push_back (e); return r; };
+        const std::vector<std::tuple<juce::int64, int, bool>> chord { { 100, 60, true }, { 100, 64, true }, { 100, 67, true } };
+
+        ArpSettings a;
+        a.enabled = true; a.mode = ArpSettings::up; a.den = 16; a.gate = 0.5f;
+        auto up = ons (runArp (a, chord, 0.8));
+        bool ok = up.size() >= 6 && up[0].note == 60 && up[1].note == 64 && up[2].note == 67 && up[3].note == 60
+                  && up[0].t == 100 && up[1].t == 100 + 6000 && up[2].t == 100 + 12000;
+        check (ok, "arp up: C E G C, one 1/16 step (6000 samples at 120 BPM) apart",
+               up.size() >= 3 ? String (up[0].note) + " " + String (up[1].note) + " " + String (up[2].note) + " @ " + String (up[1].t) : String ("no notes"));
+
+        a.mode = ArpSettings::down; a.octaves = 2;
+        auto dn = ons (runArp (a, chord, 0.9));
+        check (dn.size() >= 6 && dn[0].note == 79 && dn[1].note == 76 && dn[2].note == 72 && dn[3].note == 67 && dn[5].note == 60,
+               "arp down over 2 octaves", dn.size() >= 4 ? String (dn[0].note) + " " + String (dn[1].note) + " " + String (dn[2].note) + " " + String (dn[3].note) : String ("no notes"));
+
+        a.mode = ArpSettings::up; a.octaves = 1;
+        auto all = runArp (a, chord, 0.3);
+        juce::int64 offAt = -1;
+        for (auto& e : all) if (! e.on && e.note == 60) { offAt = e.t; break; }
+        check (offAt == 100 + 3000 - 1, "arp gate 50% ends the note half way through the step", String (offAt));
+
+        auto host = ons (runArp (a, chord, 0.5, 0.1));
+        check (! host.empty() && host[0].t == 3600, "arp follows the DAW's beat grid", host.empty() ? String ("none") : String (host[0].t));
+
+        a.steps[1].on = false;
+        auto rest = ons (runArp (a, chord, 0.5));
+        check (rest.size() >= 2 && rest[1].t == 100 + 12000, "a switched-off step is a rest");
+        a.steps[1].on = true;
+
+        auto released = runArp (a, { { 100, 60, true }, { 100, 64, true }, { 20000, 60, false }, { 20000, 64, false } }, 1.0);
+        juce::int64 lastOn = 0;
+        int balance = 0;
+        for (auto& e : released) { if (e.on) { lastOn = e.t; ++balance; } else --balance; }
+        a.latch = true;
+        auto latched = ons (runArp (a, { { 100, 60, true }, { 20000, 60, false } }, 1.0));
+        check (lastOn < 20000 && balance == 0 && latched.size() >= 7, "letting go stops the arp; latch keeps it going",
+               "last note " + String (lastOn) + ", latched notes " + String ((int) latched.size()));
+    }
+
+    //== Mono, legato, glide =======================================================
+    {
+        auto tone = sine (SR, 2.0, 440.0, 0.5f);
+        auto p = basic (*tone, 69);
+        p.loopMode = LoopMode::loop; p.loopStart = 0; p.loopEnd = tone->length();
+        // events: (time, note, on?)
+        auto run = [&] (bool legatoMode, float glide, float attack, std::vector<std::tuple<double, int, bool>> events, double secs, int* sounding = nullptr)
+        {
+            auto q = p;
+            q.attack = attack;
+            auto set = std::make_shared<ZoneSet>();
+            set->interp = Interp::sinc;
+            set->zones.push_back ({ 1, tone, q });
+            SamplerEngine e;
+            e.prepare (SR);
+            e.setZoneSet (set);
+            e.setVoiceMode (true, legatoMode, glide);
+            std::vector<float> out;
+            const int N = 64;
+            float L[N], R[N];
+            for (int b = 0; b < (int) (secs * SR / N); ++b)
+            {
+                for (auto& [t, note, on] : events)
+                    if (b == (int) (t * SR / N))
+                        on ? e.noteOn (note, 127) : e.noteOff (note);
+                std::fill (L, L + N, 0.0f);
+                std::fill (R, R + N, 0.0f);
+                e.render (L, R, N);
+                out.insert (out.end(), L, L + N);
+            }
+            if (sounding != nullptr)
+                *sounding = e.getActiveVoiceCount();
+            return out;
+        };
+
+        int voicesLeft = 0;
+        auto mono = run (false, 0.0f, 0.001f, { { 0.0, 69, true }, { 0.3, 76, true } }, 0.9, &voicesLeft);
+        const auto fm = frequency (mono, SR, 0.5, 0.85);
+        check (voicesLeft == 1 && near (fm, 659.26, 5), "mono: a new note replaces the old one",
+               String (voicesLeft) + " voice, " + String (fm, 1) + " Hz");
+
+        auto leg = run (true, 0.0f, 1.0f, { { 0.0, 69, true }, { 0.5, 76, true } }, 0.8);
+        auto ret = run (false, 0.0f, 1.0f, { { 0.0, 69, true }, { 0.5, 76, true } }, 0.8);
+        const auto lv = rms (leg, SR, 0.6, 0.7), rv = rms (ret, SR, 0.6, 0.7);
+        check (lv > rv * 2.5 && near (frequency (leg, SR, 0.55, 0.75), 659.26, 6), "legato: the note slides without restarting",
+               "level " + String (lv, 3) + " vs restarted " + String (rv, 3));
+
+        auto gl = run (true, 0.2f, 0.001f, { { 0.0, 69, true }, { 0.5, 81, true } }, 1.0);
+        const auto mid = frequency (gl, SR, 0.56, 0.62), end = frequency (gl, SR, 0.8, 0.98);
+        check (mid > 480 && mid < 840 && near (end, 880, 6), "glide slides the pitch to the new note",
+               String (mid, 0) + " Hz on the way, " + String (end, 1) + " Hz after");
+
+        auto back = run (true, 0.0f, 0.001f, { { 0.0, 69, true }, { 0.3, 76, true }, { 0.6, 76, false } }, 1.0);
+        check (near (frequency (back, SR, 0.75, 0.98), 440, 4), "mono: letting go returns to the key still held",
+               String (frequency (back, SR, 0.75, 0.98), 1) + " Hz");
+    }
 
     //== FX ========================================================================
     {

@@ -20,6 +20,8 @@ void SamplerEngine::reset() noexcept
     }
     keysDown.reset();
     sustainDown = false;
+    stackSize = 0;
+    monoNote = -1;
 }
 
 void SamplerEngine::handleMidi (const juce::MidiMessage& m) noexcept
@@ -47,19 +49,117 @@ void SamplerEngine::noteOn (int note, int velocity) noexcept
         noteOff (note);
         return;
     }
-    keysDown.set ((size_t) juce::jlimit (0, 127, note));
+    note = juce::jlimit (0, 127, note);
+    keysDown.set ((size_t) note);
     ++noteOnCount;
-    startVoicesFor (note, velocity);
+    if (! mono)
+    {
+        startVoicesFor (note, velocity);
+        return;
+    }
+    // Mono: remember the order of held keys, so letting go returns to the previous one.
+    int k = 0;
+    for (int i = 0; i < stackSize; ++i)
+        if (noteStack[i] != note)
+            noteStack[k++] = noteStack[i];
+    stackSize = k;
+    if (stackSize < 128)
+        noteStack[stackSize++] = note;
+    const int previous = monoNote >= 0 ? monoNote : lastNote;
+    monoNote = note;
+    monoVelocity = velocity;
+    monoNoteOn (note, velocity, previous);
 }
 
 void SamplerEngine::noteOff (int note) noexcept
 {
-    keysDown.reset ((size_t) juce::jlimit (0, 127, note));
+    note = juce::jlimit (0, 127, note);
+    keysDown.reset ((size_t) note);
+    if (mono)
+    {
+        int k = 0;
+        for (int i = 0; i < stackSize; ++i)
+            if (noteStack[i] != note)
+                noteStack[k++] = noteStack[i];
+        stackSize = k;
+        if (note == monoNote && ! sustainDown && stackSize > 0)
+        {
+            const int back = noteStack[stackSize - 1];   // return to the key still held
+            const int previous = monoNote;
+            monoNote = back;
+            monoNoteOn (back, monoVelocity, previous);
+            return;
+        }
+        if (note == monoNote && stackSize == 0)
+        {
+            lastNote = monoNote;
+            monoNote = -1;
+        }
+    }
     if (sustainDown)
         return;
     for (auto& v : voices)
         if (v.active && v.note == note)
             v.released = true;
+}
+
+float SamplerEngine::glideStepFor (float semitones) const noexcept
+{
+    return glideTime > 0.0f ? std::abs (semitones) / (float) (glideTime * sampleRate) : 0.0f;
+}
+
+void SamplerEngine::monoNoteOn (int note, int velocity, int previous) noexcept
+{
+    // The pitch that is sounding right now (a voice may still be gliding).
+    float fromPitch = (float) previous;
+    bool overlapping = false;
+    for (auto& v : voices)
+        if (v.active && ! v.stolen && ! v.released && previous >= 0 && v.note == previous)
+        {
+            overlapping = true;
+            fromPitch = (float) v.note + v.glide;
+            break;
+        }
+
+    if (legato && overlapping && zoneSet != nullptr)
+    {
+        // Legato: voices whose zone also plays the new note just change pitch (no restart).
+        std::bitset<1024> handled;
+        for (auto& v : voices)
+        {
+            if (! v.active || v.stolen || v.released || v.note != previous)
+                continue;
+            int index = -1;
+            for (size_t zi = 0; zi < zoneSet->zones.size(); ++zi)
+                if (zoneSet->zones[zi].id == v.zoneId)
+                    index = (int) zi;
+            const auto* z = index >= 0 ? &zoneSet->zones[(size_t) index] : nullptr;
+            const bool plays = z != nullptr && note >= z->params.loKey && note <= z->params.hiKey
+                               && velocity >= z->params.loVel && velocity <= z->params.hiVel;
+            if (plays)
+            {
+                const float current = (float) v.note + v.glide;
+                v.note = note;
+                v.glide = glideTime > 0.0f ? current - (float) note : 0.0f;
+                v.glideStep = glideStepFor (v.glide);
+                if (index < 1024)
+                    handled.set ((size_t) index);
+            }
+            else
+            {
+                v.stolen = v.released = true;   // a different zone takes over
+            }
+        }
+        startVoicesFor (note, velocity, glideTime > 0.0f ? fromPitch - (float) note : 0.0f, &handled);
+        return;
+    }
+
+    // Retrigger: fade what is sounding and start the new note (gliding unless legato is on).
+    for (auto& v : voices)
+        if (v.active && ! v.stolen)
+            v.stolen = v.released = true;
+    const bool glideNow = glideTime > 0.0f && previous >= 0 && ! legato;
+    startVoicesFor (note, velocity, glideNow ? fromPitch - (float) note : 0.0f);
 }
 
 void SamplerEngine::setSustain (bool down) noexcept
@@ -137,22 +237,24 @@ bool SamplerEngine::stealOne() noexcept
     return true;
 }
 
-void SamplerEngine::startVoicesFor (int note, int velocity) noexcept
+void SamplerEngine::startVoicesFor (int note, int velocity, float glideFrom, const std::bitset<1024>* skipZones) noexcept
 {
     if (zoneSet == nullptr)
         return;
 
-    for (auto& z : zoneSet->zones)
+    for (size_t zi = 0; zi < zoneSet->zones.size(); ++zi)
     {
+        const auto& z = zoneSet->zones[zi];
         const auto& p = z.params;
         if (z.sample == nullptr || note < p.loKey || note > p.hiKey || velocity < p.loVel || velocity > p.hiVel)
+            continue;
+        if (skipZones != nullptr && zi < 1024 && skipZones->test (zi))
             continue;
 
         while (getActiveVoiceCount() >= maxVoices && stealOne()) {}
 
         auto& v = *freeSlot();
         const double k = z.sample->sampleRate / sampleRate;
-        const double ratio = std::pow (2.0, (note - p.root + (p.tuneCents + globalTuneCents) / 100.0 + bend * bendRange) / 12.0);
         v.active = true;
         v.note = note;
         v.velocity = velocity;
@@ -163,8 +265,10 @@ void SamplerEngine::startVoicesFor (int note, int velocity) noexcept
         v.grain = juce::jmax (256, (int) std::lround (p.grainMs / 1000.0 * sampleRate)) & ~1;
         v.grainCounter = 0;
         v.pos = 0.0;
-        v.anchor0 = 0.0;
-        v.anchor1 = -0.5 * v.grain * ratio * k;   // second grain starts half a grain "early" so the attack is intact
+        v.read0 = 0.0;
+        v.read1 = 0.0;   // the second grain is fully audible at the start, so the attack is intact
+        v.glide = glideFrom;
+        v.glideStep = glideStepFor (glideFrom);
         v.level = 0.0f;
         v.stage = 0;
         v.released = v.stolen = false;
@@ -213,7 +317,13 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
     const auto mode = zoneSet != nullptr ? zoneSet->interp : Interp::sinc;
     const auto sr = sampleRate;
 
-    const double ratio = std::pow (2.0, (v.note - z.root + (z.tuneCents + globalTuneCents) / 100.0 + bend * bendRange) / 12.0);
+    const double ratio = std::pow (2.0, (v.note + v.glide - z.root + (z.tuneCents + globalTuneCents) / 100.0 + bend * bendRange) / 12.0);
+    if (std::abs (v.glide) > 0.0f)
+    {
+        // Glide: slide the remaining distance toward the note at a steady speed.
+        const float move = v.glideStep * (float) N;
+        v.glide = std::abs (v.glide) <= move ? 0.0f : v.glide - (v.glide > 0.0f ? move : -move);
+    }
     const double k = v.k, step = ratio * k;
 
     // Loop region (re-evaluated every block so edits are heard immediately).
@@ -286,7 +396,6 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
             // Keep-speed: two overlapping grains (Hann windows) read at the new pitch
             // while the play position advances at normal speed.
             const int G = v.grain, h = G >> 1;
-            const double span = G * step;
             // WSOLA: start each new grain where the waveform lines up with the grain
             // that is already playing, so the phase stays continuous (no pitch drift).
             auto align = [&] (double target, double otherX) noexcept
@@ -325,11 +434,12 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
                     if (const float s = score (d); s > bestScore) { bestScore = s; best = d; }
                 return target + best;
             };
-            if (v.grainCounter == 0) v.anchor0 = align (v.pos, v.anchor1 + 0.5 * span);
-            else if (v.grainCounter == h) v.anchor1 = align (v.pos, v.anchor0 + 0.5 * span);
+            if (v.grainCounter == 0) v.read0 = align (v.pos, v.read1);
+            else if (v.grainCounter == h) v.read1 = align (v.pos, v.read0);
             const double p0 = (double) v.grainCounter / G;
-            const double p1 = p0 < 0.5 ? p0 + 0.5 : p0 - 0.5;
-            const double x0 = v.anchor0 + p0 * span, x1 = v.anchor1 + p1 * span;
+            const double x0 = v.read0, x1 = v.read1;
+            v.read0 += step;
+            v.read1 += step;
             const auto sn = (float) std::sin (juce::MathConstants<double>::pi * p0);
             const float w0 = sn * sn, w1 = 1.0f - w0;
             a = w0 * read (c0, x0) + w1 * read (c0, x1);

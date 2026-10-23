@@ -4,9 +4,24 @@ A free, open-source sampler plugin inspired by the E-mu Emulator X.
 Load whole sound banks, edit and loop samples, stack effects, and modulate
 everything with drawable envelopes and macros.
 
-> Status: **milestone 5** — FX chains, envelopes and modulation.
+> Status: **milestone 5.5** — arpeggiator, mono / legato / glide, new background.
 
-## Using it (milestone 5)
+## Using it
+
+- **ARP tab:** switch **ARP ON** and hold a chord. Choose the order (Up, Down,
+  Up/Down, Down/Up, As played, Random, Chord), the step length (**BEATS** /
+  division, straight, dotted or triplet), **OCTAVES**, **GATE** and **SWING**.
+  **LATCH** keeps it playing after you let go. In the pattern, drag the bars to
+  set each step's velocity, click a step number to make it a rest, and click
+  the octave cell under it to shift that step up or down. While your DAW plays,
+  the steps follow its beat grid.
+- **Voice (Editor tab):** **POLY** plays chords; **MONO** plays one note at a
+  time and returns to a key you still hold. In mono, **LEGATO** makes
+  overlapping notes slide without restarting, and **GLIDE** sets how long the
+  pitch takes to get to the new note.
+
+### Milestone 5
+
 
 - **FX tab:** pick a **CHANNEL**: *Whole preset* (runs on everything) or a single
   zone (runs only on that zone, before the whole-preset chain). **+ ADD EFFECT**

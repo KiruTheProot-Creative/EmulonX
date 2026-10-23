@@ -13,6 +13,7 @@
 #include "ui/SettingsPanel.h"
 #include "ui/EditorPage.h"
 #include "ui/FxPage.h"
+#include "ui/ArpPage.h"
 
 namespace emx
 {
@@ -58,13 +59,14 @@ private:
         void showPage (int index);
 
         EmulonXEditor& owner;
-        juce::TextButton tabMain { "MAIN" }, tabEditor { "EDITOR" }, tabFx { "FX" };
+        juce::TextButton tabMain { "MAIN" }, tabEditor { "EDITOR" }, tabFx { "FX" }, tabArp { "ARP" };
         LedDisplay voicesLed, cpuLed;
         GearButton gear;
         Explorer explorer;
         MainPage mainPage;
         EditorPage editorPage;
         FxPage fxPage;
+        ArpPage arpPage;
         std::unique_ptr<SettingsPanel> settingsPanel;
         juce::Rectangle<float> titleArea;
     };

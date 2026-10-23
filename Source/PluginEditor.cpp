@@ -14,10 +14,11 @@ EmulonXEditor::Root::Root (EmulonXEditor& e)
       explorer (e.proc),
       mainPage (e.proc),
       editorPage (e.proc),
-      fxPage (e.proc)
+      fxPage (e.proc),
+      arpPage (e.proc)
 {
     int index = 0;
-    for (auto* b : { &tabMain, &tabEditor, &tabFx })
+    for (auto* b : { &tabMain, &tabEditor, &tabFx, &tabArp })
     {
         b->setClickingTogglesState (false);
         b->onClick = [this, index] { showPage (index); };
@@ -27,7 +28,7 @@ EmulonXEditor::Root::Root (EmulonXEditor& e)
 
     gear.onClick = [this] { owner.showSettings (settingsPanel == nullptr); };
     for (Component* c : { (Component*) &voicesLed, (Component*) &cpuLed, (Component*) &gear, (Component*) &explorer,
-                          (Component*) &mainPage, (Component*) &editorPage, (Component*) &fxPage })
+                          (Component*) &mainPage, (Component*) &editorPage, (Component*) &fxPage, (Component*) &arpPage })
         addAndMakeVisible (c);
 
     mainPage.getPresetPanel().onOpenZone = [this] { showPage (1); };
@@ -39,9 +40,11 @@ void EmulonXEditor::Root::showPage (int index)
     tabMain.setToggleState (index == 0, dontSendNotification);
     tabEditor.setToggleState (index == 1, dontSendNotification);
     tabFx.setToggleState (index == 2, dontSendNotification);
+    tabArp.setToggleState (index == 3, dontSendNotification);
     mainPage.setVisible (index == 0);
     editorPage.setVisible (index == 1);
     fxPage.setVisible (index == 2);
+    arpPage.setVisible (index == 3);
 }
 
 void EmulonXEditor::Root::resized()
@@ -51,7 +54,7 @@ void EmulonXEditor::Root::resized()
     auto header = r.removeFromTop (34);
     titleArea = header.removeFromLeft (190).toFloat();
     header.removeFromLeft (8);
-    for (auto* b : { &tabMain, &tabEditor, &tabFx })
+    for (auto* b : { &tabMain, &tabEditor, &tabFx, &tabArp })
     {
         b->setBounds (header.removeFromLeft (84).withSizeKeepingCentre (84, 28));
         header.removeFromLeft (6);
@@ -65,7 +68,7 @@ void EmulonXEditor::Root::resized()
     r.removeFromTop (8);
     explorer.setBounds (r.removeFromLeft (225));
     r.removeFromLeft (8);
-    for (auto* page : { (Component*) &mainPage, (Component*) &editorPage, (Component*) &fxPage })
+    for (auto* page : { (Component*) &mainPage, (Component*) &editorPage, (Component*) &fxPage, (Component*) &arpPage })
         page->setBounds (r);
     if (settingsPanel != nullptr)
         settingsPanel->setBounds (getLocalBounds());
@@ -76,9 +79,7 @@ void EmulonXEditor::Root::paint (Graphics& g)
     g.fillAll (Colours::black);
     g.setImageResamplingQuality (Graphics::highResamplingQuality);
     g.drawImage (theme::image (theme::Img::background), getLocalBounds().toFloat(),
-                 RectanglePlacement (RectanglePlacement::xLeft | RectanglePlacement::yMid | RectanglePlacement::fillDestination));
-    g.setGradientFill (ColourGradient::horizontal (Colours::black.withAlpha (0.15f), 0.0f, Colours::black.withAlpha (0.75f), (float) getWidth()));
-    g.fillAll();
+                 RectanglePlacement (RectanglePlacement::xMid | RectanglePlacement::yMid | RectanglePlacement::fillDestination));
 
     const auto f = theme::font (21.0f, 900, 0.14f);
     auto t = titleArea;
@@ -234,6 +235,8 @@ void EmulonXEditor::timerCallback()
         root->editorPage.tick();
     if (root->fxPage.isVisible())
         root->fxPage.tick();
+    if (root->arpPage.isVisible())
+        root->arpPage.tick();
 }
 
 } // namespace emx

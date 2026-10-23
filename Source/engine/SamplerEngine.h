@@ -29,6 +29,12 @@ public:
     void setStealQuietest (bool q) noexcept { stealQuietest = q; }
     void setGlobalTune (float cents) noexcept { globalTuneCents = cents; }
     void setBendRange (float semis) noexcept  { bendRange = semis; }
+    /** Mono: one note at a time. Legato: overlapping notes slide without restarting.
+        Glide: seconds for the pitch to slide to the new note (0 = off). */
+    void setVoiceMode (bool monoMode, bool legatoMode, float glideSeconds) noexcept
+    {
+        mono = monoMode; legato = legatoMode; glideTime = juce::jlimit (0.0f, 5.0f, glideSeconds);
+    }
 
     //== MIDI ==================================================================
     void handleMidi (const juce::MidiMessage&) noexcept;
@@ -69,7 +75,8 @@ private:
         ZoneParams params;                    // last known zone settings (used if the zone is removed)
         double k = 1.0;                       // source rate / output rate
         int grain = 2048, grainCounter = 0;
-        double pos = 0.0, anchor0 = 0.0, anchor1 = 0.0;
+        double pos = 0.0, read0 = 0.0, read1 = 0.0;   // keep-speed: read positions of the two grains
+        float glide = 0.0f, glideStep = 0.0f;         // semitones still to slide, and per sample
         float level = 0.0f;
         int stage = 0;                        // 0 attack, 1 decay/sustain, 3 release
         bool released = false, stolen = false, keepSpeed = true;
@@ -78,7 +85,9 @@ private:
 
     void renderVoice (Voice&, const ZoneParams&, float* L, float* R, int n) noexcept;
     Voice* freeSlot() noexcept;
-    void startVoicesFor (int note, int velocity) noexcept;
+    void startVoicesFor (int note, int velocity, float glideFrom = 0.0f, const std::bitset<1024>* skipZones = nullptr) noexcept;
+    void monoNoteOn (int note, int velocity, int previous) noexcept;
+    float glideStepFor (float semitones) const noexcept;
 
     std::array<Voice, maxVoiceSlots> voices;
     std::shared_ptr<const ZoneSet> zoneSet;
@@ -89,6 +98,9 @@ private:
     float globalTuneCents = 0.0f, bendRange = 2.0f, bend = 0.0f, modWheel = 0.0f;
     bool sustainDown = false;
     juce::uint32 noteOnCount = 0;
+    bool mono = false, legato = true;
+    float glideTime = 0.0f;
+    int noteStack[128] {}, stackSize = 0, monoNote = -1, lastNote = -1, monoVelocity = 100;
     std::bitset<128> keysDown;
 };
 } // namespace emx

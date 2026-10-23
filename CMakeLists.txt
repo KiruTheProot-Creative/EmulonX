@@ -2,7 +2,7 @@
 # Licensed under the GNU AGPLv3 (see LICENSE).
 
 cmake_minimum_required(VERSION 3.22)
-project(EmulonX VERSION 0.5.0 LANGUAGES C CXX)
+project(EmulonX VERSION 0.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -72,12 +72,14 @@ set(EMX_SOURCES
     Source/engine/Interpolator.cpp
     Source/engine/SamplerEngine.cpp
     Source/engine/SampleLoader.cpp
+    Source/engine/Arpeggiator.cpp
     Source/ui/PresetPanel.cpp
     Source/ui/BankPanel.cpp
     Source/ui/Explorer.cpp
     Source/ui/SettingsPanel.cpp
     Source/ui/EditorPage.cpp
     Source/ui/FxPage.cpp
+    Source/ui/ArpPage.cpp
     Source/ui/Theme.cpp
     Source/ui/EmxLookAndFeel.cpp
     Source/ui/Widgets.cpp
@@ -126,6 +128,7 @@ if(EMX_BUILD_TESTS)
         Source/engine/Interpolator.cpp
         Source/engine/SamplerEngine.cpp
         Source/engine/SampleLoader.cpp
+        Source/engine/Arpeggiator.cpp
         Source/fx/FxDefs.cpp
         Source/fx/FxDsp.cpp
         Source/fx/FxModel.cpp

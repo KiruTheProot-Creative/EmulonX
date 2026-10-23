@@ -225,6 +225,29 @@ int main (int argc, char** argv)
                      (int) proc.getFxSetup().master.size(), zoneFx, (int) proc.getFxSetup().routes.size());
     }
 
+    // Arpeggiator through the whole processor, and mono mode.
+    {
+        auto a = proc.getArpSettings();
+        a.enabled = true; a.mode = emx::ArpSettings::upDown; a.octaves = 2; a.length = 12; a.swing = 0.2f;
+        a.steps[3].on = false; a.steps[6].octave = 1; a.steps[9].velocity = 0.35f;
+        proc.setArpSettings (a);
+        AudioBuffer<float> b (2, 512);
+        int maxVoices = 0;
+        double sum = 0;
+        for (int i = 0; i < 60; ++i)
+        {
+            MidiBuffer m;
+            if (i == 0) { m.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 0); m.addEvent (MidiMessage::noteOn (1, 64, (uint8) 100), 0); m.addEvent (MidiMessage::noteOn (1, 67, (uint8) 100), 0); }
+            proc.processBlock (b, m);
+            maxVoices = jmax (maxVoices, proc.getActiveVoices());
+            sum += b.getRMSLevel (0, 0, 512);
+        }
+        std::printf ("arp audio: rms %.4f, step %d, voices up to %d\n", sum / 60.0, proc.getArp().currentStep.load(), maxVoices);
+        auto v = proc.getVoiceSettings();
+        v.mono = true; v.glide = 0.12f;
+        proc.setVoiceSettings (v);
+    }
+
     // Show the demo folders in the explorer.
     auto& settings = proc.getSettings();
     settings.setFolders (emx::Settings::Folder::samples, { File::getSpecialLocation (File::userHomeDirectory).getFullPathName() });
@@ -265,6 +288,8 @@ int main (int argc, char** argv)
         editor.showPage (p);
         save (String ("preview-") + pages[p] + "-100");
     }
+    editor.showPage (3);
+    save ("preview-arp");
     editor.showPage (2);
     save ("preview-fx-master");
     editor.getFxPage().setChannel (proc.getZones()[0].id);

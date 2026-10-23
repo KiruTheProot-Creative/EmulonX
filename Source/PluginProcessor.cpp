@@ -115,6 +115,9 @@ void EmulonXProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
 {
     currentSampleRate = sampleRate;
     engine.prepare (sampleRate);
+    arp.prepare (sampleRate);
+    processedMidi.ensureSize (8192);
+    arpMidi.ensureSize (8192);
     loadMeasurer.reset (sampleRate, maxBlockSize);
     masterGain.reset (sampleRate, 0.02);
     masterGain.setCurrentAndTargetValue (dbToGain (masterDb->load()));
@@ -150,8 +153,12 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
     engine.setStealQuietest (setStealQuietest.load());
     engine.setGlobalTune (setTuneCents.load());
     engine.setBendRange ((float) setBendRange.load());
+    engine.setVoiceMode (setMono.load(), setLegato.load(), setGlide.load());
     if (panicRequested.exchange (false))
+    {
         engine.allNotesOff();
+        arp.reset();
+    }
 
     // Pick up new zones / preview sample if the editor published some (never blocks).
     {
@@ -165,6 +172,11 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
             }
             if (pendingFx != audioFx)
                 audioFx = pendingFx;
+            if (arpChanged)
+            {
+                arp.setSettings (pendingArp);
+                arpChanged = false;
+            }
             if (previewChanged)
             {
                 audioPreview = pendingPreview;
@@ -188,10 +200,16 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
     const fx::Snapshot* fxs = audioFx.get();
     fxEngine.setSnapshot (fxs);
     double bpm = fxs != nullptr ? fxs->bpm : 120.0;
+    std::optional<double> hostPpq;
     if (auto* ph = getPlayHead())
         if (auto pos = ph->getPosition())
+        {
             if (auto hostBpm = pos->getBpm(); hostBpm.hasValue() && *hostBpm > 1.0)
                 bpm = *hostBpm;
+            if (pos->getIsPlaying())
+                if (auto ppq = pos->getPpqPosition(); ppq.hasValue())
+                    hostPpq = *ppq;
+        }
     float macros01[numMacros];
     for (int i = 0; i < numMacros; ++i)
         macros01[i] = macroValues[i]->load() / 100.0f;
@@ -208,9 +226,26 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
                 ++numBuses;
             }
 
+    // Channel filter and velocity curve, then the arpeggiator (if it is on).
     const int channel = setMidiChannel.load(), curve = setVelocityCurve.load();
+    processedMidi.clear();
+    for (const auto meta : midi)
+    {
+        auto msg = meta.getMessage();
+        if (channel > 0 && msg.getChannel() > 0 && msg.getChannel() != channel)
+            continue;
+        if (msg.isNoteOn())
+            msg = MidiMessage::noteOn (msg.getChannel(), msg.getNoteNumber(), (uint8) applyVelocityCurve (msg.getVelocity(), curve));
+        processedMidi.addEvent (msg, jlimit (0, n - 1, meta.samplePosition));
+    }
+    const MidiBuffer* notes = &processedMidi;
+    if (arp.isActive() || arpSettings.enabled)
+    {
+        arp.process (processedMidi, arpMidi, n, bpm, hostPpq);
+        notes = &arpMidi;
+    }
     const float masterDbNow = masterDb->load();
-    auto midiIt = midi.begin();
+    auto midiIt = notes->begin();
 
     // Work in short steps so envelopes and modulation move smoothly.
     for (int start = 0; start < n; start += subBlock)
@@ -236,21 +271,16 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
 
         // Sample-accurate MIDI, with the channel filter and velocity curve from the settings.
         int pos = 0;
-        for (; midiIt != midi.end(); ++midiIt)
+        for (; midiIt != notes->end(); ++midiIt)
         {
             const auto meta = *midiIt;
             const int t = jlimit (0, n, meta.samplePosition) - start;
             if (t >= len)
                 break;
-            auto msg = meta.getMessage();
-            if (channel > 0 && msg.getChannel() > 0 && msg.getChannel() != channel)
-                continue;
             if (t > pos)
                 renderPiece (pos, t);
             pos = jmax (pos, t);
-            if (msg.isNoteOn())
-                msg = MidiMessage::noteOn (msg.getChannel(), msg.getNoteNumber(), (uint8) applyVelocityCurve (msg.getVelocity(), curve));
-            engine.handleMidi (msg);
+            engine.handleMidi (meta.getMessage());
         }
         renderPiece (pos, len);
 
@@ -386,6 +416,8 @@ PresetToSave EmulonXProcessor::makePresetToSave() const
     p.interp = interp;
     p.macros = currentMacros();
     p.fx = fxToJson (false);
+    p.arp = arpSettings.toJson();
+    p.voice = voiceSettings.toJson();
     auto ordered = zones;
     std::sort (ordered.begin(), ordered.end(), [] (auto& a, auto& b) { return a.order < b.order; });
     for (auto& z : ordered)
@@ -450,6 +482,9 @@ void EmulonXProcessor::newPreset()
     presetName = "Init";
     presetFile = File();
     fxSetup = fx::Setup();
+    arpSettings = ArpSettings();
+    voiceSettings = VoiceSettings();
+    publishPlayModes();
     ++fxStructure;
     interp = (Interp) jlimit (0, 2, settings->getDefaultInterp());
     applyMacros ({});
@@ -632,7 +667,7 @@ void EmulonXProcessor::pushUndo (const String& tag)
     lastUndoTime = now;
     if (sameGesture)
         return;
-    undoStack.push_back ({ zones, interp, selectedZoneId, fxSetup });
+    undoStack.push_back ({ zones, interp, selectedZoneId, fxSetup, arpSettings, voiceSettings });
     if (undoStack.size() > 100)
         undoStack.erase (undoStack.begin());
     redoStack.clear();
@@ -649,13 +684,16 @@ void EmulonXProcessor::undo()
 {
     if (undoStack.empty())
         return;
-    redoStack.push_back ({ zones, interp, selectedZoneId, fxSetup });
+    redoStack.push_back ({ zones, interp, selectedZoneId, fxSetup, arpSettings, voiceSettings });
     auto st = std::move (undoStack.back());
     undoStack.pop_back();
     zones = std::move (st.zones);
     interp = st.interp;
     selectedZoneId = st.selected;
     fxSetup = std::move (st.fx);
+    arpSettings = st.arp;
+    voiceSettings = st.voice;
+    publishPlayModes();
     ++fxStructure;
     lastUndoTag = {};
     message ("Undo");
@@ -666,13 +704,16 @@ void EmulonXProcessor::redo()
 {
     if (redoStack.empty())
         return;
-    undoStack.push_back ({ zones, interp, selectedZoneId, fxSetup });
+    undoStack.push_back ({ zones, interp, selectedZoneId, fxSetup, arpSettings, voiceSettings });
     auto st = std::move (redoStack.back());
     redoStack.pop_back();
     zones = std::move (st.zones);
     interp = st.interp;
     selectedZoneId = st.selected;
     fxSetup = std::move (st.fx);
+    arpSettings = st.arp;
+    voiceSettings = st.voice;
+    publishPlayModes();
     ++fxStructure;
     lastUndoTag = {};
     message ("Redo");
@@ -772,6 +813,9 @@ void EmulonXProcessor::addLoaded (LoadResult&& r, bool autoMapAfter, const File&
         for (auto& lz : r.zones)
             zoneFx.push_back (lz.fx);
         applyFxJson (r.fx, zoneFx, true);
+        arpSettings = ArpSettings::fromJson (r.arp);
+        voiceSettings = VoiceSettings::fromJson (r.voice);
+        publishPlayModes();
     }
 
     if (! r.errors.isEmpty())
@@ -918,6 +962,8 @@ void EmulonXProcessor::writeZonesToState()
     apvts.state.setProperty ("presetName", presetName, nullptr);
     apvts.state.setProperty ("presetFile", presetFile.getFullPathName(), nullptr);
     apvts.state.setProperty ("fx", JSON::toString (fxToJson (true), true), nullptr);
+    apvts.state.setProperty ("arp", JSON::toString (arpSettings.toJson(), true), nullptr);
+    apvts.state.setProperty ("voice", JSON::toString (voiceSettings.toJson(), true), nullptr);
 }
 
 void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
@@ -938,6 +984,9 @@ void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
 
     // Projects saved with "samples inside the project": everything comes from the packed preset.
     const auto stateFx = JSON::parse (apvts.state.getProperty ("fx", "").toString());
+    arpSettings = ArpSettings::fromJson (JSON::parse (apvts.state.getProperty ("arp", "").toString()));
+    voiceSettings = VoiceSettings::fromJson (JSON::parse (apvts.state.getProperty ("voice", "").toString()));
+    publishPlayModes();
     if (! embedded.isEmpty())
     {
         const auto name = presetName;

@@ -748,8 +748,24 @@ EditorPage::EditorPage (EmulonXProcessor& p)
                           (Component*) &zoomStartButton, (Component*) &zoomEndButton, (Component*) &loopInfo,
                           (Component*) &root, (Component*) &loKey, (Component*) &hiKey, (Component*) &loVel, (Component*) &hiVel,
                           (Component*) &tune, (Component*) &keepSpeed, (Component*) &grain, (Component*) &gain, (Component*) &pan,
-                          (Component*) &attack, (Component*) &decay, (Component*) &sustain, (Component*) &release, (Component*) &keymap })
+                          (Component*) &attack, (Component*) &decay, (Component*) &sustain, (Component*) &release, (Component*) &keymap,
+                          (Component*) &polyButton, (Component*) &monoButton, (Component*) &legatoButton, (Component*) &glide })
         addAndMakeVisible (c);
+
+    //== Voice mode ================================================================
+    polyButton.setTooltip ("Play chords: every note gets its own voice");
+    monoButton.setTooltip ("One note at a time (for leads and basses); letting go returns to a key you still hold");
+    legatoButton.setTooltip ("Mono: overlapping notes slide without restarting the sample or envelope (glide only then)");
+    polyButton.onClick = [this] { auto v = proc.getVoiceSettings(); v.mono = false; proc.setVoiceSettings (v); };
+    monoButton.onClick = [this] { auto v = proc.getVoiceSettings(); v.mono = true; proc.setVoiceSettings (v); };
+    legatoButton.onClick = [this] { auto v = proc.getVoiceSettings(); v.legato = ! v.legato; proc.setVoiceSettings (v); };
+    glide.setRange (NormalisableRange<double> (0.0, 2.0,
+                        [] (double, double, double n) { return n < 0.01 ? 0.0 : 0.005 * std::pow (400.0, n); },
+                        [] (double, double, double v) { return v <= 0.0 ? 0.0 : jlimit (0.0, 1.0, std::log (v / 0.005) / std::log (400.0)); }),
+                    0.0);
+    glide.format = [] (double t) { return t <= 0.0 ? String ("OFF") : t < 1.0 ? String (roundToInt (t * 1000.0)) + " MS" : String (t, 2) + " S"; };
+    glide.onChange = [this] (double v) { auto s = proc.getVoiceSettings(); s.glide = (float) v; proc.setVoiceSettings (s); };
+    glide.slider.setTooltip ("Mono: time for the pitch to slide to the next note"); 
 
     proc.addChangeListener (this);
     settings->addChangeListener (this);
@@ -838,6 +854,14 @@ void EditorPage::refresh()
     }
     grain.setEnabled (has && z->params.keepSpeed);
 
+    const auto& vs = proc.getVoiceSettings();
+    polyButton.setToggleState (! vs.mono, dontSendNotification);
+    monoButton.setToggleState (vs.mono, dontSendNotification);
+    legatoButton.setToggleState (vs.legato, dontSendNotification);
+    legatoButton.setEnabled (vs.mono);
+    glide.setValue (vs.glide);
+    glide.setEnabled (vs.mono);
+
     const int sens = settings->getKnobSensitivity();
     for (auto* c : { &root, &loKey, &hiKey, &loVel, &hiVel, &tune, &grain, &gain, &pan })
         c->setSensitivity (sens);
@@ -921,14 +945,25 @@ void EditorPage::resized()
     }
     r.removeFromTop (8);
 
-    //== Zone settings: four panels ================================================
+    //== Zone settings: four panels + voice mode ===================================
     auto params = r.removeFromTop (172);
-    const int gap = 8, total = params.getWidth() - 3 * gap;
-    const int wMap = total * 34 / 100, wPitch = total * 23 / 100, wAmp = total * 17 / 100;
+    const int gap = 8, total = params.getWidth() - 4 * gap;
+    const int wMap = total * 30 / 100, wPitch = total * 20 / 100, wAmp = total * 14 / 100, wEnv = total * 22 / 100;
     mapArea = params.removeFromLeft (wMap).toFloat();     params.removeFromLeft (gap);
     pitchArea = params.removeFromLeft (wPitch).toFloat(); params.removeFromLeft (gap);
     ampArea = params.removeFromLeft (wAmp).toFloat();     params.removeFromLeft (gap);
-    envArea = params.toFloat();
+    envArea = params.removeFromLeft (wEnv).toFloat();     params.removeFromLeft (gap);
+    voiceArea = params.toFloat();
+    {
+        auto v = voiceArea.reduced (10.0f, 9.0f).withTrimmedTop (22.0f).reduced (6.0f, 8.0f).toNearestInt();
+        auto col = v.removeFromLeft (64);
+        polyButton.setBounds (col.removeFromTop (24));
+        col.removeFromTop (6);
+        monoButton.setBounds (col.removeFromTop (24));
+        col.removeFromTop (6);
+        legatoButton.setBounds (col.removeFromTop (24));
+        glide.setBounds (v.withSizeKeepingCentre (jmin (62, v.getWidth()), glide.getPreferredHeight()));
+    }
 
     auto layoutRow = [] (Rectangle<float> panel, std::initializer_list<Component*> items, int itemW, int itemH)
     {
@@ -975,7 +1010,7 @@ void EditorPage::paint (Graphics& g)
     g.drawText ("X-FADE", labelFade, Justification::centredLeft, false);
 
     for (auto [area, title] : { std::pair { mapArea, "Mapping" }, std::pair { pitchArea, "Pitch" },
-                                std::pair { ampArea, "Amp" }, std::pair { envArea, "Envelope" } })
+                                std::pair { ampArea, "Amp" }, std::pair { envArea, "Envelope" }, std::pair { voiceArea, "Voice" } })
     {
         theme::drawPanel (g, area.reduced (1.0f));
         theme::drawInset (g, theme::drawHeading (g, area.reduced (10.0f, 9.0f), title));

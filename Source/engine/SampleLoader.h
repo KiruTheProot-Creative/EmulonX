@@ -24,7 +24,8 @@ struct LoadResult
     int interp = -1;             // from a preset, -1 = leave unchanged
     juce::String presetName;
     MacroList macros;            // from a preset (may be empty)
-    juce::var fx;                // FX section of a prototype preset, kept so it isn't lost on re-save
+    juce::var fx;                // FX section (chains, modulation, envelopes)
+    juce::var arp, voice;        // arpeggiator and mono / poly settings (may be void)
     juce::StringArray errors;
 };
 
@@ -35,7 +36,7 @@ struct PresetToSave
     Interp interp = Interp::sinc;
     std::vector<LoadedZone> zones;
     MacroList macros;
-    juce::var fx;
+    juce::var fx, arp, voice;
 };
 
 struct BankInfo
