@@ -225,6 +225,66 @@ int main (int argc, char** argv)
                      (int) proc.getFxSetup().master.size(), zoneFx, (int) proc.getFxSetup().routes.size());
     }
 
+    // Keep speed must come back exactly as saved (all on, all off, mixed).
+    {
+        const auto ksFile = demoDir.getChildFile ("Presets").getChildFile ("KS Test.emxp");
+        String report;
+        for (int variant = 0; variant < 3; ++variant)
+        {
+            if (variant < 2) proc.setKeepSpeedForAll (variant == 0);
+            else { auto q = proc.getZones()[0].params; q.keepSpeed = ! q.keepSpeed; proc.setZoneParams (proc.getZones()[0].id, q); }
+            String before;
+            for (auto& z : proc.getZones()) before << (z.params.keepSpeed ? "1" : "0");
+            proc.savePresetAs (ksFile);
+            waitIdle();
+            proc.newPreset();
+            proc.loadFiles ({ ksFile });
+            waitIdle();
+            String after;
+            for (auto& z : proc.getZones()) after << (z.params.keepSpeed ? "1" : "0");
+            MemoryBlock st;
+            proc.getStateInformation (st);
+            proc.newPreset();
+            proc.setStateInformation (st.getData(), (int) st.getSize());
+            waitIdle();
+            String project;
+            for (auto& z : proc.getZones()) project << (z.params.keepSpeed ? "1" : "0");
+            report << before << ">" << after << ">" << project << "  ";
+        }
+        std::printf ("keep speed save/load (zones before > preset > project): %s\n", report.toRawUTF8());
+    }
+
+    // SEMI knob modulated by an envelope: saved in presets and projects.
+    {
+        auto q = proc.getZones()[1].params;
+        q.semitones = -5;
+        proc.setZoneParams (proc.getZones()[1].id, q);
+        proc.toggleRoute ({ emx::fx::SrcKind::env, 0 }, { emx::fx::Target::zonePitch, proc.getZones()[1].id });
+        const auto file = demoDir.getChildFile ("Presets").getChildFile ("Semi Test.emxp");
+        proc.savePresetAs (file);
+        waitIdle();
+        proc.newPreset();
+        proc.loadFiles ({ file });
+        waitIdle();
+        auto countSemiRoutes = [&proc]
+        {
+            int n = 0;
+            for (auto& r : proc.getFxSetup().routes)
+                if (r.target.isZonePitch() && proc.getZones().size() > 1 && r.target.slot == proc.getZones()[1].id) ++n;
+            return n;
+        };
+        const int afterPreset = countSemiRoutes();
+        const int semiPreset = proc.getZones().size() > 1 ? proc.getZones()[1].params.semitones : 99;
+        MemoryBlock st;
+        proc.getStateInformation (st);
+        proc.newPreset();
+        proc.setStateInformation (st.getData(), (int) st.getSize());
+        waitIdle();
+        std::printf ("semi: preset %d st / %d route, project %d st / %d route, target '%s'\n", semiPreset, afterPreset,
+                     proc.getZones().size() > 1 ? proc.getZones()[1].params.semitones : 99, countSemiRoutes(),
+                     proc.getZones().size() > 1 ? proc.describeTarget ({ emx::fx::Target::zonePitch, proc.getZones()[1].id }).toRawUTF8() : "");
+    }
+
     // Arpeggiator through the whole processor, and mono mode.
     {
         auto a = proc.getArpSettings();

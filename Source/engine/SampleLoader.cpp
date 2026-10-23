@@ -136,6 +136,7 @@ ZoneParams paramsFromJson (const var& j, const SampleData& s, bool v1)
         p.gainDb    = (float) num ("gainDb", 0);
         p.pan       = (float) num ("pan", 0);
         p.tuneCents = (float) num ("tuneCents", 0);
+        p.semitones = juce::jlimit (-24, 24, (int) num ("semitones", 0));
         p.keepSpeed = (bool) j.getProperty ("keepSpeed", true);
         p.grainMs   = (float) num ("grainMs", 60);
     }
@@ -169,6 +170,7 @@ static var paramsToJson (const String& sampleFile, const ZoneParams& p)
     z->setProperty ("gainDb", p.gainDb);
     z->setProperty ("pan", p.pan);
     z->setProperty ("tuneCents", p.tuneCents);
+    z->setProperty ("semitones", p.semitones);
     z->setProperty ("keepSpeed", p.keepSpeed);
     z->setProperty ("grainMs", p.grainMs);
     return var (z);

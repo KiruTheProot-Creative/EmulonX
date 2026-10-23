@@ -331,7 +331,11 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
     const auto mode = zoneSet != nullptr ? zoneSet->interp : Interp::sinc;
     const auto sr = sampleRate;
 
-    const double ratio = std::pow (2.0, (v.note + v.glide - z.root + (z.tuneCents + globalTuneCents) / 100.0 + bend * bendRange) / 12.0);
+    float semis = (float) z.semitones;
+    for (int m = 0; m < numPitchMods; ++m)
+        if (pitchMods[(size_t) m].zoneId == v.zoneId)
+            semis = pitchMods[(size_t) m].semitones;   // already includes the knob position
+    const double ratio = std::pow (2.0, (v.note + v.glide + semis - z.root + (z.tuneCents + globalTuneCents) / 100.0 + bend * bendRange) / 12.0);
     if (std::abs (v.glide) > 0.0f)
     {
         // Glide: slide the remaining distance toward the note at a steady speed.

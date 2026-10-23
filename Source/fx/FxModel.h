@@ -64,8 +64,11 @@ struct Source
 
 struct Target
 {
-    int module = -1;   // -1 = master volume
+    static constexpr int masterVolume = -1, zonePitch = -2;
+    int module = -1;   // effect id, or masterVolume, or zonePitch (then slot = zone id)
     int slot = 0;
+    bool isMaster() const noexcept    { return module == masterVolume; }
+    bool isZonePitch() const noexcept { return module == zonePitch; }
     juce::String key (Type) const;              // "f12:cut" or "master:vol"
     bool operator== (const Target& o) const noexcept { return module == o.module && slot == o.slot; }
 };

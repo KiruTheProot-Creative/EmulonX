@@ -124,7 +124,7 @@ private:
     ValueControl root { "Root", ValueControl::Style::knob }, loKey { "Low key", ValueControl::Style::knob },
                  hiKey { "High key", ValueControl::Style::knob }, loVel { "Low vel", ValueControl::Style::knob },
                  hiVel { "High vel", ValueControl::Style::knob };
-    ValueControl tune { "Tune", ValueControl::Style::knob }, grain { "Grain", ValueControl::Style::knob };
+    ValueControl semi { "Semi", ValueControl::Style::knob }, tune { "Tune", ValueControl::Style::knob }, grain { "Grain", ValueControl::Style::knob };
     juce::TextButton keepSpeed { "KEEP SPEED" };
     ValueControl gain { "Gain", ValueControl::Style::knob }, pan { "Pan", ValueControl::Style::knob };
     ValueControl attack { "Attack", ValueControl::Style::fader, 84 }, decay { "Decay", ValueControl::Style::fader, 84 },

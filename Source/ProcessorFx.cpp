@@ -45,10 +45,14 @@ const fx::Module* EmulonXProcessor::findFxModule (int moduleId, int* chainId) co
 void EmulonXProcessor::pushFxSnapshot()
 {
     std::vector<std::pair<int, const fx::Chain*>> zoneChains;
+    std::vector<std::pair<int, int>> zoneSemis;
     for (auto& z : zones)
+    {
         if (! z.fx.empty())
             zoneChains.emplace_back (z.id, &z.fx);
-    std::shared_ptr<const fx::Snapshot> snap = fx::Snapshot::build (fxSetup, zoneChains);
+        zoneSemis.emplace_back (z.id, z.params.semitones);
+    }
+    std::shared_ptr<const fx::Snapshot> snap = fx::Snapshot::build (fxSetup, zoneChains, zoneSemis);
     releasePool.add (snap);
     const SpinLock::ScopedLockType sl (snapshotLock);
     pendingFx = snap;
@@ -278,8 +282,15 @@ String EmulonXProcessor::describeSource (fx::Source s) const
 
 String EmulonXProcessor::describeTarget (fx::Target t) const
 {
-    if (t.module < 0)
+    if (t.isMaster())
         return "MASTER - VOLUME";
+    if (t.isZonePitch())
+    {
+        for (size_t i = 0; i < zones.size(); ++i)
+            if (zones[i].id == t.slot)
+                return "Z" + String ((int) i + 1) + " - SEMITONES";
+        return "(REMOVED ZONE) - SEMITONES";
+    }
     int chainId = 0;
     const auto* m = findFxModule (t.module, &chainId);
     if (m == nullptr)
@@ -370,9 +381,24 @@ var EmulonXProcessor::fxToJson (bool withZoneChains) const
     Array<var> mods;
     for (auto& r : fxSetup.routes)
     {
-        if (r.target.module < 0)
+        if (r.target.isMaster())
         {
             mods.add (fx::routeToJson (r, fx::Type::filter));
+            continue;
+        }
+        if (r.target.isZonePitch())
+        {
+            // Zones are stored by their position in the preset.
+            auto ordered = zones;
+            std::sort (ordered.begin(), ordered.end(), [] (auto& a, auto& b) { return a.order < b.order; });
+            for (size_t i = 0; i < ordered.size(); ++i)
+                if (ordered[i].id == r.target.slot)
+                {
+                    auto j = fx::routeToJson (r, fx::Type::filter);
+                    if (auto* jo = j.getDynamicObject())
+                        jo->setProperty ("target", "zone" + String ((int) i) + ":semi");
+                    mods.add (j);
+                }
             continue;
         }
         if (const auto* m = findFxModule (r.target.module))
@@ -424,7 +450,14 @@ void EmulonXProcessor::applyFxJson (const var& j, const std::vector<var>& zoneCh
                 r.amount = jlimit (-1.0f, 1.0f, (float) (double) q["amount"]);
                 const auto target = q["target"].toString();
                 if (target == "master:vol")
-                    r.target = { -1, 0 };
+                    r.target = { fx::Target::masterVolume, 0 };
+                else if (target.startsWith ("zone") && target.endsWith (":semi"))
+                {
+                    const int index = target.fromFirstOccurrenceOf ("zone", false, false).upToFirstOccurrenceOf (":", false, false).getIntValue();
+                    if (index < 0 || index >= (int) ordered.size())
+                        continue;
+                    r.target = { fx::Target::zonePitch, ordered[(size_t) index]->id };
+                }
                 else
                 {
                     const auto it = idMap.find (target.upToFirstOccurrenceOf (":", false, false));

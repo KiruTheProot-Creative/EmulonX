@@ -20,7 +20,7 @@ MainPage::MainPage (EmulonXProcessor& p)
       }, 10.0f)
 {
     // Master volume: right-click to modulate it, or click it while a macro is waiting to be linked.
-    const fx::Target volTarget { -1, 0 };
+    const fx::Target volTarget { fx::Target::masterVolume, 0 };
     masterKnob.slider.onRightClick = [this, volTarget] { modui::showMenu (proc, volTarget, &masterKnob); };
     masterKnob.slider.interceptClick = [this, volTarget] { return modui::tryLearn (proc, volTarget); };
     masterKnob.modRings = [this, volTarget] { return modui::rings (proc, volTarget, proc.getMasterVolumeNorm()); };

@@ -52,6 +52,15 @@ public:
     struct Bus { int zoneId; float* left; float* right; };
     void render (float* left, float* right, int numSamples, const Bus* buses, int numBuses) noexcept;
 
+    /** Modulated pitch of zones (semitones added on top of their SEMI knob), set every block. */
+    struct PitchMod { int zoneId; float semitones; };
+    void setPitchMods (const PitchMod* mods, int count) noexcept
+    {
+        numPitchMods = juce::jmin (count, (int) pitchMods.size());
+        for (int i = 0; i < numPitchMods; ++i)
+            pitchMods[(size_t) i] = mods[i];
+    }
+
     /** For the FX envelopes: goes up with every note-on; gate = any key (or the pedal) held. */
     juce::uint32 getNoteOnCount() const noexcept { return noteOnCount; }
     bool isGateOpen() const noexcept { return keysDown.any() || sustainDown; }
@@ -103,5 +112,7 @@ private:
     int noteStack[128] {}, stackSize = 0, monoNote = -1, lastNote = -1, monoVelocity = 100;
     std::bitset<128> keysDown;
     juce::Random random;
+    std::array<PitchMod, 64> pitchMods {};
+    int numPitchMods = 0;
 };
 } // namespace emx

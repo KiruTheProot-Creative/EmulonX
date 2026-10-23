@@ -28,11 +28,14 @@ struct Snapshot
     ChainRT master;
     std::vector<Envelope> envelopes;
     std::vector<RouteRT> volumeRoutes;  // modulation of the master volume
+    struct ZonePitchRT { int zoneId; float baseNorm; std::vector<RouteRT> routes; };
+    std::vector<ZonePitchRT> zonePitch; // modulated SEMI knobs (zones with connections only)
     float bpm = 120.0f;
     std::vector<std::shared_ptr<Processor>> keepAlive;
 
     /** zoneChains: (zone id, chain) pairs. */
-    static std::shared_ptr<Snapshot> build (const Setup&, const std::vector<std::pair<int, const Chain*>>& zoneChains);
+    static std::shared_ptr<Snapshot> build (const Setup&, const std::vector<std::pair<int, const Chain*>>& zoneChains,
+                                            const std::vector<std::pair<int, int>>& zoneSemitones = {});
 };
 
 class Engine
@@ -47,6 +50,8 @@ public:
     void beginBlock (int numSamples, double sampleRate, double bpm, juce::uint32 noteOnCount, bool gateOpen,
                      const float* macros01, int numMacros, float modWheel) noexcept;
     void processChain (const Snapshot::ChainRT&, float* L, float* R, int n) noexcept;
+    /** Modulated SEMI knobs: fills (zone id, semitones). Returns how many. */
+    int modulateZonePitch (std::pair<int, float>* out, int maxCount) noexcept;
     /** Master volume 0..1 (linear dB knob) after modulation. */
     float modulateVolume (float norm01) noexcept;
     void reset() noexcept;
@@ -61,6 +66,9 @@ public:
     ModOut modOut[maxModOut];
     std::atomic<int> modOutCount { 0 };
     std::atomic<float> volumeOut { -1.0f };   // -1 = not modulated
+    static constexpr int maxPitchOut = 64;
+    std::atomic<int> pitchOutZone[maxPitchOut] {}, pitchOutCount { 0 };
+    std::atomic<float> pitchOutNorm[maxPitchOut] {};
     std::atomic<float> envValue[maxEnvelopes] {}, envPhase[maxEnvelopes] {};
     std::atomic<int> envStage[maxEnvelopes] {};   // 0 idle, 1 gate on, 2 releasing
     std::atomic<float> bpmUsed { 120.0f };

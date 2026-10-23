@@ -37,6 +37,7 @@ struct ZoneParams
     float attack = 0.002f, decay = 0.3f, sustain = 1.0f, release = 0.25f;   // seconds / level
     float gainDb = 0.0f, pan = 0.0f;                 // pan: -100 (left) .. +100 (right)
     float tuneCents = 0.0f;
+    int semitones = 0;                               // coarse pitch, -24 .. +24 (can be modulated)
     bool keepSpeed = true;                           // pitch without changing length
     float grainMs = 60.0f;
 

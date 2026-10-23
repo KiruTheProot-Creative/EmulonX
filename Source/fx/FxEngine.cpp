@@ -3,7 +3,8 @@
 
 namespace emx::fx
 {
-std::shared_ptr<Snapshot> Snapshot::build (const Setup& setup, const std::vector<std::pair<int, const Chain*>>& zones)
+std::shared_ptr<Snapshot> Snapshot::build (const Setup& setup, const std::vector<std::pair<int, const Chain*>>& zones,
+                                           const std::vector<std::pair<int, int>>& zoneSemitones)
 {
     auto s = std::make_shared<Snapshot>();
     s->envelopes = setup.envelopes;
@@ -42,8 +43,17 @@ std::shared_ptr<Snapshot> Snapshot::build (const Setup& setup, const std::vector
         }
     convert (setup.master, s->master);
     for (auto& r : setup.routes)
-        if (r.target.module < 0)
+        if (r.target.isMaster())
             s->volumeRoutes.push_back ({ 0, r.source.kind, r.source.index, r.amount });
+    for (auto& [zoneId, semis] : zoneSemitones)
+    {
+        ZonePitchRT zp { zoneId, (float) (semis + 24) / 48.0f, {} };
+        for (auto& r : setup.routes)
+            if (r.target.isZonePitch() && r.target.slot == zoneId)
+                zp.routes.push_back ({ 0, r.source.kind, r.source.index, r.amount });
+        if (! zp.routes.empty())
+            s->zonePitch.push_back (std::move (zp));
+    }
     return s;
 }
 
@@ -176,6 +186,24 @@ void Engine::processChain (const Snapshot::ChainRT& chain, float* L, float* R, i
             modOutCount.store (outIndex, std::memory_order_relaxed);
         }
     }
+}
+
+int Engine::modulateZonePitch (std::pair<int, float>* out, int maxCount) noexcept
+{
+    int count = 0;
+    if (snap != nullptr)
+        for (auto& zp : snap->zonePitch)
+        {
+            if (count >= maxCount || count >= maxPitchOut)
+                break;
+            const float n = modulated (zp.baseNorm, zp.routes, 0);
+            out[count] = { zp.zoneId, n * 48.0f - 24.0f };
+            pitchOutZone[count].store (zp.zoneId, std::memory_order_relaxed);
+            pitchOutNorm[count].store (n, std::memory_order_relaxed);
+            ++count;
+        }
+    pitchOutCount.store (count, std::memory_order_relaxed);
+    return count;
 }
 
 float Engine::modulateVolume (float norm01) noexcept

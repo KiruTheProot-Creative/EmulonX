@@ -287,6 +287,15 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
         // Effects: each zone's own channel first, then the whole-preset chain.
         fxEngine.beginBlock (len, currentSampleRate, bpm, engine.getNoteOnCount(), engine.isGateOpen(),
                              macros01, numMacros, engine.getModWheel());
+        {
+            // Modulated SEMI knobs (used from the next step on, ~1 ms later).
+            std::pair<int, float> pm[64];
+            const int count = fxEngine.modulateZonePitch (pm, 64);
+            SamplerEngine::PitchMod mods[64];
+            for (int i = 0; i < count; ++i)
+                mods[i] = { pm[i].first, pm[i].second };
+            engine.setPitchMods (mods, count);
+        }
         for (int b = 0; b < numBuses; ++b)
         {
             fxEngine.processChain (*busChains[b], busData[b][0], busData[b][1], len);
@@ -632,6 +641,7 @@ void EmulonXProcessor::setZoneParams (int id, ZoneParams p)
             p.gainDb = jlimit (-48.0f, 24.0f, p.gainDb);
             p.pan = jlimit (-100.0f, 100.0f, p.pan);
             p.tuneCents = jlimit (-100.0f, 100.0f, p.tuneCents);
+            p.semitones = jlimit (-24, 24, p.semitones);
             p.grainMs = jlimit (20.0f, 150.0f, p.grainMs);
             pushUndo ("params" + String (id));
             z.params = p;
@@ -956,6 +966,7 @@ void EmulonXProcessor::writeZonesToState()
          .setProperty ("s", p.sustain, nullptr).setProperty ("r", p.release, nullptr)
          .setProperty ("gain", p.gainDb, nullptr).setProperty ("pan", p.pan, nullptr)
          .setProperty ("tune", p.tuneCents, nullptr).setProperty ("ks", p.keepSpeed, nullptr)
+         .setProperty ("semi", p.semitones, nullptr)
          .setProperty ("grain", p.grainMs, nullptr);
         zt.appendChild (c, nullptr);
     }
@@ -1039,7 +1050,7 @@ void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
         p.sampleStart = c["ss"]; p.sampleEnd = c["se"];
         p.randomStart = c["rs"]; p.randomEnd = c["re"];
         p.attack = c["a"]; p.decay = c["d"]; p.sustain = c["s"]; p.release = c["r"];
-        p.gainDb = c["gain"]; p.pan = c["pan"]; p.tuneCents = c["tune"];
+        p.gainDb = c["gain"]; p.pan = c["pan"]; p.tuneCents = c["tune"]; p.semitones = c["semi"];
         p.keepSpeed = c["ks"]; p.grainMs = c["grain"];
         zones.push_back (z);
     }

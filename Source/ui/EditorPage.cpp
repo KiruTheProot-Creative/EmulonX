@@ -2,6 +2,7 @@
 #include "EditorPage.h"
 #include "Theme.h"
 #include "../PluginProcessor.h"
+#include "FxPage.h"
 
 namespace emx
 {
@@ -850,6 +851,17 @@ EditorPage::EditorPage (EmulonXProcessor& p)
     loVel.slider.setTooltip ("Softest velocity this zone answers to (for velocity layers)");
     hiVel.slider.setTooltip ("Hardest velocity this zone answers to");
 
+    semi.setRange (intRange (-24, 24), 0);
+    semi.format = [] (double v) { const int st = roundToInt (v); return (st > 0 ? "+" : "") + String (st) + " ST"; };
+    semi.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.semitones = roundToInt (v); }); };
+    semi.slider.setTooltip ("Pitch in semitones (12 = one octave) - right-click to move it with an envelope, macro or the mod wheel");
+    auto semiTarget = [this] { return fx::Target { fx::Target::zonePitch, proc.getSelectedZoneId() }; };
+    semi.slider.onRightClick = [this, semiTarget] { if (proc.getSelectedZone() != nullptr) modui::showMenu (proc, semiTarget(), &semi); };
+    semi.slider.interceptClick = [this, semiTarget] { return proc.getSelectedZone() != nullptr && modui::tryLearn (proc, semiTarget()); };
+    semi.modRings = [this, semiTarget] { return modui::rings (proc, semiTarget(), (float) ((semi.getValue() + 24.0) / 48.0)); };
+    for (auto* k : { &semi, &tune, &grain })
+        k->setRingMargin (6);
+
     tune.setRange (intRange (-100, 100), 0);
     tune.format = [] (double v) { const int c = roundToInt (v); return (c > 0 ? "+" : "") + String (c) + " CT"; };
     tune.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.tuneCents = (float) roundToInt (v); }); };
@@ -894,7 +906,7 @@ EditorPage::EditorPage (EmulonXProcessor& p)
                           (Component*) &zeroEnd, (Component*) &snapButton, (Component*) &zoomAllButton,
                           (Component*) &zoomStartButton, (Component*) &zoomEndButton, (Component*) &loopInfo,
                           (Component*) &root, (Component*) &loKey, (Component*) &hiKey, (Component*) &loVel, (Component*) &hiVel,
-                          (Component*) &tune, (Component*) &keepSpeed, (Component*) &grain, (Component*) &gain, (Component*) &pan,
+                          (Component*) &semi, (Component*) &tune, (Component*) &keepSpeed, (Component*) &grain, (Component*) &gain, (Component*) &pan,
                           (Component*) &attack, (Component*) &decay, (Component*) &sustain, (Component*) &release, (Component*) &keymap,
                           (Component*) &polyButton, (Component*) &monoButton, (Component*) &legatoButton, (Component*) &glide })
         addAndMakeVisible (c);
@@ -1016,7 +1028,7 @@ void EditorPage::refresh()
     setBox (fadeBox, hasAudio ? String (z->params.crossfade) : String());
 
     for (Component* c : { (Component*) &root, (Component*) &loKey, (Component*) &hiKey, (Component*) &loVel, (Component*) &hiVel,
-                          (Component*) &tune, (Component*) &keepSpeed, (Component*) &gain, (Component*) &pan,
+                          (Component*) &semi, (Component*) &tune, (Component*) &keepSpeed, (Component*) &gain, (Component*) &pan,
                           (Component*) &attack, (Component*) &decay, (Component*) &sustain, (Component*) &release })
         c->setEnabled (has);
     if (has)
@@ -1025,6 +1037,7 @@ void EditorPage::refresh()
         root.setValue (q.root);   loKey.setValue (q.loKey); hiKey.setValue (q.hiKey);
         loVel.setValue (q.loVel); hiVel.setValue (q.hiVel);
         tune.setValue (q.tuneCents);
+        semi.setValue (q.semitones);
         grain.setValue (q.grainMs);
         keepSpeed.setToggleState (q.keepSpeed, dontSendNotification);
         gain.setValue (q.gainDb); pan.setValue (q.pan);
@@ -1041,7 +1054,7 @@ void EditorPage::refresh()
     glide.setEnabled (vs.mono);
 
     const int sens = settings->getKnobSensitivity();
-    for (auto* c : { &root, &loKey, &hiKey, &loVel, &hiVel, &tune, &grain, &gain, &pan })
+    for (auto* c : { &root, &loKey, &hiKey, &loVel, &hiVel, &semi, &tune, &grain, &gain, &pan })
         c->setSensitivity (sens);
 
     keymap.layoutLanes();
@@ -1054,6 +1067,8 @@ void EditorPage::tick()
 {
     wave.tick();
     keymap.tick();
+    if (! proc.getFxSetup().routes.empty())
+        semi.repaint();   // modulation ring dot
 }
 
 void EditorPage::resized()
@@ -1136,7 +1151,7 @@ void EditorPage::resized()
     //== Zone settings: four panels + voice mode ===================================
     auto params = r.removeFromTop (172);
     const int gap = 8, total = params.getWidth() - 4 * gap;
-    const int wMap = total * 30 / 100, wPitch = total * 20 / 100, wAmp = total * 14 / 100, wEnv = total * 22 / 100;
+    const int wMap = total * 28 / 100, wPitch = total * 25 / 100, wAmp = total * 13 / 100, wEnv = total * 20 / 100;
     mapArea = params.removeFromLeft (wMap).toFloat();     params.removeFromLeft (gap);
     pitchArea = params.removeFromLeft (wPitch).toFloat(); params.removeFromLeft (gap);
     ampArea = params.removeFromLeft (wAmp).toFloat();     params.removeFromLeft (gap);
@@ -1168,8 +1183,8 @@ void EditorPage::resized()
     };
     const int kh = root.getPreferredHeight();
     layoutRow (mapArea, { &root, &loKey, &hiKey, &loVel, &hiVel }, 62, kh);
-    layoutRow (pitchArea, { &tune, &keepSpeed, &grain }, 72, kh);
-    keepSpeed.setBounds (keepSpeed.getBounds().withSizeKeepingCentre (keepSpeed.getWidth(), 26).translated (0, -10));
+    layoutRow (pitchArea, { &semi, &tune, &keepSpeed, &grain }, 62, semi.getPreferredHeight());
+    keepSpeed.setBounds (keepSpeed.getBounds().withSizeKeepingCentre (keepSpeed.getWidth(), 30).translated (0, -8));
     layoutRow (ampArea, { &gain, &pan }, 62, kh);
     layoutRow (envArea, { &attack, &decay, &sustain, &release }, 54, attack.getPreferredHeight());
     r.removeFromTop (8);

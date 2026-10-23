@@ -119,8 +119,10 @@ bool Source::parse (const String& s, Source& out)
 
 String Target::key (Type t) const
 {
-    if (module < 0)
+    if (module == masterVolume)
         return "master:vol";
+    if (module == zonePitch)
+        return "zone:semi";   // the processor writes the zone's position in the preset
     const auto& d = def (t);
     return "f" + String (module) + ":" + (slot >= 0 && slot < (int) d.slots.size() ? String (d.slots[(size_t) slot].id) : String());
 }

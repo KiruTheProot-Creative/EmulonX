@@ -68,8 +68,9 @@ everything with drawable envelopes and macros.
   - **Loop modes:** *Off*, *Loop* (keeps looping during the release) and
     *Until release* (plays on to the end after you let go). **X-FADE** blends
     the loop seam.
-  - **Mapping, Pitch, Amp, Envelope:** root note, key and velocity ranges, fine
-    tune, keep speed and grain size, gain, pan, and an ADSR envelope per zone.
+  - **Mapping, Pitch, Amp, Envelope:** root note, key and velocity ranges,
+    **SEMI** (semitones, can be moved by envelopes / macros / mod wheel: right-click
+    it), fine tune, keep speed and grain size, gain, pan, and an ADSR envelope per zone.
   - **Keymap:** each bar is a zone. Click it to edit, drag it to move, drag its
     ends to change the key range. Click keys to play (lower on the key = louder),
     shift-click a key to set the root note.

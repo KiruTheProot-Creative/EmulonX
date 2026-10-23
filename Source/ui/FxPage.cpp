@@ -71,8 +71,15 @@ ModRings rings (EmulonXProcessor& proc, fx::Target t, float base)
     if (r.rings.empty())
         return r;
     auto& eng = proc.getFxEngine();
-    if (t.module < 0)
+    if (t.isMaster())
         r.current = eng.volumeOut.load();
+    else if (t.isZonePitch())
+    {
+        const int count = eng.pitchOutCount.load();
+        for (int i = 0; i < count; ++i)
+            if (eng.pitchOutZone[i].load() == t.slot)
+                r.current = eng.pitchOutNorm[i].load();
+    }
     else
     {
         const int count = eng.modOutCount.load();

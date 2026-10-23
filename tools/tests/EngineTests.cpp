@@ -526,6 +526,36 @@ int main (int argc, char** argv)
                String ((int) starts.size()) + " different starts");
     }
 
+    //== SEMI knob and its modulation ==================================================
+    {
+        auto p = basic (*a440, 69);
+        p.semitones = 12;
+        auto up = play (a440, p, 69, 0.5);
+        p.semitones = 0;
+        auto modded = play (a440, p, 69, 0.5, Interp::sinc, -1, 48000.0, [] (SamplerEngine& e, int)
+        {
+            SamplerEngine::PitchMod m { 1, 7.0f };   // zone 1 pushed up a fifth by modulation
+            e.setPitchMods (&m, 1);
+        });
+        const auto fu = frequency (up.left, SR, 0.1, 0.4), fm = frequency (modded.left, SR, 0.1, 0.4);
+        check (near (fu, 880, 5) && near (fm, 659.26, 5), "SEMI +12 plays an octave up; modulation moves the pitch",
+               String (fu, 0) + " Hz / " + String (fm, 0) + " Hz");
+
+        using namespace emx::fx;
+        Setup setup;
+        setup.routes.push_back ({ { SrcKind::macro, 0 }, { Target::zonePitch, 1 }, 0.25f });
+        auto snap = Snapshot::build (setup, {}, { { 1, 0 }, { 2, 5 } });
+        Engine eng;
+        eng.setSnapshot (snap.get());
+        float macros[20] {};
+        macros[0] = 1.0f;
+        eng.beginBlock (64, SR, 120, 0, false, macros, 20, 0.0f);
+        std::pair<int, float> out[8];
+        const int count = eng.modulateZonePitch (out, 8);
+        check (count == 1 && out[0].first == 1 && near (out[0].second, 12.0, 0.01),
+               "a macro can move a zone's SEMI knob (+25% = +12 semitones)", String (count) + " / " + String (count > 0 ? out[0].second : 0.0f, 2));
+    }
+
     //== Arpeggiator ================================================================
     {
         struct Ev { juce::int64 t; int note; bool on; };
