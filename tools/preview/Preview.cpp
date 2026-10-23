@@ -306,6 +306,13 @@ int main (int argc, char** argv)
     save ("preview-arp");
     editor.showPage (2);
     save ("preview-fx-master");
+    {
+        // Change envelope 1 the way its buttons do, without switching envelope tabs.
+        auto e = proc.getFxSetup().envelopes[0];
+        e.loop = false; e.dot = 1; e.den = 8; e.trigger = emx::fx::Envelope::free;
+        proc.setEnvelope (0, e);
+        save ("preview-fx-envchange");
+    }
     editor.getFxPage().setChannel (proc.getZones()[0].id);
     editor.getFxPage().selectEnvelope (1);
     save ("preview-fx-zone");

@@ -205,7 +205,8 @@ var envelopeToJson (const Envelope& e)
     }
     o->setProperty ("pts", pts);
     o->setProperty ("loop", e.loop);
-    o->setProperty ("trig", e.retrigger);
+    o->setProperty ("trig", e.trigger == Envelope::retrig);   // the prototype reads this
+    o->setProperty ("trigMode", e.trigger);
     o->setProperty ("sync", e.sync);
     o->setProperty ("num", e.num);
     o->setProperty ("den", e.den);
@@ -237,7 +238,7 @@ Envelope envelopeFromJson (const var& j)
     auto getF = [&j] (const char* k, float def) { return j.hasProperty (k) ? (float) (double) j[k] : def; };
     auto getI = [&j] (const char* k, int def) { return j.hasProperty (k) ? (int) j[k] : def; };
     e.loop = getB ("loop", true);
-    e.retrigger = getB ("trig", true);
+    e.trigger = j.hasProperty ("trigMode") ? juce::jlimit (0, 2, getI ("trigMode", 0)) : (getB ("trig", true) ? Envelope::retrig : Envelope::free);
     e.sync = getB ("sync", true);
     e.num = juce::jlimit (1, 32, getI ("num", 1));
     e.den = juce::jlimit (1, 64, getI ("den", 4));

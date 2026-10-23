@@ -75,8 +75,10 @@ float Engine::modulated (float base, const std::vector<Snapshot::RouteRT>& route
 }
 
 void Engine::beginBlock (int numSamples, double sampleRate, double bpm, juce::uint32 noteOns, bool gateOpen,
-                         const float* macros01, int numMacros, float modWheel) noexcept
+                         const float* macros01, int numMacros, float modWheel, std::optional<double> hostPpq) noexcept
 {
+    if (hostPpq.has_value())
+        beatPos = *hostPpq;
     sr = sampleRate;
     bpmNow = bpm;
     bpmUsed.store ((float) bpm, std::memory_order_relaxed);
@@ -134,8 +136,20 @@ void Engine::beginBlock (int numSamples, double sampleRate, double bpm, juce::ui
         else
         {
             const double period = juce::jmax (0.001, E.sync ? syncSeconds (E.num, E.den, E.dot, bpmNow) : 1.0 / E.hz);
-            double ph = (double) (E.retrigger ? T - s.t0 : T) / sr / period;
-            ph = E.loop ? ph - std::floor (ph) : juce::jmin (ph, 1.0);
+            double ph;
+            if (E.trigger == Envelope::beat && E.sync)
+            {
+                // Locked to the song position: one cycle = num/den notes, never restarted by notes.
+                static const double mult[] { 1.0, 1.5, 2.0 / 3.0 };
+                const double cycleBeats = juce::jmax (1.0e-3, (double) E.num / (double) juce::jmax (1, E.den) * 4.0 * mult[juce::jlimit (0, 2, E.dot)]);
+                ph = beatPos / cycleBeats;
+                ph -= std::floor (ph);
+            }
+            else
+            {
+                ph = (double) (E.trigger == Envelope::retrig ? T - s.t0 : T) / sr / period;
+                ph = E.loop ? ph - std::floor (ph) : juce::jmin (ph, 1.0);
+            }
             x = (float) ph;
             v = E.shapeAt (x);
         }
@@ -146,6 +160,7 @@ void Engine::beginBlock (int numSamples, double sampleRate, double bpm, juce::ui
         envStage[i].store (s.gate ? 1 : s.trig ? 2 : 0, std::memory_order_relaxed);
     }
     T += numSamples;
+    beatPos += (double) numSamples / sr * bpmNow / 60.0;   // keeps going when the DAW is stopped
 }
 
 void Engine::processChain (const Snapshot::ChainRT& chain, float* L, float* R, int n) noexcept

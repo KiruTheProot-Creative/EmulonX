@@ -860,6 +860,33 @@ int main (int argc, char** argv)
                    "macro and envelope modulate a knob", String (atStart, 3) + " then " + String (half, 3));
         }
 
+        // Envelope in BEAT mode: follows the song position, notes don't restart it.
+        {
+            Setup setup;
+            setup.envelopes = { makeEnvelope (false, "Saw Up") };
+            auto& e = setup.envelopes[0];
+            e.trigger = Envelope::beat; e.sync = true; e.num = 1; e.den = 4;   // one cycle per beat
+            auto snap = Snapshot::build (setup, {});
+            Engine eng;
+            eng.setSnapshot (snap.get());
+            float macros[20] {};
+            eng.beginBlock (64, SR, 120, 0, false, macros, 20, 0.0f, 3.25);    // DAW at beat 3.25
+            const float a1 = eng.envValue[0].load();
+            eng.beginBlock (64, SR, 120, 1, true, macros, 20, 0.0f, 7.5);      // a note arrives at beat 7.5
+            const float a2 = eng.envValue[0].load();
+            float a3 = 0;
+            for (int b = 0; b < 3750 / 64; ++b)   // DAW stopped: keeps running at 120 BPM (0.25 beat later ~ 6000 samples)
+            {
+                eng.beginBlock (64, SR, 120, 1, true, macros, 20, 0.0f);
+                a3 = eng.envValue[0].load();
+            }
+            check (near (a1, 0.25, 0.01) && near (a2, 0.5, 0.01) && a3 > 0.55 && a3 < 0.7,
+                   "envelope BEAT mode follows the song position, notes don't restart it",
+                   String (a1, 2) + " / " + String (a2, 2) + " / " + String (a3, 2));
+            auto back = envelopeFromJson (JSON::parse (JSON::toString (envelopeToJson (e))));
+            check (back.trigger == Envelope::beat, "envelope BEAT mode is saved");
+        }
+
         // JSON round trip (prototype format).
         {
             std::map<String, int> idMap;

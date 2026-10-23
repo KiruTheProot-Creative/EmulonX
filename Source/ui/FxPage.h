@@ -49,6 +49,7 @@ private:
     void syncValues();       // only values changed
     void rebuildChannelBox();
     void rebuildEnvelopeOptions();
+    void syncEnvelopeOptions();
     void layoutEnvelopeOptions();
 
     EmulonXProcessor& proc;
@@ -68,6 +69,7 @@ private:
     juce::ComboBox shapeBox, gridBox;
     std::unique_ptr<EnvelopeGraph> graph;
     juce::OwnedArray<juce::Component> envOptions;
+    std::vector<std::function<void (const fx::Envelope&)>> envSyncers;
     std::unique_ptr<DestinationList> destinations;
     juce::Viewport destView;
 

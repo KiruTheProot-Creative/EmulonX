@@ -1047,15 +1047,13 @@ void FxPage::rebuild()
 void FxPage::rebuildEnvelopeOptions()
 {
     envOptions.clear();
+    envSyncers.clear();
     const auto& envs = proc.getFxSetup().envelopes;
     if (envIndex >= (int) envs.size())
         return;
     const auto& E = envs[(size_t) envIndex];
-    typeShape.setToggleState (! E.ahdsr, dontSendNotification);
-    typeAhdsr.setToggleState (E.ahdsr, dontSendNotification);
     shapeBox.setVisible (! E.ahdsr);
     gridBox.setVisible (! E.ahdsr);
-    gridBox.setSelectedId (E.grid + 1, dontSendNotification);
 
     auto editEnv = [this] (std::function<void (fx::Envelope&)> f)
     {
@@ -1063,26 +1061,28 @@ void FxPage::rebuildEnvelopeOptions()
         f (e);
         proc.setEnvelope (envIndex, e);
     };
-    auto toggle = [this, editEnv] (const String& text, const String& tip, bool on, std::function<void (fx::Envelope&)> f)
+    // Every option registers how to show the current envelope, so changes appear right away.
+    auto toggle = [this, editEnv] (const String& text, const String& tip, std::function<bool (const fx::Envelope&)> isOn,
+                                   std::function<void (fx::Envelope&)> f)
     {
         auto* b = new TextButton (text);
         b->setTooltip (tip);
-        b->setToggleState (on, dontSendNotification);
         b->onClick = [editEnv, f] { editEnv (f); };
         envOptions.add (b);
         addAndMakeVisible (b);
+        envSyncers.push_back ([b, isOn] (const fx::Envelope& e) { b->setToggleState (isOn (e), dontSendNotification); });
         return b;
     };
-    auto knob = [this, editEnv] (const String& caption, NormalisableRange<double> range, double value, double def,
-                                 std::function<String (double)> fmt, std::function<void (fx::Envelope&, double)> f)
+    auto knob = [this, editEnv] (const String& caption, NormalisableRange<double> range, double def, std::function<String (double)> fmt,
+                                 std::function<double (const fx::Envelope&)> get, std::function<void (fx::Envelope&, double)> f)
     {
         auto* k = new ValueControl (caption, ValueControl::Style::knob, 40);
         k->setRange (range, def);
-        k->setValue (value);
         k->format = fmt;
         k->onChange = [editEnv, f] (double v) { editEnv ([f, v] (fx::Envelope& e) { f (e, v); }); };
         envOptions.add (k);
         addAndMakeVisible (k);
+        envSyncers.push_back ([k, get] (const fx::Envelope& e) { k->setValue (get (e)); });
         return k;
     };
 
@@ -1093,48 +1093,68 @@ void FxPage::rebuildEnvelopeOptions()
             [] (double, double, double v) { return v <= 0.0 ? 0.0 : jlimit (0.0, 1.0, std::log (v / 0.001) / std::log (1.0e4)); });
     };
     auto timeFmt = [] (double t) { return t <= 0.0 ? String ("0 MS") : t < 1.0 ? String (roundToInt (t * 1000.0)) + " MS" : String (t, 2) + " S"; };
+    using Env = fx::Envelope;
 
     if (! E.ahdsr)
     {
-        toggle ("LOOP", "Repeat the shape", E.loop, [] (fx::Envelope& e) { e.loop = true; });
-        toggle ("1-SHOT", "Play the shape once per note", ! E.loop, [] (fx::Envelope& e) { e.loop = false; });
-        toggle ("RETRIG", "Restart with every note", E.retrigger, [] (fx::Envelope& e) { e.retrigger = true; });
-        toggle ("FREE", "Keep running, ignore notes", ! E.retrigger, [] (fx::Envelope& e) { e.retrigger = false; });
-        toggle ("SYNC", "Length follows the tempo", E.sync, [] (fx::Envelope& e) { e.sync = ! e.sync; });
+        toggle ("LOOP", "Repeat the shape", [] (const Env& e) { return e.loop; }, [] (Env& e) { e.loop = true; });
+        toggle ("1-SHOT", "Play the shape once per note", [] (const Env& e) { return ! e.loop; }, [] (Env& e) { e.loop = false; });
+        toggle ("RETRIG", "Restart the shape with every note", [] (const Env& e) { return e.trigger == Env::retrig; },
+                [] (Env& e) { e.trigger = Env::retrig; });
+        toggle ("FREE", "Keep running on its own clock, ignore notes", [] (const Env& e) { return e.trigger == Env::free; },
+                [] (Env& e) { e.trigger = Env::free; });
+        toggle ("BEAT", "Locked to your DAW's song position and tempo: always lines up with the beat, never restarted by notes",
+                [] (const Env& e) { return e.trigger == Env::beat; }, [] (Env& e) { e.trigger = Env::beat; e.sync = true; e.loop = true; });
+        toggle ("SYNC", "Length follows the tempo", [] (const Env& e) { return e.sync; }, [] (Env& e) { e.sync = ! e.sync; if (! e.sync && e.trigger == Env::beat) e.trigger = Env::free; });
         if (E.sync)
         {
-            knob ("Beats", NormalisableRange<double> (1, 32, 1), E.num, 1, [] (double v) { return String (roundToInt (v)); },
-                  [] (fx::Envelope& e, double v) { e.num = roundToInt (v); });
+            knob ("Beats", NormalisableRange<double> (1, 32, 1), 1, [] (double v) { return String (roundToInt (v)); },
+                  [] (const Env& e) { return (double) e.num; }, [] (Env& e, double v) { e.num = roundToInt (v); });
             auto* den = new ComboBox();
             for (int d : { 1, 2, 4, 8, 16, 32, 64 })
                 den->addItem ("/ " + String (d), d);
-            den->setSelectedId (E.den, dontSendNotification);
-            den->onChange = [editEnv, den] { const int v = den->getSelectedId(); editEnv ([v] (fx::Envelope& e) { e.den = v; }); };
+            den->onChange = [editEnv, den] { const int v = den->getSelectedId(); editEnv ([v] (Env& e) { e.den = v; }); };
             envOptions.add (den);
             addAndMakeVisible (den);
-            toggle ("STR", "Straight", E.dot == 0, [] (fx::Envelope& e) { e.dot = 0; });
-            toggle ("DOT", "Dotted (x1.5)", E.dot == 1, [] (fx::Envelope& e) { e.dot = 1; });
-            toggle ("TRI", "Triplet (x2/3)", E.dot == 2, [] (fx::Envelope& e) { e.dot = 2; });
+            envSyncers.push_back ([den] (const Env& e) { den->setSelectedId (e.den, dontSendNotification); });
+            toggle ("STR", "Straight", [] (const Env& e) { return e.dot == 0; }, [] (Env& e) { e.dot = 0; });
+            toggle ("DOT", "Dotted (x1.5)", [] (const Env& e) { return e.dot == 1; }, [] (Env& e) { e.dot = 1; });
+            toggle ("TRI", "Triplet (x2/3)", [] (const Env& e) { return e.dot == 2; }, [] (Env& e) { e.dot = 2; });
         }
         else
         {
             knob ("Rate", NormalisableRange<double> (0.05, 20.0,
                       [] (double, double, double n) { return 0.05 * std::pow (400.0, n); },
                       [] (double, double, double v) { return jlimit (0.0, 1.0, std::log (v / 0.05) / std::log (400.0)); }),
-                  E.hz, 2.0, [] (double v) { return String (v, 2) + " HZ"; },
-                  [] (fx::Envelope& e, double v) { e.hz = (float) v; });
+                  2.0, [] (double v) { return String (v, 2) + " HZ"; },
+                  [] (const Env& e) { return (double) e.hz; }, [] (Env& e, double v) { e.hz = (float) v; });
         }
     }
     else
     {
-        knob ("Attack", timeRange (true), E.a, 0.01, timeFmt, [] (fx::Envelope& e, double v) { e.a = (float) v; });
-        knob ("Hold", timeRange (true), E.h, 0.0, timeFmt, [] (fx::Envelope& e, double v) { e.h = (float) v; });
-        knob ("Decay", timeRange (true), E.d, 0.3, timeFmt, [] (fx::Envelope& e, double v) { e.d = (float) v; });
-        knob ("Sustain", NormalisableRange<double> (0.0, 1.0, 0.01), E.s, 0.6, [] (double v) { return String (roundToInt (v * 100.0)) + "%"; },
-              [] (fx::Envelope& e, double v) { e.s = (float) v; });
-        knob ("Release", timeRange (false), E.r, 0.4, timeFmt, [] (fx::Envelope& e, double v) { e.r = (float) jmax (0.001, v); });
+        knob ("Attack", timeRange (true), 0.01, timeFmt, [] (const Env& e) { return (double) e.a; }, [] (Env& e, double v) { e.a = (float) v; });
+        knob ("Hold", timeRange (true), 0.0, timeFmt, [] (const Env& e) { return (double) e.h; }, [] (Env& e, double v) { e.h = (float) v; });
+        knob ("Decay", timeRange (true), 0.3, timeFmt, [] (const Env& e) { return (double) e.d; }, [] (Env& e, double v) { e.d = (float) v; });
+        knob ("Sustain", NormalisableRange<double> (0.0, 1.0, 0.01), 0.6, [] (double v) { return String (roundToInt (v * 100.0)) + "%"; },
+              [] (const Env& e) { return (double) e.s; }, [] (Env& e, double v) { e.s = (float) v; });
+        knob ("Release", timeRange (false), 0.4, timeFmt, [] (const Env& e) { return (double) e.r; },
+              [] (Env& e, double v) { e.r = (float) jmax (0.001, v); });
     }
+    syncEnvelopeOptions();
     layoutEnvelopeOptions();
+}
+
+void FxPage::syncEnvelopeOptions()
+{
+    const auto& envs = proc.getFxSetup().envelopes;
+    if (envIndex >= (int) envs.size())
+        return;
+    const auto& E = envs[(size_t) envIndex];
+    typeShape.setToggleState (! E.ahdsr, dontSendNotification);
+    typeAhdsr.setToggleState (E.ahdsr, dontSendNotification);
+    gridBox.setSelectedId (E.grid + 1, dontSendNotification);
+    for (auto& f : envSyncers)
+        f (E);
 }
 
 void FxPage::layoutEnvelopeOptions()
@@ -1151,32 +1171,35 @@ void FxPage::layoutEnvelopeOptions()
             c->setBounds (r.removeFromLeft (cell).withSizeKeepingCentre (jmin (62, cell), kh));
         return;
     }
-    // LOOP / 1-SHOT, RETRIG / FREE  |  SYNC + beats / division  (or SYNC + rate)
-    auto col = r.removeFromLeft (128).withSizeKeepingCentre (128, 54);
+    // LOOP / 1-SHOT, RETRIG / FREE / BEAT  |  SYNC + beats / division  (or SYNC + rate)
+    auto col = r.removeFromLeft (156).withSizeKeepingCentre (156, 54);
     auto rowA = col.removeFromTop (24);
-    envOptions[0]->setBounds (rowA.removeFromLeft (60));
-    envOptions[1]->setBounds (rowA.removeFromRight (64));
+    envOptions[0]->setBounds (rowA.removeFromLeft (76));
+    envOptions[1]->setBounds (rowA.removeFromRight (76));
     col.removeFromTop (6);
     auto rowB = col.removeFromTop (24);
-    envOptions[2]->setBounds (rowB.removeFromLeft (64));
-    envOptions[3]->setBounds (rowB.removeFromRight (60));
-    r.removeFromLeft (14);
-    envOptions[4]->setBounds (r.removeFromLeft (52).withSizeKeepingCentre (52, 24));
-    r.removeFromLeft (6);
-    if (E.sync && envOptions.size() >= 10)
+    envOptions[2]->setBounds (rowB.removeFromLeft (56));
+    rowB.removeFromLeft (2);
+    envOptions[3]->setBounds (rowB.removeFromLeft (48));
+    rowB.removeFromLeft (2);
+    envOptions[4]->setBounds (rowB);
+    r.removeFromLeft (10);
+    envOptions[5]->setBounds (r.removeFromLeft (50).withSizeKeepingCentre (50, 24));
+    r.removeFromLeft (4);
+    if (E.sync && envOptions.size() >= 11)
     {
-        envOptions[5]->setBounds (r.removeFromLeft (60).withSizeKeepingCentre (60, kh));
+        envOptions[6]->setBounds (r.removeFromLeft (58).withSizeKeepingCentre (58, kh));
         auto c2 = r.removeFromLeft (100).withSizeKeepingCentre (100, 52);
-        envOptions[6]->setBounds (c2.removeFromTop (22));
+        envOptions[7]->setBounds (c2.removeFromTop (22));
         c2.removeFromTop (6);
-        for (int i = 7; i < 10; ++i)
+        for (int i = 8; i < 11; ++i)
         {
             envOptions[i]->setBounds (c2.removeFromLeft (32).withHeight (22));
             c2.removeFromLeft (2);
         }
     }
-    else if (envOptions.size() >= 6)
-        envOptions[5]->setBounds (r.removeFromLeft (62).withSizeKeepingCentre (62, kh));
+    else if (envOptions.size() >= 7)
+        envOptions[6]->setBounds (r.removeFromLeft (62).withSizeKeepingCentre (62, kh));
 }
 
 void FxPage::syncValues()
@@ -1186,22 +1209,7 @@ void FxPage::syncValues()
     for (auto* c : cards)
         c->sync();
     destinations->syncValues();
-    // Envelope option knobs mirror the envelope (values may change through undo or the graph).
-    const auto& envs = proc.getFxSetup().envelopes;
-    if (envIndex < (int) envs.size())
-    {
-        const auto& E = envs[(size_t) envIndex];
-        std::vector<ValueControl*> ks;
-        for (auto* c : envOptions)
-            if (auto* k = dynamic_cast<ValueControl*> (c))
-                ks.push_back (k);
-        if (E.ahdsr && ks.size() == 5)
-        {
-            ks[0]->setValue (E.a); ks[1]->setValue (E.h); ks[2]->setValue (E.d); ks[3]->setValue (E.s); ks[4]->setValue (E.r);
-        }
-        else if (! E.ahdsr && ks.size() == 1)
-            ks[0]->setValue (E.sync ? (double) E.num : (double) E.hz);
-    }
+    syncEnvelopeOptions();   // buttons, boxes and knobs show the envelope as it is now
     graph->repaint();
 }
 
