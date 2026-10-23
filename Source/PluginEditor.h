@@ -9,12 +9,15 @@
 #include "Settings.h"
 #include "ui/EmxLookAndFeel.h"
 #include "ui/MainPage.h"
+#include "ui/Explorer.h"
+#include "ui/SettingsPanel.h"
 
 namespace emx
 {
 class EmulonXEditor final : public juce::AudioProcessorEditor,
                             public juce::FileDragAndDropTarget,
-                            private juce::Timer
+                            private juce::Timer,
+                            private juce::ChangeListener
 {
 public:
     static constexpr int baseWidth = 1280, baseHeight = 800;
@@ -25,6 +28,8 @@ public:
     void resized() override;
     void setUiScale (float scale);
     void showPage (int index) { root->showPage (index); }
+    void showSettings (bool show, int page = 0);
+    Explorer& getExplorer() noexcept { return root->explorer; }
 
     //== Drop audio files / presets anywhere on the window =====================
     bool isInterestedInFileDrag (const juce::StringArray&) override;
@@ -35,7 +40,8 @@ public:
 
 private:
     void timerCallback() override;
-    void showSettingsMenu();
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;   // settings
+    void updateTooltips();
 
     /** Everything visible lives in here, at base size; the editor scales it. */
     class Root final : public juce::Component
@@ -51,16 +57,17 @@ private:
         juce::TextButton tabMain { "MAIN" }, tabEditor { "EDITOR" }, tabFx { "FX" };
         LedDisplay voicesLed, cpuLed;
         GearButton gear;
-        ComingSoonPanel explorer;
+        Explorer explorer;
         MainPage mainPage;
         ComingSoonPanel editorPage, fxPage;
+        std::unique_ptr<SettingsPanel> settingsPanel;
         juce::Rectangle<float> titleArea;
     };
 
     EmulonXProcessor& proc;
     juce::SharedResourcePointer<Settings> settings;
     EmxLookAndFeel lnf;
-    juce::TooltipWindow tooltips { this, 600 };
+    std::unique_ptr<juce::TooltipWindow> tooltips;
     std::unique_ptr<Root> root;
     float uiScale = 1.0f;
     bool dragging = false;

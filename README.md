@@ -4,22 +4,33 @@ A free, open-source sampler plugin inspired by the E-mu Emulator X.
 Load whole sound banks, edit and loop samples, stack effects, and modulate
 everything with drawable envelopes and macros.
 
-> Status: **milestone 2** — the sampler engine. Drop audio files or a preset
-> made in the browser prototype onto the window and play.
+> Status: **milestone 3** — presets, banks, the Explorer and the settings window.
 
-## Using it (milestone 2)
+## Using it (milestone 3)
 
-- **Add sounds:** drag WAV, AIFF, FLAC, OGG or MP3 files onto the plugin window,
-  or press **LOAD...**. A `.emxp` preset from the browser prototype loads with all
-  its zones, loops and envelopes.
-- **Root notes** are read from WAV loop markers or from file names such as
-  `Piano_C4.wav` or `Pad A#3.wav`. Dropping several files at once spreads them
-  across the keyboard automatically (**AUTO MAP** does it again any time).
+- **Add sounds:** drag WAV, AIFF, FLAC, OGG or MP3 files onto the window, press
+  **LOAD...**, or double-click them in the Explorer's **SAMPLES** tab (a single
+  click plays a preview). Root notes come from WAV loop markers or file names
+  such as `Piano_C4.wav`; several files at once are spread across the keyboard
+  (**AUTO MAP** does it again).
+- **Presets (`.emxp`):** name the preset at the top of the Preset panel and press
+  **SAVE**. The samples are packed inside the file, so one file is all you need
+  to share. Opening a preset replaces the current one.
+- **Banks (`.emxb`):** **ADD CURRENT** puts a copy of the current preset into the
+  Bank list; **EXPORT...** saves the whole list as one `.emxb` file. **OPEN...**
+  (or dropping a bank on the window) fills the list from a bank; double-click a
+  preset to load it.
+- **Explorer:** the **BANKS** tab shows *Base banks*, *Other banks* (each bank as
+  a folder of presets) and *User* folders. Add folders with the folder **+** button
+  or in the settings.
+- **Settings** (gear button): folders, voices, CPU limit, voice stealing, default
+  interpolation and keep speed, MIDI channel, velocity curve, pitch-bend range,
+  tuning (A4), interface size, knob sensitivity and help tips. They are shared by
+  every Emulon X in every project.
+- **Your DAW project stores the samples too** (setting *Samples in DAW projects*),
+  so a project still sounds right if the original files move or are deleted.
 - **Interpolation:** *Sinc HQ* sounds cleanest; *Linear* uses the least CPU.
-- **Keep speed** changes pitch without changing length (turn it off for drums).
-- Sustain pedal, pitch bend (±2 semitones) and up to 64 voices work.
-- Everything is saved with your DAW project. Samples are referenced from where
-  they are on disk, so don't move or delete them.
+  **Keep speed** changes pitch without changing length (turn it off for drums).
 
 ## Install (Windows, e.g. for Ableton Live)
 

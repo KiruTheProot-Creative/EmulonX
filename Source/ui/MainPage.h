@@ -3,27 +3,35 @@
 #pragma once
 
 #include "Widgets.h"
-#include "ZonesPanel.h"
+#include "PresetPanel.h"
+#include "BankPanel.h"
+#include "../Settings.h"
 
 namespace emx
 {
 class EmulonXProcessor;
 
-class MainPage final : public juce::Component
+class MainPage final : public juce::Component,
+                       private juce::ChangeListener
 {
 public:
     explicit MainPage (EmulonXProcessor&);
+    ~MainPage() override;
 
     /** Called ~30x per second by the editor to update meters. */
     void tick();
-    ZonesPanel& getZonesPanel() noexcept { return zonesPanel; }
+    PresetPanel& getPresetPanel() noexcept { return presetPanel; }
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
+
     EmulonXProcessor& proc;
-    ZonesPanel zonesPanel;
+    juce::SharedResourcePointer<Settings> settings;
+    PresetPanel presetPanel;
+    BankPanel bankPanel;
     EmxKnob masterKnob;
     LevelMeter meter;
     LedDisplay peakLed;

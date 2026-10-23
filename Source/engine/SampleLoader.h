@@ -1,4 +1,5 @@
-// Emulon X — loading audio files and .emxp presets (runs on a background thread).
+// Emulon X — loading and saving: audio files, .emxp presets and .emxb banks.
+// Everything here may run on a background thread.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
@@ -13,37 +14,72 @@ struct LoadedZone
     ZoneParams params;
 };
 
+using MacroList = std::vector<std::pair<juce::String, float>>;   // name, value 0..100
+
 struct LoadResult
 {
     std::vector<LoadedZone> zones;
+    bool isPreset = false;       // true: replaces the current preset; false: zones are added
     int interp = -1;             // from a preset, -1 = leave unchanged
     juce::String presetName;
+    MacroList macros;            // from a preset (may be empty)
+    juce::var fx;                // FX section of a prototype preset, kept so it isn't lost on re-save
     juce::StringArray errors;
+};
+
+/** Everything needed to write a preset file. */
+struct PresetToSave
+{
+    juce::String name;
+    Interp interp = Interp::sinc;
+    std::vector<LoadedZone> zones;
+    MacroList macros;
+    juce::var fx;
+};
+
+struct BankInfo
+{
+    juce::String name;
+    juce::StringArray presetNames, presetEntries;   // entry = path of the .emxp inside the bank
+    juce::String error;
 };
 
 namespace loader
 {
-    /** File types that can be dropped onto the plugin. */
+    //== What can be opened =====================================================
     juce::String supportedWildcards();
     bool isSupported (const juce::File&);
+    bool isAudioFile (const juce::File&);
+    bool isPresetFile (const juce::File&);   // .emxp (also a renamed .emxp.zip)
+    bool isBankFile (const juce::File&);     // .emxb (also .emxb.zip)
 
-    /** One audio file -> one zone (root and loop taken from the file when present). */
+    //== Loading ================================================================
     LoadResult loadAudioFile (const juce::File&);
-
-    /** A preset made in Emulon X (or the browser prototype): zones with all their settings. */
     LoadResult loadPreset (const juce::File&);
+    LoadResult loadPresetFromMemory (const juce::MemoryBlock&, const juce::String& sourcePrefix, const juce::String& fallbackName);
+    LoadResult load (const juce::File&);   // audio or preset, by extension / content
 
-    /** Picks loadAudioFile or loadPreset by extension. */
-    LoadResult load (const juce::File&);
+    BankInfo readBankInfo (const juce::File&);
+    juce::MemoryBlock readBankEntry (const juce::File& bank, const juce::String& entry);
 
-    /** Re-loads one sample from a saved source string ("file|..." or "emxp|...|entry"). */
+    /** Re-loads one sample from a saved source string:
+        "file|<path>", "emxp|<preset>|<entry>" or "emxb|<bank>|<preset entry>|<sample entry>". */
     std::shared_ptr<const SampleData> loadSource (const juce::String& source, juce::String& error);
 
-    /** Decodes audio from a stream. `name` is used for display and root-note detection. */
     std::shared_ptr<SampleData> decode (std::unique_ptr<juce::InputStream>, const juce::String& name,
                                         const juce::String& source, juce::String& error);
-
-    /** Reads a zone's settings from a preset's JSON. `v1` = very first prototype format. */
     ZoneParams paramsFromJson (const juce::var& z, const SampleData&, bool v1);
+
+    //== Saving =================================================================
+    /** A preset with its samples packed inside as 24-bit WAV. Same format as the prototype. */
+    juce::MemoryBlock presetToBytes (const PresetToSave&, juce::String& error);
+    bool savePreset (const juce::File&, const PresetToSave&, juce::String& error);
+
+    /** A bank: several presets (as .emxp data) in one file. */
+    bool saveBank (const juce::File&, const juce::String& bankName,
+                   const std::vector<std::pair<juce::String, juce::MemoryBlock>>& presets, juce::String& error);
+
+    /** Turns a name into something safe for a file name. */
+    juce::String safeFileName (const juce::String&);
 }
 } // namespace emx

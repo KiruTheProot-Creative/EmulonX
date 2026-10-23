@@ -21,6 +21,11 @@ public:
 
     int getPreferredHeight() const noexcept { return knobSize + 4 + 16 + 3 + 14; }
 
+    /** Re-reads an editable caption (e.g. after a preset brought new macro names). */
+    void refreshCaption();
+    /** 0 fast, 1 normal, 2 fine (from the settings). */
+    void setSensitivity (int level);
+
     void paint (juce::Graphics&) override;
     void resized() override;
 
@@ -32,7 +37,22 @@ private:
     int knobSize;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     std::unique_ptr<NameLabel> nameLabel;
+    std::function<juce::String()> nameSource;
     juce::Rectangle<float> ledArea, captionArea;
+};
+
+/** A red LED text field. Click to type (or double-click, if set). */
+class LedLabel final : public juce::Label
+{
+public:
+    explicit LedLabel (float textHeight = 9.0f, bool singleClickEdit = true);
+    void paint (juce::Graphics&) override;
+    void setPlaceholder (const juce::String& p) { placeholder = p; }
+
+private:
+    juce::TextEditor* createEditorComponent() override;
+    float textHeight;
+    juce::String placeholder;
 };
 
 /** Red LED readout whose text comes from a function, refreshed by a timer. */

@@ -1,24 +1,27 @@
-// Emulon X — the zone list on the Main tab (until the full Editor tab arrives).
+// Emulon X — the Preset panel on the Main tab: name, zones, load / save / new.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
-#include <juce_gui_basics/juce_gui_basics.h>
+#include "Widgets.h"
 
 namespace emx
 {
 class EmulonXProcessor;
 
-class ZonesPanel final : public juce::Component,
-                         private juce::ChangeListener,
-                         private juce::ListBoxModel
+class PresetPanel final : public juce::Component,
+                          private juce::ChangeListener,
+                          private juce::ListBoxModel
 {
 public:
-    explicit ZonesPanel (EmulonXProcessor&);
-    ~ZonesPanel() override;
+    explicit PresetPanel (EmulonXProcessor&);
+    ~PresetPanel() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
+
     void openLoadDialog();
+    void save();
+    void saveAs();
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -29,11 +32,14 @@ private:
     void deleteKeyPressed (int lastRowSelected) override;
 
     EmulonXProcessor& proc;
+    LedLabel nameLabel { 10.0f };
+    LedDisplay status;
     juce::ListBox list { "zones", this };
-    juce::TextButton loadButton { "LOAD..." }, mapButton { "AUTO MAP" }, removeButton { "REMOVE" }, clearButton { "CLEAR" };
+    juce::TextButton loadButton { "LOAD..." }, saveButton { "SAVE" }, saveAsButton { "SAVE AS..." }, newButton { "NEW" };
+    juce::TextButton mapButton { "AUTO MAP" }, removeButton { "REMOVE" }, clearButton { "CLEAR" };
     juce::TextButton interpButtons[3] { juce::TextButton ("LINEAR"), juce::TextButton ("CUBIC"), juce::TextButton ("SINC HQ") };
     juce::TextButton keepSpeedButton { "KEEP SPEED" };
     std::unique_ptr<juce::FileChooser> chooser;
-    juce::Rectangle<float> listArea, statusArea;
+    juce::Rectangle<float> listArea;
 };
 } // namespace emx

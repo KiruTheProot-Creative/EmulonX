@@ -46,7 +46,7 @@ int main (int argc, char** argv)
     demoDir.createDirectory();
     proc.loadFiles ({ writeDemoSample (demoDir, "Glass Pad_C3", 130.81), writeDemoSample (demoDir, "Glass Pad_C4", 261.63),
                       writeDemoSample (demoDir, "Glass Pad_C5", 523.25) });
-    for (int i = 0; i < 100 && (proc.isLoading() || proc.getZones().size() < 3); ++i)
+    for (int i = 0; i < 100 && (proc.isBusy() || proc.getZones().size() < 3); ++i)
         MessageManager::getInstance()->runDispatchLoopUntil (50);
 
     String zonesInfo;
@@ -84,20 +84,69 @@ int main (int argc, char** argv)
                      c4, g6, silent, proc.getActiveVoices());
     }
 
-    // State round trip: save, clear, restore -> the same zones come back.
+    auto waitIdle = [&proc]
+    {
+        for (int i = 0; i < 200; ++i)
+        {
+            MessageManager::getInstance()->runDispatchLoopUntil (30);
+            if (! proc.isBusy())
+                break;
+        }
+        MessageManager::getInstance()->runDispatchLoopUntil (30);
+    };
+
+    // Save a preset, build a bank, export it.
+    const auto presetDir = demoDir.getChildFile ("Presets"), bankDir = demoDir.getChildFile ("Banks");
+    presetDir.createDirectory();
+    bankDir.createDirectory();
+    proc.setPresetName ("Glass Pad");
+    proc.savePresetAs (presetDir.getChildFile ("Glass Pad.emxp"));
+    waitIdle();
+    proc.addCurrentPresetToBank();
+    waitIdle();
+    proc.setPresetName ("Glass Pad Bright");
+    proc.addCurrentPresetToBank();
+    waitIdle();
+    proc.setBankName ("Demo Bank");
+    proc.exportBank (bankDir.getChildFile ("Demo Bank.emxb"));
+    waitIdle();
+    std::printf ("preset file: %lld bytes, bank file: %lld bytes, bank entries %d, message '%s'\n",
+                 presetDir.getChildFile ("Glass Pad.emxp").getSize(), bankDir.getChildFile ("Demo Bank.emxb").getSize(),
+                 (int) proc.getBank().size(), proc.getLastMessage().toRawUTF8());
+
+    // Project state with the samples inside: delete the WAVs, restore, everything must still play.
     {
         MemoryBlock state;
+        for (int i = 0; i < 20; ++i) MessageManager::getInstance()->runDispatchLoopUntil (60);   // let the embed cache build
         proc.getStateInformation (state);
-        proc.clearZones();
+        for (auto n : { "Glass Pad_C3", "Glass Pad_C4", "Glass Pad_C5" })
+            demoDir.getChildFile (String (n) + ".wav").deleteFile();
+        proc.newPreset();
         proc.setStateInformation (state.getData(), (int) state.getSize());
-        for (int i = 0; i < 100 && (proc.isLoading() || proc.getZones().empty()); ++i)
-            MessageManager::getInstance()->runDispatchLoopUntil (50);
+        waitIdle();
         int loaded = 0;
         for (auto& z : proc.getZones())
             if (z.sample != nullptr)
                 ++loaded;
-        std::printf ("state round trip: %d zones restored, %d with audio\n", (int) proc.getZones().size(), loaded);
+        std::printf ("state round trip (embedded, %lld KB): %d zones restored, %d with audio, preset '%s'\n",
+                     (long long) state.getSize() / 1024, (int) proc.getZones().size(), loaded, proc.getPresetName().toRawUTF8());
     }
+
+    // Open the bank file and load its second preset.
+    proc.clearBank();
+    proc.openBank (bankDir.getChildFile ("Demo Bank.emxb"));
+    waitIdle();
+    proc.loadBankEntry (1);
+    waitIdle();
+    std::printf ("bank reopened: '%s' with %d presets; loaded '%s' (%d zones)\n", proc.getBankName().toRawUTF8(),
+                 (int) proc.getBank().size(), proc.getPresetName().toRawUTF8(), (int) proc.getZones().size());
+
+    // Show the demo folders in the explorer.
+    auto& settings = proc.getSettings();
+    settings.setFolders (emx::Settings::Folder::samples, { File::getSpecialLocation (File::userHomeDirectory).getFullPathName() });
+    settings.setFolders (emx::Settings::Folder::other, { bankDir.getFullPathName() });
+    settings.setFolders (emx::Settings::Folder::user, { presetDir.getFullPathName() });
+    settings.setFolders (emx::Settings::Folder::base, {});
 
     const float demo[] { 0.0f, 0.25f, 0.6f, 1.0f, 0.4f };
     for (int i = 0; i < emx::numMacros; ++i)
@@ -110,6 +159,7 @@ int main (int argc, char** argv)
 
     auto save = [&] (const String& name)
     {
+        MessageManager::getInstance()->runDispatchLoopUntil (120);   // let async layout (trees, lists) settle
         const auto img = editor.createComponentSnapshot (editor.getLocalBounds(), true, 1.0f);
         const auto file = outDir.getChildFile (name + ".png");
         file.deleteFile();
@@ -125,11 +175,34 @@ int main (int argc, char** argv)
         save (String ("preview-") + pages[p] + "-100");
     }
     editor.showPage (0);
-    for (auto s : { 0.75f, 1.5f })
+    editor.getExplorer().showTab (0);
+    save ("preview-main-samples");
+    editor.getExplorer().showTab (1);
+    // Open every folder and bank in the explorer, to show presets inside banks.
+    if (auto* tv = [&]() -> TreeView* { for (auto* c : editor.getExplorer().getChildren()) if (auto* t = dynamic_cast<TreeView*> (c)) return t; return nullptr; }())
     {
-        editor.setUiScale (s);
-        save ("preview-main-" + String (roundToInt (s * 100.0f)));
+        std::function<void (TreeViewItem*)> openAll = [&] (TreeViewItem* it)
+        {
+            it->setOpen (true);
+            for (int i = 0; i < it->getNumSubItems(); ++i)
+                openAll (it->getSubItem (i));
+        };
+        openAll (tv->getRootItem());
     }
+    save ("preview-main-banks-open");
+    const char* settingsPages[] { "folders", "performance", "midi", "interface", "about" };
+    for (int p = 0; p < 5; ++p)
+    {
+        editor.showSettings (true, p);
+        save (String ("preview-settings-") + settingsPages[p]);
+    }
+    editor.showSettings (false);
+    for (auto sc : { 0.75f, 1.5f })
+    {
+        editor.setUiScale (sc);
+        save ("preview-main-" + String (roundToInt (sc * 100.0f)));
+    }
+    editor.setUiScale (1.0f);
     demoDir.deleteRecursively();
     return 0;
 }

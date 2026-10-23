@@ -43,6 +43,9 @@ public:
     void render (float* left, float* right, int numSamples) noexcept;
 
     int getActiveVoiceCount() const noexcept;
+
+    /** Fades out one voice (released notes first). Used by the voice limit and the CPU guard. */
+    bool stealOne() noexcept;
     float getModWheel() const noexcept { return modWheel; }
 
     /** Current playback position (in source frames) of the newest voice of each zone. For the UI. */
@@ -67,7 +70,6 @@ private:
 
     void renderVoice (Voice&, const ZoneParams&, float* L, float* R, int n) noexcept;
     Voice* freeSlot() noexcept;
-    bool stealOne() noexcept;
     void startVoicesFor (int note, int velocity) noexcept;
 
     std::array<Voice, maxVoiceSlots> voices;

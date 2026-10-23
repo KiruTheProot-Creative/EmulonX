@@ -22,6 +22,10 @@ EmxLookAndFeel::EmxLookAndFeel()
     setColour (TextEditor::outlineColourId, Colours::black);
     setColour (TextEditor::focusedOutlineColourId, theme::red);
     setColour (CaretComponent::caretColourId, theme::red);
+    setColour (ComboBox::textColourId, theme::red);
+    setColour (ComboBox::arrowColourId, theme::red);
+    setColour (ListBox::textColourId, theme::red);
+    setColour (TreeView::backgroundColourId, Colours::transparentBlack);
 }
 
 //== Knob: your knob artwork + a glowing pointer ================================
@@ -124,5 +128,56 @@ void EmxLookAndFeel::drawPopupMenuSectionHeader (Graphics& g, const Rectangle<in
 Font EmxLookAndFeel::getLabelFont (Label& l)
 {
     return theme::font ((float) jmax (8, l.getHeight() / 2), 500, 0.04f);
+}
+
+//== Drop-downs: LED box with a red arrow =======================================
+void EmxLookAndFeel::drawComboBox (Graphics& g, int w, int h, bool, int, int, int, int, ComboBox& box)
+{
+    auto r = Rectangle<float> (0, 0, (float) w, (float) h);
+    theme::drawLed (g, r, {});
+    if (box.isPopupActive() || box.hasKeyboardFocus (true))
+    {
+        g.setColour (theme::red.withAlpha (0.6f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
+    }
+    const auto a = r.removeFromRight ((float) h).withSizeKeepingCentre (8.0f, 5.0f);
+    Path arrow;
+    arrow.addTriangle (a.getX(), a.getY(), a.getRight(), a.getY(), a.getCentreX(), a.getBottom());
+    g.setColour (box.isEnabled() ? theme::red : theme::redDark);
+    g.fillPath (arrow);
+}
+
+Font EmxLookAndFeel::getComboBoxFont (ComboBox&) { return theme::font (9.5f, 500, 0.05f); }
+
+void EmxLookAndFeel::positionComboBoxText (ComboBox& box, Label& label)
+{
+    label.setBounds (4, 1, box.getWidth() - box.getHeight() - 4, box.getHeight() - 2);
+    label.setFont (getComboBoxFont (box));
+}
+
+PopupMenu::Options EmxLookAndFeel::getOptionsForComboBoxPopupMenu (ComboBox& box, Label& label)
+{
+    return LookAndFeel_V4::getOptionsForComboBoxPopupMenu (box, label).withStandardItemHeight (22);
+}
+
+//== Explorer tree: small red triangles =========================================
+void EmxLookAndFeel::drawTreeviewPlusMinusBox (Graphics& g, const Rectangle<float>& area, Colour, bool isOpen, bool over)
+{
+    const auto c = area.getCentre();
+    Path p;
+    if (isOpen)
+        p.addTriangle (c.x - 3.5f, c.y - 2.0f, c.x + 3.5f, c.y - 2.0f, c.x, c.y + 2.5f);
+    else
+        p.addTriangle (c.x - 2.0f, c.y - 3.5f, c.x - 2.0f, c.y + 3.5f, c.x + 2.5f, c.y);
+    g.setColour (over ? Colour (0xffff6060) : theme::redDim);
+    g.fillPath (p);
+}
+
+void EmxLookAndFeel::drawScrollbar (Graphics& g, ScrollBar&, int x, int y, int w, int h, bool vertical,
+                                    int thumbStart, int thumbSize, bool over, bool down)
+{
+    auto thumb = vertical ? Rectangle<int> (x, thumbStart, w, thumbSize) : Rectangle<int> (thumbStart, y, thumbSize, h);
+    g.setColour ((down ? theme::red : over ? theme::redDim : theme::redDark).withAlpha (0.8f));
+    g.fillRoundedRectangle (thumb.toFloat().reduced (2.0f, 2.0f), 3.0f);
 }
 } // namespace emx

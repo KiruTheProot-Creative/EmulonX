@@ -49,6 +49,7 @@ EmxKnob::~EmxKnob() = default;
 void EmxKnob::setEditableCaption (std::function<String()> getName, std::function<void (const String&)> setName)
 {
     nameLabel = std::make_unique<NameLabel>();
+    nameSource = getName;
     nameLabel->setText (getName(), dontSendNotification);
     nameLabel->setTooltip ("Double-click to rename");
     nameLabel->onTextChange = [this, getName, setName]
@@ -58,6 +59,17 @@ void EmxKnob::setEditableCaption (std::function<String()> getName, std::function
     };
     addAndMakeVisible (*nameLabel);
     resized();
+}
+
+void EmxKnob::refreshCaption()
+{
+    if (nameLabel != nullptr && nameSource != nullptr && ! nameLabel->isBeingEdited())
+        nameLabel->setText (nameSource(), dontSendNotification);
+}
+
+void EmxKnob::setSensitivity (int level)
+{
+    slider.setMouseDragSensitivity (level == 0 ? 90 : level == 2 ? 400 : 160);
 }
 
 void EmxKnob::resized()
@@ -81,6 +93,32 @@ void EmxKnob::paint (Graphics& g)
         g.setFont (theme::font (8.0f, 700, 0.12f));
         g.drawText (caption, captionArea, Justification::centredTop, false);
     }
+}
+
+//== LedLabel ==================================================================
+LedLabel::LedLabel (float h, bool singleClick) : textHeight (h)
+{
+    setEditable (singleClick, ! singleClick, false);
+    setJustificationType (Justification::centredLeft);
+    setMouseCursor (MouseCursor::IBeamCursor);
+}
+
+void LedLabel::paint (Graphics& g)
+{
+    if (isBeingEdited())
+        return;
+    const auto t = getText();
+    theme::drawLed (g, getLocalBounds().toFloat(), t.isEmpty() ? placeholder : t, textHeight,
+                    Justification::centredLeft, t.isEmpty() ? theme::redDark : theme::red);
+}
+
+TextEditor* LedLabel::createEditorComponent()
+{
+    auto* ed = Label::createEditorComponent();
+    ed->setFont (theme::font (textHeight + 1.0f, 500, 0.06f));
+    ed->setIndents (6, 0);
+    ed->setJustification (Justification::centredLeft);
+    return ed;
 }
 
 //== LedDisplay =================================================================

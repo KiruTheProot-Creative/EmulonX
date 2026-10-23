@@ -9,7 +9,8 @@ using namespace juce;
 
 MainPage::MainPage (EmulonXProcessor& p)
     : proc (p),
-      zonesPanel (p),
+      presetPanel (p),
+      bankPanel (p),
       masterKnob (p.apvts, masterParamId, "Volume", 58),
       peakLed ([this]
       {
@@ -17,7 +18,8 @@ MainPage::MainPage (EmulonXProcessor& p)
           return db < -59.0f ? String ("-INF DB") : (db > 0 ? "+" : "") + String (db, 1) + " DB";
       }, 10.0f)
 {
-    addAndMakeVisible (zonesPanel);
+    addAndMakeVisible (presetPanel);
+    addAndMakeVisible (bankPanel);
     addAndMakeVisible (masterKnob);
     addAndMakeVisible (meter);
     addAndMakeVisible (peakLed);
@@ -28,6 +30,28 @@ MainPage::MainPage (EmulonXProcessor& p)
         k->setEditableCaption ([this, i] { return proc.getMacroName (i); },
                                [this, i] (const String& n) { proc.setMacroName (i, n); });
         addAndMakeVisible (k);
+    }
+
+    proc.addChangeListener (this);
+    settings->addChangeListener (this);
+    changeListenerCallback (nullptr);
+}
+
+MainPage::~MainPage()
+{
+    proc.removeChangeListener (this);
+    settings->removeChangeListener (this);
+}
+
+void MainPage::changeListenerCallback (ChangeBroadcaster*)
+{
+    // A preset may have brought new macro names; the settings may have a new knob sensitivity.
+    const int sens = settings->getKnobSensitivity();
+    masterKnob.setSensitivity (sens);
+    for (auto* k : macros)
+    {
+        k->refreshCaption();
+        k->setSensitivity (sens);
     }
 }
 
@@ -40,11 +64,14 @@ void MainPage::tick()
 void MainPage::resized()
 {
     auto r = getLocalBounds();
-    auto top = r.removeFromTop (210);
+    auto top = r.removeFromTop (214);
     const int w3 = (top.getWidth() - 16) / 3;
-    zonesPanel.setBounds (top.removeFromLeft (2 * w3 + 8));
+    presetPanel.setBounds (top.removeFromLeft (2 * w3 + 8));
     top.removeFromLeft (8);
     masterArea = top.toFloat();
+
+    r.removeFromTop (8);
+    bankPanel.setBounds (r.removeFromTop (136));
 
     // Master panel content
     auto m = masterArea.reduced (10.0f, 8.0f).withTrimmedTop (22.0f).reduced (4.0f, 6.0f);
@@ -77,7 +104,7 @@ void MainPage::paint (Graphics& g)
     auto hint = getLocalBounds().toFloat().withTrimmedTop (macroArea.getBottom() + 10.0f).removeFromTop (16.0f);
     g.setColour (theme::textMuted);
     g.setFont (theme::font (9.0f, 500, 0.06f));
-    g.drawText ("MILESTONE 2 - THE SAMPLER ENGINE. EDIT LOOPS, ENVELOPES AND KEY RANGES IN THE EDITOR TAB (MILESTONE 4).",
+    g.drawText ("MILESTONE 3 - PRESETS, BANKS, EXPLORER & SETTINGS. THE ZONE EDITOR ARRIVES IN MILESTONE 4.",
                 hint, Justification::centredLeft, true);
 }
 } // namespace emx

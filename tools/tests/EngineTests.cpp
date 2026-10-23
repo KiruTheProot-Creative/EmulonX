@@ -371,6 +371,67 @@ int main (int argc, char** argv)
 
         auto missing = loader::loadSource ("file|" + tmp.getChildFile ("nope.wav").getFullPathName(), err);
         check (missing == nullptr && err.startsWith ("Missing"), "missing files are reported, not crashed on");
+
+        //== Save a preset, load it back: everything must survive ==================
+        PresetToSave save;
+        save.name = "Round Trip";
+        save.interp = Interp::sinc;
+        save.zones = r.zones;
+        save.macros = { { "CUTOFF", 42.0f }, { "SPACE", 7.5f } };
+        save.fx = JSON::parse (R"({"preset":[{"type":"delay","on":true}]})");
+        const auto saved = tmp.getChildFile ("Round Trip.emxp");
+        String saveErr;
+        const bool wrote = loader::savePreset (saved, save, saveErr);
+        auto back = loader::loadPreset (saved);
+        bool same = wrote && back.isPreset && back.zones.size() == 2 && back.presetName == "Round Trip"
+                    && back.interp == (int) Interp::sinc && back.macros.size() >= 2
+                    && back.macros[0].first == "CUTOFF" && near (back.macros[0].second, 42.0, 1e-3)
+                    && back.fx["preset"].size() == 1;
+        float worstDiff = 1.0f;
+        if (same)
+        {
+            const auto& a = r.zones[0];
+            const auto& b = back.zones[0];
+            same = b.params.root == a.params.root && b.params.loKey == a.params.loKey && b.params.loopMode == a.params.loopMode
+                   && b.params.loopStart == a.params.loopStart && b.params.loopEnd == a.params.loopEnd
+                   && b.params.crossfade == a.params.crossfade && near (b.params.release, a.params.release, 1e-4)
+                   && near (b.params.pan, a.params.pan, 1e-4) && b.params.keepSpeed == a.params.keepSpeed
+                   && b.sample->length() == a.sample->length() && near (b.sample->sampleRate, a.sample->sampleRate, 0.1)
+                   && back.zones[0].sample == back.zones[1].sample;   // shared samples are stored once
+            worstDiff = 0.0f;
+            for (int i = 0; i < a.sample->length(); ++i)
+                worstDiff = jmax (worstDiff, std::abs (a.sample->audio.getSample (0, i) - b.sample->audio.getSample (0, i)));
+        }
+        check (same && worstDiff < 1.0e-5f, "preset save + load keeps zones, macros, FX and audio (24-bit)",
+               saveErr + back.errors.joinIntoString ("; ") + " diff " + String (worstDiff, 7));
+
+        //== Bank: two presets in one .emxb ========================================
+        MemoryBlock p1 = loader::presetToBytes (save, saveErr);
+        save.name = "Second";
+        MemoryBlock p2 = loader::presetToBytes (save, saveErr);
+        const auto bankFile = tmp.getChildFile ("My Bank.emxb");
+        const bool bankOk = loader::saveBank (bankFile, "My Bank", { { "Round Trip", p1 }, { "Second", p2 } }, saveErr);
+        auto info = loader::readBankInfo (bankFile);
+        bool bankGood = bankOk && info.error.isEmpty() && info.name == "My Bank" && info.presetNames.size() == 2
+                        && info.presetNames[1] == "Second";
+        if (bankGood)
+        {
+            auto bytes = loader::readBankEntry (bankFile, info.presetEntries[1]);
+            auto second = loader::loadPresetFromMemory (bytes, "emxb|" + bankFile.getFullPathName() + "|" + info.presetEntries[1], "?");
+            bankGood = second.isPreset && second.presetName == "Second" && second.zones.size() == 2;
+            if (bankGood)
+            {
+                String e2;
+                auto fromSource = loader::loadSource (second.zones[0].sample->source, e2);
+                bankGood = fromSource != nullptr && fromSource->length() == a440->length();
+                if (! bankGood) saveErr = "source " + second.zones[0].sample->source + ": " + e2;
+            }
+        }
+        check (bankGood, "bank save + open + load preset + reload sample from bank", saveErr + info.error);
+
+        auto viaLoad = loader::load (saved);
+        check (viaLoad.isPreset && viaLoad.zones.size() == 2 && loader::isBankFile (bankFile) && ! loader::isPresetFile (bankFile),
+               "file types are recognised (.emxp / .emxb)");
     }
     tmp.deleteRecursively();
 
