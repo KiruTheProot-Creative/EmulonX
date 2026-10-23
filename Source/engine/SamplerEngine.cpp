@@ -48,6 +48,7 @@ void SamplerEngine::noteOn (int note, int velocity) noexcept
         return;
     }
     keysDown.set ((size_t) juce::jlimit (0, 127, note));
+    ++noteOnCount;
     startVoicesFor (note, velocity);
 }
 
@@ -174,6 +175,11 @@ void SamplerEngine::startVoicesFor (int note, int velocity) noexcept
 
 void SamplerEngine::render (float* L, float* R, int numSamples) noexcept
 {
+    render (L, R, numSamples, nullptr, 0);
+}
+
+void SamplerEngine::render (float* L, float* R, int numSamples, const Bus* buses, int numBuses) noexcept
+{
     const ZoneSet* set = zoneSet.get();
     for (auto& v : voices)
     {
@@ -182,7 +188,16 @@ void SamplerEngine::render (float* L, float* R, int numSamples) noexcept
         if (set != nullptr)
             if (auto* z = set->find (v.zoneId))
                 v.params = z->params;          // live edits apply to held notes
-        renderVoice (v, v.params, L, R, numSamples);
+        float* outL = L;
+        float* outR = R;
+        for (int b = 0; b < numBuses; ++b)
+            if (buses[b].zoneId == v.zoneId)
+            {
+                outL = buses[b].left;
+                outR = buses[b].right;
+                break;
+            }
+        renderVoice (v, v.params, outL, outR, numSamples);
         if (! v.active)
             v.sample.reset();
     }

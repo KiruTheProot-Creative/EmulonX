@@ -12,6 +12,7 @@
 #include "ui/Explorer.h"
 #include "ui/SettingsPanel.h"
 #include "ui/EditorPage.h"
+#include "ui/FxPage.h"
 
 namespace emx
 {
@@ -31,6 +32,7 @@ public:
     void showPage (int index) { root->showPage (index); }
     void showSettings (bool show, int page = 0);
     Explorer& getExplorer() noexcept { return root->explorer; }
+    FxPage& getFxPage() noexcept { return root->fxPage; }
 
     //== Drop audio files / presets anywhere on the window =====================
     bool isInterestedInFileDrag (const juce::StringArray&) override;
@@ -62,7 +64,7 @@ private:
         Explorer explorer;
         MainPage mainPage;
         EditorPage editorPage;
-        ComingSoonPanel fxPage;
+        FxPage fxPage;
         std::unique_ptr<SettingsPanel> settingsPanel;
         juce::Rectangle<float> titleArea;
     };

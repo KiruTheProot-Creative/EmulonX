@@ -8,6 +8,32 @@
 
 namespace emx
 {
+/** A slider that reports right-clicks (for the modulation menu) and can hand a left-click
+    to someone else first (macro "learn": the next knob you click gets linked). */
+class ModSlider final : public juce::Slider
+{
+public:
+    std::function<void()> onRightClick;
+    std::function<bool()> interceptClick;   // return true to swallow the click
+
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+private:
+    bool swallowed = false;
+};
+
+/** Modulation shown around a knob: one arc per connection, plus a dot at the current value. */
+struct ModRings
+{
+    struct Ring { float amount; bool envelope; };
+    std::vector<Ring> rings;
+    float base = 0.0f;       // knob position 0..1
+    float current = -1.0f;   // modulated position, -1 = hide the dot
+};
+void drawModRings (juce::Graphics&, juce::Rectangle<float> knob, const ModRings&);
+
 /** Knob (your artwork) + red LED value readout + caption underneath.
     Bound to a DAW parameter, so it is automatable and saved with the project. */
 class EmxKnob final : public juce::Component
@@ -19,7 +45,8 @@ public:
     /** Replaces the fixed caption with a name the user can double-click to rename. */
     void setEditableCaption (std::function<juce::String()> getName, std::function<void (const juce::String&)> setName);
 
-    int getPreferredHeight() const noexcept { return knobSize + 4 + 16 + 3 + 14; }
+    int getPreferredHeight() const noexcept { return ringMargin + knobSize + 4 + 16 + 3 + 14; }
+    void setRingMargin (int m) { ringMargin = m; resized(); }
 
     /** Re-reads an editable caption (e.g. after a preset brought new macro names). */
     void refreshCaption();
@@ -29,12 +56,15 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    juce::Slider slider;
+    ModSlider slider;
+    std::function<ModRings()> modRings;   // optional
+
+    void paintOverChildren (juce::Graphics&) override;
 
 private:
     class NameLabel;
     juce::String caption;
-    int knobSize;
+    int knobSize, ringMargin = 0;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     std::unique_ptr<NameLabel> nameLabel;
     std::function<juce::String()> nameSource;
@@ -57,18 +87,24 @@ public:
     std::function<juce::String (double)> format;
     std::function<void (double)> onChange;
 
-    int getPreferredHeight() const noexcept { return controlSize + 4 + 16 + 3 + 14; }
+    int getPreferredHeight() const noexcept { return ringMargin + controlSize + 4 + 16 + 3 + 14; }
     int getPreferredWidth() const noexcept  { return style == Style::knob ? 62 : 54; }
+    /** Space above the knob for modulation rings. */
+    void setRingMargin (int m) { ringMargin = m; resized(); }
 
     void paint (juce::Graphics&) override;
+    void paintOverChildren (juce::Graphics&) override;
     void resized() override;
+    void setCaption (const juce::String& c) { caption = c.toUpperCase(); repaint(); }
 
-    juce::Slider slider;
+    ModSlider slider;
+    std::function<juce::String()> tooltipExtra;
+    std::function<ModRings()> modRings;   // optional
 
 private:
     juce::String caption;
     Style style;
-    int controlSize;
+    int controlSize, ringMargin = 0;
     juce::Rectangle<float> ledArea, captionArea;
 };
 
@@ -87,7 +123,8 @@ private:
 };
 
 /** Red LED readout whose text comes from a function, refreshed by a timer. */
-class LedDisplay final : public juce::Component
+class LedDisplay final : public juce::Component,
+                         public juce::SettableTooltipClient
 {
 public:
     explicit LedDisplay (std::function<juce::String()> textSource, float textHeight = 9.0f);

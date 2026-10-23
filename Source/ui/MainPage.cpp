@@ -2,6 +2,7 @@
 #include "MainPage.h"
 #include "Theme.h"
 #include "../PluginProcessor.h"
+#include "FxPage.h"
 
 namespace emx
 {
@@ -18,6 +19,14 @@ MainPage::MainPage (EmulonXProcessor& p)
           return db < -59.0f ? String ("-INF DB") : (db > 0 ? "+" : "") + String (db, 1) + " DB";
       }, 10.0f)
 {
+    // Master volume: right-click to modulate it, or click it while a macro is waiting to be linked.
+    const fx::Target volTarget { -1, 0 };
+    masterKnob.slider.onRightClick = [this, volTarget] { modui::showMenu (proc, volTarget, &masterKnob); };
+    masterKnob.slider.interceptClick = [this, volTarget] { return modui::tryLearn (proc, volTarget); };
+    masterKnob.modRings = [this, volTarget] { return modui::rings (proc, volTarget, proc.getMasterVolumeNorm()); };
+    masterKnob.setRingMargin (8);
+    masterKnob.slider.setTooltip ("Master volume - drag, double-click resets, right-click to modulate");
+
     addAndMakeVisible (presetPanel);
     addAndMakeVisible (bankPanel);
     addAndMakeVisible (masterKnob);
@@ -29,6 +38,8 @@ MainPage::MainPage (EmulonXProcessor& p)
         auto* k = macros.add (new EmxKnob (p.apvts, macroParamId (i), {}, 40));
         k->setEditableCaption ([this, i] { return proc.getMacroName (i); },
                                [this, i] (const String& n) { proc.setMacroName (i, n); });
+        k->slider.onRightClick = [this, i, k] { modui::showMacroMenu (proc, i, k); };
+        k->slider.setTooltip ("Automatable in your DAW - right-click to link it to FX knobs");
         addAndMakeVisible (k);
     }
 
@@ -59,6 +70,8 @@ void MainPage::tick()
 {
     meter.push (proc.takePeak (0), proc.takePeak (1));
     peakLed.refresh();
+    if (! proc.getFxSetup().routes.empty())
+        masterKnob.repaint();
 }
 
 void MainPage::resized()
@@ -98,7 +111,7 @@ void MainPage::paint (Graphics& g)
     theme::drawInset (g, mi);
 
     theme::drawPanel (g, macroArea.reduced (1.0f));
-    theme::drawHeading (g, macroArea.reduced (11.0f, 9.0f), "Macro controller", "automatable in your DAW - double-click a name to rename");
+    theme::drawHeading (g, macroArea.reduced (11.0f, 9.0f), "Macro controller", "automatable in your DAW - double-click a name to rename - right-click to link to FX");
     theme::drawInset (g, macroInset);
 
     auto hint = getLocalBounds().toFloat().withTrimmedTop (macroArea.getBottom() + 10.0f).removeFromTop (16.0f);

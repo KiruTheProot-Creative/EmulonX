@@ -39,6 +39,8 @@ EmulonXProcessor::EmulonXProcessor()
       apvts (*this, nullptr, "EmulonX", createParameterLayout())
 {
     masterDb = apvts.getRawParameterValue (masterParamId);
+    for (int i = 0; i < numMacros; ++i)
+        macroValues[i] = apvts.getRawParameterValue (macroParamId (i));
     interp = (Interp) jlimit (0, 2, settings->getDefaultInterp());
     settings->addChangeListener (this);
     applySettings();
@@ -116,6 +118,18 @@ void EmulonXProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
     loadMeasurer.reset (sampleRate, maxBlockSize);
     masterGain.reset (sampleRate, 0.02);
     masterGain.setCurrentAndTargetValue (dbToGain (masterDb->load()));
+
+    // Effects keep their buffers sized for the sample rate they were made at; resize them now
+    // (audio is stopped while the host calls this).
+    std::shared_ptr<const fx::Snapshot> fxNow;
+    {
+        const SpinLock::ScopedLockType sl (snapshotLock);
+        fxNow = pendingFx;
+    }
+    if (fxNow != nullptr)
+        for (auto& proc : fxNow->keepAlive)
+            proc->prepare (sampleRate);
+    fxEngine.reset();
 }
 
 static int applyVelocityCurve (int v, int curve)
@@ -149,6 +163,8 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
                 audioSnapshot = pendingSnapshot;   // the release pool keeps the old one alive
                 engine.setZoneSet (audioSnapshot);
             }
+            if (pendingFx != audioFx)
+                audioFx = pendingFx;
             if (previewChanged)
             {
                 audioPreview = pendingPreview;
@@ -162,73 +178,133 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
     if (buffer.getNumChannels() == 0)
         return;
 
-    float* L = buffer.getWritePointer (0);
-    float* R = buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : nullptr;
-    float monoRight[256];
-
-    auto renderRange = [&] (int from, int to)
-    {
-        if (R != nullptr)
-        {
-            engine.render (L + from, R + from, to - from);
-            return;
-        }
-        for (int s = from; s < to; s += 256)
-        {
-            const int len = jmin (256, to - s);
-            std::fill (monoRight, monoRight + len, 0.0f);
-            engine.render (L + s, monoRight, len);
-            for (int i = 0; i < len; ++i)
-                L[s + i] = (L[s + i] + monoRight[i]) * 0.5f;
-        }
-    };
+    float* outL = buffer.getWritePointer (0);
+    float* outR = buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : nullptr;
 
     // Notes from the on-screen keyboard join the incoming MIDI (and the keyboard shows what is held).
     keyboardState.processNextMidiBuffer (midi, 0, n, true);
 
-    // Sample-accurate MIDI, with the channel filter and velocity curve from the settings.
-    const int channel = setMidiChannel.load(), curve = setVelocityCurve.load();
-    int pos = 0;
-    for (const auto meta : midi)
-    {
-        auto msg = meta.getMessage();
-        if (channel > 0 && msg.getChannel() > 0 && msg.getChannel() != channel)
-            continue;
-        const int t = jlimit (0, n, meta.samplePosition);
-        if (t > pos)
-            renderRange (pos, t);
-        pos = jmax (pos, t);
-        if (msg.isNoteOn())
-            msg = MidiMessage::noteOn (msg.getChannel(), msg.getNoteNumber(), (uint8) applyVelocityCurve (msg.getVelocity(), curve));
-        engine.handleMidi (msg);
-    }
-    if (pos < n)
-        renderRange (pos, n);
+    // What the FX need this block: tempo (from the host if it has one), macros, zone channels.
+    const fx::Snapshot* fxs = audioFx.get();
+    fxEngine.setSnapshot (fxs);
+    double bpm = fxs != nullptr ? fxs->bpm : 120.0;
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition())
+            if (auto hostBpm = pos->getBpm(); hostBpm.hasValue() && *hostBpm > 1.0)
+                bpm = *hostBpm;
+    float macros01[numMacros];
+    for (int i = 0; i < numMacros; ++i)
+        macros01[i] = macroValues[i]->load() / 100.0f;
 
-    // Explorer preview: plays the sample once at its own pitch.
-    if (audioPreview != nullptr)
-    {
-        const auto& s = *audioPreview;
-        const double step = s.sampleRate / currentSampleRate;
-        const float* c0 = s.audio.getReadPointer (0);
-        const float* c1 = s.audio.getNumChannels() > 1 ? s.audio.getReadPointer (1) : c0;
-        for (int i = 0; i < n; ++i)
-        {
-            if (previewPos >= s.length() - 1)
+    SamplerEngine::Bus buses[maxBuses];
+    const fx::Snapshot::ChainRT* busChains[maxBuses];
+    int numBuses = 0;
+    if (fxs != nullptr)
+        for (auto& c : fxs->zoneChains)
+            if (numBuses < maxBuses)
             {
-                audioPreview.reset();   // the release pool still holds it
-                break;
+                busChains[numBuses] = &c;
+                buses[numBuses] = { c.zoneId, busData[numBuses][0], busData[numBuses][1] };
+                ++numBuses;
             }
-            const auto a = interpolate (c0, previewPos, s.length(), Interp::linear, nullptr) * 0.5f;
-            const auto b = interpolate (c1, previewPos, s.length(), Interp::linear, nullptr) * 0.5f;
-            if (R != nullptr) { L[i] += a; R[i] += b; }
-            else              { L[i] += 0.5f * (a + b); }
-            previewPos += step;
+
+    const int channel = setMidiChannel.load(), curve = setVelocityCurve.load();
+    const float masterDbNow = masterDb->load();
+    auto midiIt = midi.begin();
+
+    // Work in short steps so envelopes and modulation move smoothly.
+    for (int start = 0; start < n; start += subBlock)
+    {
+        const int len = jmin (subBlock, n - start);
+        std::fill (mixL, mixL + len, 0.0f);
+        std::fill (mixR, mixR + len, 0.0f);
+        for (int b = 0; b < numBuses; ++b)
+        {
+            std::fill (busData[b][0], busData[b][0] + len, 0.0f);
+            std::fill (busData[b][1], busData[b][1] + len, 0.0f);
+        }
+
+        auto renderPiece = [&] (int from, int to)
+        {
+            if (to <= from)
+                return;
+            SamplerEngine::Bus shifted[maxBuses];
+            for (int b = 0; b < numBuses; ++b)
+                shifted[b] = { buses[b].zoneId, buses[b].left + from, buses[b].right + from };
+            engine.render (mixL + from, mixR + from, to - from, shifted, numBuses);
+        };
+
+        // Sample-accurate MIDI, with the channel filter and velocity curve from the settings.
+        int pos = 0;
+        for (; midiIt != midi.end(); ++midiIt)
+        {
+            const auto meta = *midiIt;
+            const int t = jlimit (0, n, meta.samplePosition) - start;
+            if (t >= len)
+                break;
+            auto msg = meta.getMessage();
+            if (channel > 0 && msg.getChannel() > 0 && msg.getChannel() != channel)
+                continue;
+            if (t > pos)
+                renderPiece (pos, t);
+            pos = jmax (pos, t);
+            if (msg.isNoteOn())
+                msg = MidiMessage::noteOn (msg.getChannel(), msg.getNoteNumber(), (uint8) applyVelocityCurve (msg.getVelocity(), curve));
+            engine.handleMidi (msg);
+        }
+        renderPiece (pos, len);
+
+        // Effects: each zone's own channel first, then the whole-preset chain.
+        fxEngine.beginBlock (len, currentSampleRate, bpm, engine.getNoteOnCount(), engine.isGateOpen(),
+                             macros01, numMacros, engine.getModWheel());
+        for (int b = 0; b < numBuses; ++b)
+        {
+            fxEngine.processChain (*busChains[b], busData[b][0], busData[b][1], len);
+            for (int i = 0; i < len; ++i)
+            {
+                mixL[i] += busData[b][0][i];
+                mixR[i] += busData[b][1][i];
+            }
+        }
+        if (fxs != nullptr && ! fxs->master.modules.empty())
+            fxEngine.processChain (fxs->master, mixL, mixR, len);
+
+        // Explorer preview: plays the sample once at its own pitch (not through the effects).
+        if (audioPreview != nullptr)
+        {
+            const auto& smp = *audioPreview;
+            const double step = smp.sampleRate / currentSampleRate;
+            const float* c0 = smp.audio.getReadPointer (0);
+            const float* c1 = smp.audio.getNumChannels() > 1 ? smp.audio.getReadPointer (1) : c0;
+            for (int i = 0; i < len; ++i)
+            {
+                if (previewPos >= smp.length() - 1)
+                {
+                    audioPreview.reset();   // the release pool still holds it
+                    break;
+                }
+                mixL[i] += interpolate (c0, previewPos, smp.length(), Interp::linear, nullptr) * 0.5f;
+                mixR[i] += interpolate (c1, previewPos, smp.length(), Interp::linear, nullptr) * 0.5f;
+                previewPos += step;
+            }
+        }
+
+        // Master volume (can be modulated, like in the prototype: linear dB scale).
+        const auto& vs = fx::masterVolumeSpec();
+        const float volDb = vs.fromNorm (fxEngine.modulateVolume (vs.toNorm (jmax (-60.0f, masterDbNow))));
+        masterGain.setTargetValue (dbToGain (masterDbNow <= -59.9f ? -60.0f : volDb));
+        for (int i = 0; i < len; ++i)
+        {
+            const float g = masterGain.getNextValue();
+            if (outR != nullptr)
+            {
+                outL[start + i] = mixL[i] * g;
+                outR[start + i] = mixR[i] * g;
+            }
+            else
+                outL[start + i] = (mixL[i] + mixR[i]) * 0.5f * g;
         }
     }
-
-    masterGain.setTargetValue (dbToGain (masterDb->load()));
-    masterGain.applyGain (buffer, n);
 
     // CPU guard: past the limit, fade out one voice per block until the load drops.
     if (const auto limit = setCpuLimit.load(); limit > 0.0f && loadMeasurer.getLoadAsProportion() > limit)
@@ -309,12 +385,12 @@ PresetToSave EmulonXProcessor::makePresetToSave() const
     p.name = presetName;
     p.interp = interp;
     p.macros = currentMacros();
-    p.fx = presetFx;
+    p.fx = fxToJson (false);
     auto ordered = zones;
     std::sort (ordered.begin(), ordered.end(), [] (auto& a, auto& b) { return a.order < b.order; });
     for (auto& z : ordered)
         if (z.sample != nullptr)
-            p.zones.push_back ({ z.sample, z.params });
+            p.zones.push_back ({ z.sample, z.params, z.fx.empty() ? var() : fx::chainToJson (z.fx) });
     return p;
 }
 
@@ -351,6 +427,7 @@ void EmulonXProcessor::publish()
         const SpinLock::ScopedLockType sl (snapshotLock);
         pendingSnapshot = snapshot;
     }
+    pushFxSnapshot();
     {
         const ScopedLock sl (embedLock);
         embedDirty = true;
@@ -372,7 +449,8 @@ void EmulonXProcessor::newPreset()
     zones.clear();
     presetName = "Init";
     presetFile = File();
-    presetFx = var();
+    fxSetup = fx::Setup();
+    ++fxStructure;
     interp = (Interp) jlimit (0, 2, settings->getDefaultInterp());
     applyMacros ({});
     message ("New preset");
@@ -535,6 +613,7 @@ void EmulonXProcessor::duplicateZone (int id)
             pushUndo ("duplicate");
             auto copy = zones[i];
             copy.id = nextZoneId++;
+            copy.fx = copyChainWithNewIds (copy.fx);
             zones.insert (zones.begin() + (std::ptrdiff_t) i + 1, copy);
             for (size_t k = 0; k < zones.size(); ++k)
                 zones[k].order = (int) k;
@@ -553,7 +632,7 @@ void EmulonXProcessor::pushUndo (const String& tag)
     lastUndoTime = now;
     if (sameGesture)
         return;
-    undoStack.push_back ({ zones, interp, selectedZoneId });
+    undoStack.push_back ({ zones, interp, selectedZoneId, fxSetup });
     if (undoStack.size() > 100)
         undoStack.erase (undoStack.begin());
     redoStack.clear();
@@ -570,12 +649,14 @@ void EmulonXProcessor::undo()
 {
     if (undoStack.empty())
         return;
-    redoStack.push_back ({ zones, interp, selectedZoneId });
+    redoStack.push_back ({ zones, interp, selectedZoneId, fxSetup });
     auto st = std::move (undoStack.back());
     undoStack.pop_back();
     zones = std::move (st.zones);
     interp = st.interp;
     selectedZoneId = st.selected;
+    fxSetup = std::move (st.fx);
+    ++fxStructure;
     lastUndoTag = {};
     message ("Undo");
     publish();
@@ -585,12 +666,14 @@ void EmulonXProcessor::redo()
 {
     if (redoStack.empty())
         return;
-    undoStack.push_back ({ zones, interp, selectedZoneId });
+    undoStack.push_back ({ zones, interp, selectedZoneId, fxSetup });
     auto st = std::move (redoStack.back());
     redoStack.pop_back();
     zones = std::move (st.zones);
     interp = st.interp;
     selectedZoneId = st.selected;
+    fxSetup = std::move (st.fx);
+    ++fxStructure;
     lastUndoTag = {};
     message ("Redo");
     publish();
@@ -658,7 +741,6 @@ void EmulonXProcessor::addLoaded (LoadResult&& r, bool autoMapAfter, const File&
         clearUndo();
         zones.clear();
         presetName = r.presetName;
-        presetFx = r.fx;
         presetFile = loader::isPresetFile (fromFile) ? fromFile : File();
         if (r.interp >= 0)
             interp = (Interp) r.interp;
@@ -683,6 +765,13 @@ void EmulonXProcessor::addLoaded (LoadResult&& r, bool autoMapAfter, const File&
         if (! r.isPreset)
             z.params.keepSpeed = settings->getDefaultKeepSpeed();
         zones.push_back (std::move (z));
+    }
+    if (r.isPreset)
+    {
+        std::vector<var> zoneFx;
+        for (auto& lz : r.zones)
+            zoneFx.push_back (lz.fx);
+        applyFxJson (r.fx, zoneFx, true);
     }
 
     if (! r.errors.isEmpty())
@@ -828,6 +917,7 @@ void EmulonXProcessor::writeZonesToState()
     apvts.state.appendChild (zt, nullptr);
     apvts.state.setProperty ("presetName", presetName, nullptr);
     apvts.state.setProperty ("presetFile", presetFile.getFullPathName(), nullptr);
+    apvts.state.setProperty ("fx", JSON::toString (fxToJson (true), true), nullptr);
 }
 
 void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
@@ -847,11 +937,12 @@ void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
     interp = (Interp) jlimit (0, 2, (int) zt.getProperty ("interp", 2));
 
     // Projects saved with "samples inside the project": everything comes from the packed preset.
+    const auto stateFx = JSON::parse (apvts.state.getProperty ("fx", "").toString());
     if (! embedded.isEmpty())
     {
         const auto name = presetName;
         runInBackground<LoadResult> ([embedded, name] { return loader::loadPresetFromMemory (embedded, "project", name); },
-                                     [this] (LoadResult& r)
+                                     [this, stateFx] (LoadResult& r)
                                      {
                                          for (auto& lz : r.zones)
                                          {
@@ -864,7 +955,13 @@ void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
                                              z.params = lz.params;
                                              zones.push_back (std::move (z));
                                          }
-                                         presetFx = r.fx;
+                                         std::vector<var> zoneFx;
+                                         for (auto& lz : r.zones)
+                                             zoneFx.push_back (lz.fx);
+                                         if (stateFx.isObject())
+                                             applyFxJson (stateFx, {}, false);
+                                         else
+                                             applyFxJson (r.fx, zoneFx, false);
                                          {
                                              const ScopedLock sl (embedLock);
                                              embedDirty = true;
@@ -893,6 +990,7 @@ void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
         p.keepSpeed = c["ks"]; p.grainMs = c["grain"];
         zones.push_back (z);
     }
+    applyFxJson (stateFx, {}, false);
 
     using Loaded = std::pair<std::shared_ptr<const SampleData>, String>;
     for (auto& z : zones)

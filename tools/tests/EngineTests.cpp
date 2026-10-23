@@ -4,6 +4,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "engine/SamplerEngine.h"
 #include "engine/SampleLoader.h"
+#include "fx/FxEngine.h"
 
 using namespace emx;
 using namespace juce;
@@ -434,6 +435,180 @@ int main (int argc, char** argv)
                "file types are recognised (.emxp / .emxb)");
     }
     tmp.deleteRecursively();
+
+    //== FX ========================================================================
+    {
+        using namespace emx::fx;
+        constexpr int blk = 64;
+        // Runs a module over a signal (stereo, in 64-sample blocks) and returns the left channel.
+        auto runFx = [&] (Module& m, const std::vector<float>& in, double bpm = 120.0)
+        {
+            std::vector<float> l (in), r (in);
+            float v[maxSlots] {};
+            for (int i = 0; i < maxSlots; ++i)
+                v[i] = m.value (i);
+            for (size_t p = 0; p < l.size(); p += blk)
+            {
+                const int n = (int) std::min<size_t> (blk, l.size() - p);
+                m.processor->process (v, m.settings, l.data() + p, r.data() + p, n, SR, bpm);
+            }
+            return l;
+        };
+        auto tone = [&] (double hz, double secs, float amp = 0.5f)
+        {
+            std::vector<float> x ((size_t) (secs * SR));
+            for (size_t i = 0; i < x.size(); ++i)
+                x[i] = amp * (float) std::sin (MathConstants<double>::twoPi * hz * (double) i / SR);
+            return x;
+        };
+        auto level = [] (const std::vector<float>& x, size_t from, size_t to)
+        {
+            double s2 = 0;
+            for (size_t i = from; i < std::min (to, x.size()); ++i) s2 += (double) x[i] * x[i];
+            return std::sqrt (s2 / (double) std::max<size_t> (1, std::min (to, x.size()) - from));
+        };
+
+        // Every effect in every mode, with default knobs: finite output, no runaway.
+        String bad;
+        int runs = 0;
+        auto noise = tone (220.0, 0.5);
+        for (auto t : addOrder())
+            for (int mode = 0; mode < (int) def (t).modes.size(); ++mode)
+            {
+                auto m = makeModule (t, 1, SR);
+                setMode (m, mode);
+                if (t == Type::delay) m.settings.sync = mode % 2 == 0;
+                auto out = runFx (m, noise);
+                bool ok = true;
+                for (auto x : out)
+                    if (! std::isfinite (x) || std::abs (x) > 8.0f) { ok = false; break; }
+                ++runs;
+                if (! ok) bad << def (t).name << "/" << def (t).modes[(size_t) mode] << " ";
+            }
+        check (bad.isEmpty(), "all " + String (runs) + " effect modes run cleanly", bad);
+
+        // Filter: low pass at 500 Hz keeps 200 Hz and removes 5 kHz; high pass the opposite.
+        {
+            auto lp = makeModule (Type::filter, 1, SR);
+            lp.norm[0] = def (Type::filter).slots[0].spec.toNorm (500.0f);
+            lp.norm[1] = 0.0f;
+            const auto lo = level (runFx (lp, tone (200, 0.5)), 4800, 24000), hi = level (runFx (lp, tone (5000, 0.5)), 4800, 24000);
+            auto hp = lp;
+            hp.processor = createProcessor (Type::filter, SR);
+            hp.settings.mode = 1;
+            hp.settings.slope = 1;
+            const auto hlo = level (runFx (hp, tone (100, 0.5)), 4800, 24000), hhi = level (runFx (hp, tone (5000, 0.5)), 4800, 24000);
+            check (lo > 0.3 && hi < 0.03 && hlo < 0.02 && hhi > 0.3, "filter low pass / high pass",
+                   "LP " + String (lo, 3) + " / " + String (hi, 4) + ", HP 24dB " + String (hlo, 4) + " / " + String (hhi, 3));
+        }
+
+        // Delay synced to 1/4 at 120 BPM: the echo of a click arrives after 0.5 s.
+        {
+            auto d = makeModule (Type::delay, 1, SR);
+            d.settings.sync = true; d.settings.num = 1; d.settings.den = 4;
+            d.norm[6] = 1.0f;   // mix 100%: only the echo
+            d.norm[1] = 0.0f;   // no repeats
+            std::vector<float> click ((size_t) SR, 0.0f);
+            click[100] = 1.0f;
+            auto out = runFx (d, click, 120.0);
+            size_t peakAt = 0;
+            for (size_t i = 1; i < out.size(); ++i)
+                if (std::abs (out[i]) > std::abs (out[peakAt])) peakAt = i;
+            check (near ((double) (peakAt - 100) / SR, 0.5, 0.004), "delay 1/4 at 120 BPM echoes after 0.5 s",
+                   String ((double) (peakAt - 100) / SR, 4) + " s");
+        }
+
+        // Reverb: sound keeps ringing after the input stops.
+        {
+            auto rv = makeModule (Type::reverb, 1, SR);
+            auto in = tone (440, 0.3);
+            in.resize ((size_t) (SR * 1.5), 0.0f);
+            auto out = runFx (rv, in);
+            const auto tail = level (out, (size_t) (SR * 0.5), (size_t) (SR * 0.9));
+            check (tail > 0.003, "reverb tail rings after the note", "tail rms " + String (tail, 4));
+        }
+
+        // Compressor: a loud tone comes out quieter and reports gain reduction.
+        {
+            auto c = makeModule (Type::comp, 1, SR);
+            const auto in = tone (440, 0.5, 0.9f);
+            const auto out = runFx (c, in);
+            check (level (out, 12000, 24000) < level (in, 12000, 24000) * 0.7 && c.processor->gainReductionDb < -3.0f,
+                   "compressor reduces a loud signal", "GR " + String (c.processor->gainReductionDb, 1) + " dB");
+        }
+
+        // Modulation: a macro and an envelope move a filter's cutoff.
+        {
+            Setup setup;
+            auto m = makeModule (Type::filter, 7, SR);
+            m.norm[0] = 0.2f;
+            setup.master.push_back (m);
+            setup.envelopes = { makeEnvelope (false, "Saw Up") };
+            setup.envelopes[0].sync = false;
+            setup.envelopes[0].hz = 1.0f;
+            setup.routes.push_back ({ { SrcKind::macro, 0 }, { 7, 0 }, 0.5f });
+            setup.routes.push_back ({ { SrcKind::env, 0 }, { 7, 0 }, 0.25f });
+            auto snap = Snapshot::build (setup, {});
+            Engine eng;
+            eng.setSnapshot (snap.get());
+            float macros[20] {};
+            macros[0] = 1.0f;
+            float l[blk] {}, r[blk] {};
+            eng.beginBlock (blk, SR, 120, 1, true, macros, 20, 0.0f);   // note-on starts the envelope
+            eng.processChain (snap->master, l, r, blk);
+            const float atStart = eng.modOut[0].value[0].load();
+            for (int b = 0; b < (int) (SR * 0.5) / blk; ++b)
+            {
+                eng.beginBlock (blk, SR, 120, 1, true, macros, 20, 0.0f);
+                eng.processChain (snap->master, l, r, blk);
+            }
+            const float half = eng.modOut[0].value[0].load();
+            check (near (atStart, 0.7, 0.01) && near (half, 0.2f + 0.5f + 0.25f * 0.5f, 0.02),
+                   "macro and envelope modulate a knob", String (atStart, 3) + " then " + String (half, 3));
+        }
+
+        // JSON round trip (prototype format).
+        {
+            std::map<String, int> idMap;
+            int nextId = 50;
+            Chain chain { makeModule (Type::delay, 3, SR), makeModule (Type::dist, 4, SR) };
+            chain[0].settings.sync = false; chain[0].norm[0] = 0.33f;
+            setMode (chain[1], 5);
+            chain[1].norm[1] = 0.8f;
+            auto back = chainFromJson (JSON::parse (JSON::toString (chainToJson (chain))), idMap, nextId, SR);
+            auto env = makeEnvelope (true, "Pluck");
+            env.a = 0.25f; env.cr = -0.5f;
+            const auto env2 = envelopeFromJson (JSON::parse (JSON::toString (envelopeToJson (env))));
+            const bool ok = back.size() == 2 && back[0].type == Type::delay && ! back[0].settings.sync
+                            && near (back[0].norm[0], 0.33, 1e-4) && back[1].settings.mode == 5 && near (back[1].norm[1], 0.8, 1e-4)
+                            && idMap["f3"] == 50 && idMap["f4"] == 51 && env2.ahdsr && near (env2.a, 0.25, 1e-5) && near (env2.cr, -0.5, 1e-5);
+            check (ok, "FX chains and envelopes save and load (prototype JSON)");
+        }
+
+        // CPU: a chain with all ten effects must be cheap.
+        {
+            Chain all;
+            for (auto t : addOrder())
+                all.push_back (makeModule (t, (int) t + 1, SR));
+            Setup setup;
+            setup.master = all;
+            auto snap = Snapshot::build (setup, {});
+            Engine eng;
+            eng.setSnapshot (snap.get());
+            float macros[20] {};
+            std::vector<float> l (blk), r (blk);
+            const int blocks = (int) (SR * 2.0) / blk;
+            const auto t0 = Time::getMillisecondCounterHiRes();
+            for (int b = 0; b < blocks; ++b)
+            {
+                for (int i = 0; i < blk; ++i) l[(size_t) i] = r[(size_t) i] = 0.3f * (float) std::sin (0.05 * (b * blk + i));
+                eng.beginBlock (blk, SR, 120, 0, false, macros, 20, 0.0f);
+                eng.processChain (snap->master, l.data(), r.data(), blk);
+            }
+            const auto load = (Time::getMillisecondCounterHiRes() - t0) / 2000.0;
+            check (load < 0.25, "all 10 effects in one chain run in real time", String (load * 100.0, 1) + "% of one CPU core");
+        }
+    }
 
     //== CPU: 32 keep-speed voices with sinc HQ must run comfortably in real time ==
     {

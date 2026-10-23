@@ -42,6 +42,14 @@ public:
     /** Adds the voices into L/R (they must be cleared by the caller). */
     void render (float* left, float* right, int numSamples) noexcept;
 
+    /** A zone with its own FX channel: its voices go to this buffer instead of the main mix. */
+    struct Bus { int zoneId; float* left; float* right; };
+    void render (float* left, float* right, int numSamples, const Bus* buses, int numBuses) noexcept;
+
+    /** For the FX envelopes: goes up with every note-on; gate = any key (or the pedal) held. */
+    juce::uint32 getNoteOnCount() const noexcept { return noteOnCount; }
+    bool isGateOpen() const noexcept { return keysDown.any() || sustainDown; }
+
     int getActiveVoiceCount() const noexcept;
 
     /** Fades out one voice (released notes first). Used by the voice limit and the CPU guard. */
@@ -80,6 +88,7 @@ private:
     bool stealQuietest = false;
     float globalTuneCents = 0.0f, bendRange = 2.0f, bend = 0.0f, modWheel = 0.0f;
     bool sustainDown = false;
+    juce::uint32 noteOnCount = 0;
     std::bitset<128> keysDown;
 };
 } // namespace emx

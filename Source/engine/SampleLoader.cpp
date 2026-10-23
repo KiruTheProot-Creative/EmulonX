@@ -82,7 +82,7 @@ LoadResult loadAudioFile (const File& file)
     LoadResult r;
     String err;
     if (auto s = decode (file.createInputStream(), file.getFileNameWithoutExtension(), "file|" + file.getFullPathName(), err))
-        r.zones.push_back ({ s, ZoneParams::defaultsFor (*s) });
+        r.zones.push_back ({ s, ZoneParams::defaultsFor (*s), {} });
     else
         r.errors.add (err);
     return r;
@@ -232,7 +232,7 @@ static LoadResult readPreset (ZipFile& zip, const String& sourcePrefix, const St
         {
             const auto it = samples.find (z.getProperty ("sample", "").toString());
             if (it != samples.end())
-                r.zones.push_back ({ it->second, paramsFromJson (z, *it->second, v1) });
+                r.zones.push_back ({ it->second, paramsFromJson (z, *it->second, v1), z.getProperty ("fx", var()) });
         }
     return r;
 }
@@ -395,7 +395,11 @@ MemoryBlock presetToBytes (const PresetToSave& p, String& error)
             samples.add (var (s));
             it = files.emplace (z.sample.get(), file).first;
         }
-        zones.add (paramsToJson (it->second, z.params));
+        auto zj = paramsToJson (it->second, z.params);
+        if (auto* chain = z.fx.getArray(); chain != nullptr && ! chain->isEmpty())
+            if (auto* obj = zj.getDynamicObject())
+                obj->setProperty ("fx", z.fx);
+        zones.add (zj);
     }
 
     Array<var> macros;

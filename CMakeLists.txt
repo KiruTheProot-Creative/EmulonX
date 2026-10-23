@@ -2,7 +2,7 @@
 # Licensed under the GNU AGPLv3 (see LICENSE).
 
 cmake_minimum_required(VERSION 3.22)
-project(EmulonX VERSION 0.4.0 LANGUAGES C CXX)
+project(EmulonX VERSION 0.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -63,6 +63,11 @@ set(EMX_SOURCES
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/Settings.cpp
+    Source/ProcessorFx.cpp
+    Source/fx/FxDefs.cpp
+    Source/fx/FxDsp.cpp
+    Source/fx/FxModel.cpp
+    Source/fx/FxEngine.cpp
     Source/engine/Zone.cpp
     Source/engine/Interpolator.cpp
     Source/engine/SamplerEngine.cpp
@@ -72,6 +77,7 @@ set(EMX_SOURCES
     Source/ui/Explorer.cpp
     Source/ui/SettingsPanel.cpp
     Source/ui/EditorPage.cpp
+    Source/ui/FxPage.cpp
     Source/ui/Theme.cpp
     Source/ui/EmxLookAndFeel.cpp
     Source/ui/Widgets.cpp
@@ -119,7 +125,11 @@ if(EMX_BUILD_TESTS)
         Source/engine/Zone.cpp
         Source/engine/Interpolator.cpp
         Source/engine/SamplerEngine.cpp
-        Source/engine/SampleLoader.cpp)
+        Source/engine/SampleLoader.cpp
+        Source/fx/FxDefs.cpp
+        Source/fx/FxDsp.cpp
+        Source/fx/FxModel.cpp
+        Source/fx/FxEngine.cpp)
     target_include_directories(EmulonXTests PRIVATE Source)
     target_compile_definitions(EmulonXTests PRIVATE EMX_VERSION_STRING="${PROJECT_VERSION}" JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_STANDALONE_APPLICATION=1)
     target_link_libraries(EmulonXTests PRIVATE

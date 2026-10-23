@@ -12,6 +12,7 @@ struct LoadedZone
 {
     std::shared_ptr<const SampleData> sample;
     ZoneParams params;
+    juce::var fx;   // this zone's own FX chain (prototype JSON), may be void
 };
 
 using MacroList = std::vector<std::pair<juce::String, float>>;   // name, value 0..100

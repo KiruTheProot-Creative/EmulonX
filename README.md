@@ -4,9 +4,31 @@ A free, open-source sampler plugin inspired by the E-mu Emulator X.
 Load whole sound banks, edit and loop samples, stack effects, and modulate
 everything with drawable envelopes and macros.
 
-> Status: **milestone 4** — the Editor tab: waveform, loop points, zone settings and keymap.
+> Status: **milestone 5** — FX chains, envelopes and modulation.
 
-## Using it (milestone 4)
+## Using it (milestone 5)
+
+- **FX tab:** pick a **CHANNEL**: *Whole preset* (runs on everything) or a single
+  zone (runs only on that zone, before the whole-preset chain). **+ ADD EFFECT**
+  adds Filter, Morph Filter, EQ, Distortion (10 types), Compressor (with
+  Limiter and OTT), Chorus / Flanger / Ensemble, Phaser, Delay (Stereo,
+  Ping-Pong, Tape, Diffuse; synced to your DAW's tempo) and Reverb (Room, Hall,
+  Plate, Ambience), plus Utility. Effects run top to bottom; use the arrows to
+  reorder and **ON** to bypass.
+- **Modulation:** right-click any FX knob (or the master volume) and pick an
+  envelope, a macro or the mod wheel. Rings around the knob show how far each
+  source moves it; the list under the envelope editor sets the amounts
+  (negative = upside down). Right-click a macro on the Main tab to see its
+  connections, or choose **Link** and then click the knob it should move.
+- **Envelopes:** draw your own shape (drag points, drag the small circles to
+  bend curves, double-click to add or remove points) or switch to **AHDSR**.
+  Shapes loop or play once, restart with each note or run freely, and follow the
+  tempo (**SYNC**) or a rate in Hz. Up to 16 envelopes (**+**).
+- Effects, envelopes and connections are saved in presets, banks and your DAW
+  project, in the same format as the browser prototype.
+
+### Earlier milestones
+
 
 - **Editor tab:** double-click a zone on the Main tab (or use **<** / **>**) to edit it.
   - **Waveform:** mouse wheel zooms, dragging scrolls, double-click shows everything.
@@ -69,7 +91,7 @@ everything with drawable envelopes and macros.
 | 2 | Sampler engine: zones, sinc interpolation, crossfaded loops, keep-speed pitching, ADSR |
 | 3 | Explorer, `.emxp` / `.emxb` files, settings window with bank folders |
 | 4 | Editor tab: waveform, loop points, keymap |
-| 5 | FX chains (preset + per zone), envelopes, macro and mod-wheel routing |
+| 5 | FX chains (preset + per zone), envelopes, macro and mod-wheel modulation |
 | 6 | Polish, factory banks, installers |
 
 ## Building it yourself

@@ -166,6 +166,65 @@ int main (int argc, char** argv)
         proc.undo();   // back to the original loop
     }
 
+    // FX: chains on the preset and on a zone, modulation, audio through it, preset + project round trips.
+    {
+        using namespace emx;
+        proc.addFx (0, fx::Type::filter);
+        proc.addFx (0, fx::Type::delay);
+        proc.addFx (0, fx::Type::reverb);
+        const int zoneId = proc.getZones()[0].id;
+        proc.addFx (zoneId, fx::Type::dist);
+        const int filterId = proc.getFxSetup().master[0].id, reverbId = proc.getFxSetup().master[2].id;
+        proc.setFxParam (filterId, 1, 0.55f);
+        proc.toggleRoute ({ fx::SrcKind::env, 0 }, { filterId, 0 });
+        proc.toggleRoute ({ fx::SrcKind::macro, 0 }, { reverbId, 6 });
+        proc.toggleRoute ({ fx::SrcKind::macro, 1 }, { -1, 0 });
+        proc.setRouteAmount (2, -0.3f);
+        proc.setMacroName (0, "SPACE");
+        proc.setMacroName (1, "DUCK");
+
+        proc.prepareToPlay (48000.0, 512);
+        AudioBuffer<float> b (2, 512);
+        double sum = 0;
+        bool finite = true;
+        for (int i = 0; i < 80; ++i)
+        {
+            MidiBuffer m;
+            if (i == 0) m.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 0);
+            if (i == 40) m.addEvent (MidiMessage::noteOff (1, 60), 0);
+            proc.processBlock (b, m);
+            for (int c = 0; c < 2; ++c)
+                for (int k = 0; k < 512; ++k)
+                    finite = finite && std::isfinite (b.getSample (c, k));
+            sum += b.getRMSLevel (0, 0, 512);
+        }
+        std::printf ("fx audio: rms %.4f, finite %s, modulated cutoff %.3f\n", sum / 80.0, finite ? "yes" : "NO",
+                     proc.getFxEngine().modOut[1].value[0].load());
+
+        const auto fxPreset = demoDir.getChildFile ("Presets").getChildFile ("FX Test.emxp");
+        proc.setPresetName ("FX Test");
+        proc.savePresetAs (fxPreset);
+        waitIdle();
+        proc.newPreset();
+        proc.loadFiles ({ fxPreset });
+        waitIdle();
+        int zoneFx = 0;
+        for (auto& z : proc.getZones()) zoneFx += (int) z.fx.size();
+        std::printf ("fx preset round trip: %d preset effects, %d zone effects, %d routes, %d envelopes\n",
+                     (int) proc.getFxSetup().master.size(), zoneFx, (int) proc.getFxSetup().routes.size(),
+                     (int) proc.getFxSetup().envelopes.size());
+
+        MemoryBlock state;
+        proc.getStateInformation (state);
+        proc.newPreset();
+        proc.setStateInformation (state.getData(), (int) state.getSize());
+        waitIdle();
+        zoneFx = 0;
+        for (auto& z : proc.getZones()) zoneFx += (int) z.fx.size();
+        std::printf ("fx project round trip: %d preset effects, %d zone effects, %d routes\n",
+                     (int) proc.getFxSetup().master.size(), zoneFx, (int) proc.getFxSetup().routes.size());
+    }
+
     // Show the demo folders in the explorer.
     auto& settings = proc.getSettings();
     settings.setFolders (emx::Settings::Folder::samples, { File::getSpecialLocation (File::userHomeDirectory).getFullPathName() });
@@ -206,6 +265,13 @@ int main (int argc, char** argv)
         editor.showPage (p);
         save (String ("preview-") + pages[p] + "-100");
     }
+    editor.showPage (2);
+    save ("preview-fx-master");
+    editor.getFxPage().setChannel (proc.getZones()[0].id);
+    editor.getFxPage().selectEnvelope (1);
+    save ("preview-fx-zone");
+    editor.getFxPage().setChannel (0);
+    editor.getFxPage().selectEnvelope (0);
     proc.keyboardState.allNotesOff (0);
     editor.showPage (0);
     editor.getExplorer().showTab (0);

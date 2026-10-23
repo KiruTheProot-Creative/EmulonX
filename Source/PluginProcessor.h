@@ -7,6 +7,7 @@
 #include "engine/SamplerEngine.h"
 #include "engine/SampleLoader.h"
 #include "engine/ReleasePool.h"
+#include "fx/FxEngine.h"
 #include "Settings.h"
 
 namespace emx
@@ -23,6 +24,7 @@ struct ModelZone
     juce::String source, name, problem;
     ZoneParams params;
     int order = 0;
+    fx::Chain fx;   // this zone's own FX channel (runs before the whole-preset chain)
 };
 
 struct BankEntry
@@ -111,6 +113,37 @@ public:
     void undo();
     void redo();
 
+    //== FX, envelopes and modulation (FX tab) ===================================
+    /** chainId 0 = the whole-preset chain, otherwise a zone id. */
+    const fx::Chain* getFxChain (int chainId) const;
+    const fx::Setup& getFxSetup() const noexcept { return fxSetup; }
+    /** Goes up when effects are added, removed, moved or change mode (the FX tab rebuilds then). */
+    int getFxStructureVersion() const noexcept { return fxStructure; }
+    const fx::Module* findFxModule (int moduleId, int* chainId = nullptr) const;
+    void addFx (int chainId, fx::Type);
+    void removeFx (int moduleId);
+    void moveFx (int moduleId, int delta);
+    void setFxOn (int moduleId, bool on);
+    void setFxMode (int moduleId, int mode);
+    void setFxSettings (int moduleId, const fx::Settings&);
+    void setFxParam (int moduleId, int slot, float norm);
+    void setFxBpm (float bpm);
+    void addEnvelope();
+    void removeEnvelope (int index);
+    void setEnvelope (int index, const fx::Envelope&);
+    bool hasRoute (fx::Source, fx::Target) const;
+    void toggleRoute (fx::Source, fx::Target);
+    void setRouteAmount (int routeIndex, float amount);
+    void removeRoute (int routeIndex);
+    juce::String describeSource (fx::Source) const;
+    juce::String describeTarget (fx::Target) const;
+    /** The master volume as a 0..1 position on a linear dB scale (what modulation moves). */
+    float getMasterVolumeNorm() const;
+    fx::Engine& getFxEngine() noexcept { return fxEngine; }
+    /** Macro "learn": while set, the next FX knob clicked gets linked to this macro (-1 = off). */
+    int getLearnMacro() const noexcept { return learnMacro; }
+    void setLearnMacro (int index);
+
     /** Where the newest voice of each zone is playing (for the waveform). */
     int getPlayheads (SamplerEngine::Playhead* out, int maxCount) const noexcept;
 
@@ -158,7 +191,15 @@ private:
     void message (const juce::String&);
     void mapByRoots();
 
-    struct UndoState { std::vector<ModelZone> zones; Interp interp; int selected; };
+    // FX helpers
+    fx::Module* findFx (int moduleId, int* chainId = nullptr);
+    void publishFx (bool structureChanged);
+    void pushFxSnapshot();
+    juce::var fxToJson (bool withZoneChains) const;
+    void applyFxJson (const juce::var& fxJson, const std::vector<juce::var>& zoneChainsJson, bool applyVolume);
+    fx::Chain copyChainWithNewIds (const fx::Chain&);
+
+    struct UndoState { std::vector<ModelZone> zones; Interp interp; int selected; fx::Setup fx; };
     /** Remembers the zones before a change. Repeated changes with the same tag within a
         moment (one knob drag) become one undo step. */
     void pushUndo (const juce::String& tag);
@@ -179,7 +220,8 @@ private:
     int nextZoneId = 1, nextOrder = 0, filesWritten = 0, selectedZoneId = 0;
     juce::String presetName { "Init" }, lastMessage, bankName { "My Bank" };
     juce::File presetFile;
-    juce::var presetFx;
+    fx::Setup fxSetup;
+    int nextFxId = 1, fxStructure = 0, learnMacro = -1;
     std::vector<BankEntry> bank;
 
     // Embedded copy of the preset for the DAW project (built in the background)
@@ -191,6 +233,7 @@ private:
     juce::SpinLock snapshotLock;
     std::shared_ptr<const ZoneSet> pendingSnapshot, audioSnapshot;
     std::shared_ptr<const SampleData> pendingPreview, audioPreview;
+    std::shared_ptr<const fx::Snapshot> pendingFx, audioFx;
     bool previewChanged = false;
     double previewPos = 0.0;
     ReleasePool releasePool;
@@ -207,10 +250,15 @@ private:
 
     // Audio
     SamplerEngine engine;
+    fx::Engine fxEngine;
+    static constexpr int subBlock = 64, maxBuses = 32;
+    float busData[maxBuses][2][subBlock] {};
+    float mixL[subBlock] {}, mixR[subBlock] {};
     double currentSampleRate = 44100.0;
     juce::AudioProcessLoadMeasurer loadMeasurer;
     juce::SmoothedValue<float> masterGain;
     std::atomic<float>* masterDb = nullptr;
+    std::atomic<float>* macroValues[numMacros] {};
     std::atomic<float> peak[2] { 0.0f, 0.0f };
     std::atomic<int> activeVoices { 0 };
     static constexpr int maxPlayheads = 16;

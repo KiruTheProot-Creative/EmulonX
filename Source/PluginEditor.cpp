@@ -14,7 +14,7 @@ EmulonXEditor::Root::Root (EmulonXEditor& e)
       explorer (e.proc),
       mainPage (e.proc),
       editorPage (e.proc),
-      fxPage ("FX", "chains - envelopes - modulation", "EFFECTS AND MODULATION ARRIVE IN MILESTONE 5")
+      fxPage (e.proc)
 {
     int index = 0;
     for (auto* b : { &tabMain, &tabEditor, &tabFx })
@@ -205,6 +205,11 @@ void EmulonXEditor::paintOverChildren (Graphics& g)
 
 bool EmulonXEditor::keyPressed (const KeyPress& k)
 {
+    if (k == KeyPress::escapeKey && proc.getLearnMacro() >= 0)
+    {
+        proc.setLearnMacro (-1);
+        return true;
+    }
     const auto m = k.getModifiers();
     if (m.isCommandDown() && (k.getKeyCode() == 'Z' || k.getKeyCode() == 'z'))
     {
@@ -227,6 +232,8 @@ void EmulonXEditor::timerCallback()
         root->mainPage.tick();
     if (root->editorPage.isVisible())
         root->editorPage.tick();
+    if (root->fxPage.isVisible())
+        root->fxPage.tick();
 }
 
 } // namespace emx
