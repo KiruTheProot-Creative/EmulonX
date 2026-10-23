@@ -70,16 +70,30 @@ double WaveformView::frameAt (const ModelZone& z, float x)
     return v.getStart() + (double) x / jmax (1, getWidth()) * v.getLength();
 }
 
-int WaveformView::hitMarker (const ModelZone& z, float x)
+int WaveformView::hitMarker (const ModelZone& z, Point<float> pos)
 {
-    if (z.params.loopMode == LoopMode::off || z.sample == nullptr)
+    if (z.sample == nullptr)
         return -1;
     const auto v = view (z);
     const double spp = v.getLength() / jmax (1, getWidth());
     const auto px = [&] (int f) { return (float) ((f - v.getStart()) / spp); };
-    if (std::abs (px (z.params.loopStart) - x) < 8.0f) return 0;
-    if (std::abs (px (z.params.loopEnd) - x) < 8.0f) return 1;
-    return -1;
+    const auto& p = z.params;
+    const bool loopOn = p.loopMode != LoopMode::off;
+    const bool upper = pos.y < (float) getHeight() * 0.5f;   // loop flags sit at the top, sample flags at the bottom
+    int best = -1;
+    float bestScore = 1.0e9f;
+    const int frames[4] { p.loopStart, p.loopEnd, p.sampleStart, p.sampleEnd > 0 ? p.sampleEnd : z.sample->length() };
+    for (int i = 0; i < 4; ++i)
+    {
+        if (i < 2 && ! loopOn)
+            continue;
+        const float d = std::abs (px (frames[i]) - pos.x);
+        if (d >= 8.0f)
+            continue;
+        const float score = d + ((i < 2) == upper ? 0.0f : 6.0f);
+        if (score < bestScore) { bestScore = score; best = i; }
+    }
+    return best;
 }
 
 int WaveformView::nearestZeroCrossing (const AudioBuffer<float>& b, int f)
@@ -218,6 +232,29 @@ void WaveformView::paint (Graphics& g)
         }
     }
 
+    // Sample start / end: darken what is not played, amber markers with flags at the bottom
+    {
+        const int se = p.sampleEnd > 0 ? p.sampleEnd : n;
+        g.setColour (Colours::black.withAlpha (0.5f));
+        if (p.sampleStart > 0)
+            g.fillRect (Rectangle<float>::leftTopRightBottom (jmax (0.0f, X (0)), 0.0f, X (p.sampleStart), H));
+        if (se < n)
+            g.fillRect (Rectangle<float>::leftTopRightBottom (X (se), 0.0f, jmin (W, X (n)), H));
+        const Colour amber (0xffffb030);
+        for (int which = 0; which < 2; ++which)
+        {
+            const float px = std::round (X (which == 0 ? p.sampleStart : se));
+            if (px < -20.0f || px > W + 20.0f)
+                continue;
+            g.setColour (amber);
+            g.fillRect (px - 1.0f, 0.0f, 2.0f, H);
+            Path flag;
+            if (which == 0) flag.addTriangle (px, H - 15.0f, px + 13.0f, H - 7.5f, px, H);
+            else            flag.addTriangle (px, H - 15.0f, px - 13.0f, H - 7.5f, px, H);
+            g.fillPath (flag);
+        }
+    }
+
     // Loop markers
     if (p.loopMode != LoopMode::off)
     {
@@ -251,7 +288,7 @@ void WaveformView::paint (Graphics& g)
 void WaveformView::mouseMove (const MouseEvent& e)
 {
     const auto* z = zone();
-    setMouseCursor (z != nullptr && hitMarker (*z, e.position.x) >= 0 ? MouseCursor::LeftRightResizeCursor
+    setMouseCursor (z != nullptr && hitMarker (*z, e.position) >= 0 ? MouseCursor::LeftRightResizeCursor
                                                                       : MouseCursor::DraggingHandCursor);
 }
 
@@ -260,7 +297,7 @@ void WaveformView::mouseDown (const MouseEvent& e)
     dragMode = -1;
     if (const auto* z = zone(); z != nullptr && z->sample != nullptr)
     {
-        const int hit = hitMarker (*z, e.position.x);
+        const int hit = hitMarker (*z, e.position);
         dragMode = hit >= 0 ? hit : 2;
         dragView = view (*z);
     }
@@ -592,6 +629,67 @@ void KeymapView::mouseUp (const MouseEvent&)
 }
 
 //==================================================================================
+// Horizontal slider for a position in the sample (in frames)
+//==================================================================================
+class EditorPage::FrameSlider final : public Component, public SettableTooltipClient
+{
+public:
+    explicit FrameSlider (String labelText) : label (std::move (labelText)) {}
+
+    std::function<void (int)> onChange;
+    void setRange (int maximum) { maxValue = jmax (1, maximum); repaint(); }
+    void setValue (int v) { if (v != value) { value = v; repaint(); } }
+
+    void paint (Graphics& g) override
+    {
+        auto r = getLocalBounds().toFloat();
+        g.setColour (isEnabled() ? theme::textMuted : theme::textMuted.withAlpha (0.4f));
+        g.setFont (theme::font (7.5f, 700, 0.08f));
+        g.drawText (label, r.removeFromLeft (labelW), Justification::centredLeft, true);
+        track = r;
+        theme::drawLed (g, r, {});
+        const float pos = (float) jlimit (0.0, 1.0, (double) value / maxValue);
+        auto fill = r.reduced (2.0f, 3.0f);
+        const float x = fill.getX() + fill.getWidth() * pos;
+        const float alpha = isEnabled() ? 1.0f : 0.35f;
+        g.setGradientFill (ColourGradient::horizontal (Colour (0xff5a0808).withAlpha (alpha), fill.getX(),
+                                                       Colour (0xffd02a2a).withAlpha (alpha), jmax (fill.getX() + 1.0f, x)));
+        g.fillRoundedRectangle (fill.withRight (x), 2.5f);
+        g.setColour (Colours::white.withAlpha (alpha));
+        g.fillRoundedRectangle (x - 1.5f, r.getY() + 1.0f, 3.0f, r.getHeight() - 2.0f, 1.5f);
+        g.setColour (Colour (0xffffd0d0).withAlpha (alpha));
+        g.setFont (theme::font (7.5f, 500, 0.04f));
+        g.drawText (String (value), r.reduced (6.0f, 0.0f), Justification::centredRight, false);
+    }
+
+    void mouseDown (const MouseEvent& e) override { dragStart = value; set (e, true); }
+    void mouseDrag (const MouseEvent& e) override { set (e, false); }
+
+private:
+    void set (const MouseEvent& e, bool first)
+    {
+        if (! isEnabled() || track.getWidth() <= 4.0f)
+            return;
+        int v;
+        if (e.mods.isShiftDown())   // fine: drag moves 1/20 as far
+        {
+            if (first) return;
+            v = dragStart + roundToInt ((double) e.getDistanceFromDragStartX() / track.getWidth() * maxValue / 20.0);
+        }
+        else
+            v = roundToInt ((double) (e.position.x - track.getX()) / track.getWidth() * maxValue);
+        v = jlimit (0, maxValue, v);
+        if (v != value && onChange)
+            onChange (v);
+    }
+
+    String label;
+    int value = 0, maxValue = 1, dragStart = 0;
+    static constexpr float labelW = 52.0f;
+    Rectangle<float> track;
+};
+
+//==================================================================================
 // EditorPage
 //==================================================================================
 EditorPage::EditorPage (EmulonXProcessor& p)
@@ -682,6 +780,22 @@ EditorPage::EditorPage (EmulonXProcessor& p)
     zoomStartButton.onClick = [this] { if (auto* z = proc.getSelectedZone()) wave.zoomAround (z->params.loopStart); };
     zoomEndButton.setTooltip ("Zoom in on the loop end");
     zoomEndButton.onClick = [this] { if (auto* z = proc.getSelectedZone()) wave.zoomAround (z->params.loopEnd); };
+
+    const char* sliderNames[] { "SMP START", "SMP END", "LOOP START", "LOOP END", "X-FADE" };
+    const char* sliderTips[] { "Where the sample starts playing (amber marker) - shift-drag for fine moves",
+                               "Where the sample stops when it isn't looping (amber marker)",
+                               "Loop start (white S flag)", "Loop end (white E flag)", "Crossfade length at the loop seam" };
+    for (int i = 0; i < 5; ++i)
+    {
+        sliders[i] = std::make_unique<FrameSlider> (sliderNames[i]);
+        sliders[i]->setTooltip (sliderTips[i]);
+        addAndMakeVisible (*sliders[i]);
+    }
+    sliders[0]->onChange = [this] (int v) { setLoopPoint (2, v, true); };
+    sliders[1]->onChange = [this] (int v) { setLoopPoint (3, v, true); };
+    sliders[2]->onChange = [this] (int v) { setLoopPoint (0, v, true); };
+    sliders[3]->onChange = [this] (int v) { setLoopPoint (1, v, true); };
+    sliders[4]->onChange = [this] (int v) { edit ([v] (ZoneParams& q) { q.crossfade = jlimit (0, q.loopEnd - q.loopStart, v); }); };
 
     //== Zone settings =============================================================
     auto noteFmt = [] (double v) { return noteName (roundToInt (v)); };
@@ -799,9 +913,13 @@ void EditorPage::setLoopPoint (int which, int frame, bool exact)
     if (wave.snapToZero && ! exact)
         frame = WaveformView::nearestZeroCrossing (z->sample->audio, frame);
     auto q = z->params;
-    if (which == 0) q.loopStart = jlimit (0, jmax (0, q.loopEnd - 16), frame);
-    else            q.loopEnd = jlimit (jmin (n, q.loopStart + 16), n, frame);
-    if (q.loopStart != z->params.loopStart || q.loopEnd != z->params.loopEnd)
+    const int se = q.sampleEnd > 0 ? q.sampleEnd : n;
+    if (which == 0)      q.loopStart = jlimit (0, jmax (0, q.loopEnd - 16), frame);
+    else if (which == 1) q.loopEnd = jlimit (jmin (n, q.loopStart + 16), n, frame);
+    else if (which == 2) q.sampleStart = jlimit (0, jmax (0, se - 16), frame);
+    else                 q.sampleEnd = jlimit (jmin (n, q.sampleStart + 16), n, frame);
+    if (q.loopStart != z->params.loopStart || q.loopEnd != z->params.loopEnd
+        || q.sampleStart != z->params.sampleStart || q.sampleEnd != z->params.sampleEnd)
         proc.setZoneParams (z->id, q);
 }
 
@@ -831,6 +949,26 @@ void EditorPage::refresh()
         c->setEnabled (looping);
     zoomAllButton.setEnabled (hasAudio);
     snapButton.setToggleState (wave.snapToZero, dontSendNotification);
+
+    if (hasAudio)
+    {
+        const auto& q = z->params;
+        const int n = z->sample->length();
+        for (int i = 0; i < 4; ++i)
+            sliders[i]->setRange (n);
+        sliders[4]->setRange (jmax (1, q.loopEnd - q.loopStart));
+        sliders[0]->setValue (q.sampleStart);
+        sliders[1]->setValue (q.sampleEnd > 0 ? q.sampleEnd : n);
+        sliders[2]->setValue (q.loopStart);
+        sliders[3]->setValue (q.loopEnd);
+        sliders[4]->setValue (q.crossfade);
+    }
+    sliders[0]->setEnabled (hasAudio);
+    sliders[1]->setEnabled (hasAudio);
+    for (int i = 2; i < 5; ++i)
+        sliders[i]->setEnabled (looping);
+    for (auto& sl : sliders)
+        sl->repaint();
 
     auto setBox = [] (LedLabel& box, const String& t) { if (! box.isBeingEdited()) box.setText (t, dontSendNotification); };
     setBox (startBox, hasAudio ? String (z->params.loopStart) : String());
@@ -912,7 +1050,7 @@ void EditorPage::resized()
     r.removeFromTop (8);
 
     //== Sample & loop =============================================================
-    sampleArea = r.removeFromTop (222).toFloat();
+    sampleArea = r.removeFromTop (250).toFloat();
     {
         auto s = sampleArea.toNearestInt().reduced (11, 9);
         s.removeFromTop (24);
@@ -920,6 +1058,14 @@ void EditorPage::resized()
         loopInfo.setBounds (info);
         s.removeFromBottom (6);
         auto row = s.removeFromBottom (24);
+        s.removeFromBottom (6);
+        auto sliderRow = s.removeFromBottom (20);
+        const int sw = (sliderRow.getWidth() - 4 * 10) / 5;
+        for (auto& sl : sliders)
+        {
+            sl->setBounds (sliderRow.removeFromLeft (sw));
+            sliderRow.removeFromLeft (10);
+        }
         s.removeFromBottom (7);
         waveArea = s.toFloat();
         wave.setBounds (s);

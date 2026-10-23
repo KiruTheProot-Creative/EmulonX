@@ -13,8 +13,36 @@ const char* ArpSettings::modeName (int m)
 
 ArpSettings::ArpSettings()
 {
-    for (size_t i = 0; i < steps.size(); ++i)
-        steps[i].velocity = i % 4 == 0 ? 1.0f : 0.75f;
+    for (auto& p : patterns)
+        for (size_t i = 0; i < p.steps.size(); ++i)
+            p.steps[i].velocity = i % 4 == 0 ? 1.0f : 0.75f;
+}
+
+int ArpSettings::totalSteps() const noexcept
+{
+    int t = 0;
+    for (int i = 0; i < jlimit (1, maxSlots, arrangementLength); ++i)
+        t += jlimit (1, 16, patterns[(size_t) jlimit (0, numPatterns - 1, arrangement[(size_t) i])].length);
+    return jmax (1, t);
+}
+
+void ArpSettings::locate (int64 k, int& slot, int& pattern, int& step) const noexcept
+{
+    const int total = totalSteps();
+    int p = (int) (((k % total) + total) % total);
+    const int slots = jlimit (1, maxSlots, arrangementLength);
+    for (slot = 0; slot < slots; ++slot)
+    {
+        pattern = jlimit (0, numPatterns - 1, arrangement[(size_t) slot]);
+        const int len = jlimit (1, 16, patterns[(size_t) pattern].length);
+        if (p < len)
+        {
+            step = p;
+            return;
+        }
+        p -= len;
+    }
+    slot = 0; pattern = jlimit (0, numPatterns - 1, arrangement[0]); step = 0;
 }
 
 double ArpSettings::stepBeats() const noexcept
@@ -27,11 +55,19 @@ bool ArpSettings::operator== (const ArpSettings& o) const noexcept
 {
     if (enabled != o.enabled || mode != o.mode || num != o.num || den != o.den || dot != o.dot || octaves != o.octaves
         || std::abs (gate - o.gate) > 1.0e-6f || std::abs (swing - o.swing) > 1.0e-6f || latch != o.latch
-        || playedVelocity != o.playedVelocity || length != o.length)
+        || playedVelocity != o.playedVelocity || arrangementLength != o.arrangementLength || arrangement != o.arrangement)
         return false;
-    for (size_t i = 0; i < steps.size(); ++i)
-        if (steps[i].on != o.steps[i].on || std::abs (steps[i].velocity - o.steps[i].velocity) > 1.0e-6f || steps[i].octave != o.steps[i].octave)
+    for (size_t p = 0; p < patterns.size(); ++p)
+    {
+        const auto& a = patterns[p];
+        const auto& b = o.patterns[p];
+        if (a.length != b.length)
             return false;
+        for (size_t i = 0; i < a.steps.size(); ++i)
+            if (a.steps[i].on != b.steps[i].on || std::abs (a.steps[i].velocity - b.steps[i].velocity) > 1.0e-6f
+                || a.steps[i].transpose != b.steps[i].transpose)
+                return false;
+    }
     return true;
 }
 
@@ -48,17 +84,28 @@ var ArpSettings::toJson() const
     o->setProperty ("swing", swing);
     o->setProperty ("latch", latch);
     o->setProperty ("playedVelocity", playedVelocity);
-    o->setProperty ("length", length);
-    Array<var> st;
-    for (auto& s : steps)
+    Array<var> pats;
+    for (auto& p : patterns)
     {
-        auto* q = new DynamicObject();
-        q->setProperty ("on", s.on);
-        q->setProperty ("velocity", std::round (s.velocity * 1000.0f) / 1000.0f);
-        q->setProperty ("octave", s.octave);
-        st.add (var (q));
+        auto* po = new DynamicObject();
+        po->setProperty ("length", p.length);
+        Array<var> st;
+        for (auto& s : p.steps)
+        {
+            auto* q = new DynamicObject();
+            q->setProperty ("on", s.on);
+            q->setProperty ("velocity", std::round (s.velocity * 1000.0f) / 1000.0f);
+            q->setProperty ("transpose", s.transpose);
+            st.add (var (q));
+        }
+        po->setProperty ("steps", st);
+        pats.add (var (po));
     }
-    o->setProperty ("steps", st);
+    o->setProperty ("patterns", pats);
+    Array<var> arr;
+    for (int i = 0; i < arrangementLength; ++i)
+        arr.add (arrangement[(size_t) i]);
+    o->setProperty ("arrangement", arr);
     return var (o);
 }
 
@@ -80,15 +127,40 @@ ArpSettings ArpSettings::fromJson (const var& j)
     a.swing = jlimit (0.0f, 1.0f, getF ("swing", 0.0f));
     a.latch = getB ("latch", false);
     a.playedVelocity = getB ("playedVelocity", false);
-    a.length = jlimit (1, 16, getI ("length", 8));
-    if (auto* arr = j["steps"].getArray())
-        for (int i = 0; i < jmin (16, arr->size()); ++i)
+    auto readSteps = [] (const var& arr, ArpPattern& p)
+    {
+        if (auto* steps = arr.getArray())
+            for (int i = 0; i < jmin (16, steps->size()); ++i)
+            {
+                const auto& s = steps->getReference (i);
+                auto& st = p.steps[(size_t) i];
+                st.on = s.hasProperty ("on") ? (bool) s["on"] : true;
+                st.velocity = jlimit (0.0f, 1.0f, s.hasProperty ("velocity") ? (float) (double) s["velocity"] : 0.8f);
+                st.transpose = s.hasProperty ("transpose") ? jlimit (-24, 24, (int) s["transpose"])
+                                                           : jlimit (-24, 24, 12 * (int) s["octave"]);   // older presets
+            }
+    };
+    if (auto* pats = j["patterns"].getArray())
+    {
+        for (int p = 0; p < jmin (numPatterns, pats->size()); ++p)
         {
-            const auto& s = arr->getReference (i);
-            a.steps[(size_t) i].on = s.hasProperty ("on") ? (bool) s["on"] : true;
-            a.steps[(size_t) i].velocity = jlimit (0.0f, 1.0f, s.hasProperty ("velocity") ? (float) (double) s["velocity"] : 0.8f);
-            a.steps[(size_t) i].octave = jlimit (-1, 2, (int) s["octave"]);
+            const auto& pj = pats->getReference (p);
+            a.patterns[(size_t) p].length = jlimit (1, 16, pj.hasProperty ("length") ? (int) pj["length"] : 8);
+            readSteps (pj["steps"], a.patterns[(size_t) p]);
         }
+    }
+    else
+    {
+        // Older format: one pattern.
+        a.patterns[0].length = jlimit (1, 16, getI ("length", 8));
+        readSteps (j["steps"], a.patterns[0]);
+    }
+    if (auto* arr = j["arrangement"].getArray(); arr != nullptr && ! arr->isEmpty())
+    {
+        a.arrangementLength = jmin (maxSlots, arr->size());
+        for (int i = 0; i < a.arrangementLength; ++i)
+            a.arrangement[(size_t) i] = jlimit (0, numPatterns - 1, (int) arr->getReference (i));
+    }
     return a;
 }
 
@@ -188,12 +260,14 @@ void Arpeggiator::noteInput (int note, int velocity, bool on, int pos, MidiBuffe
 void Arpeggiator::trigger (int64 stepIndex, int pos, int numSamples, double samplesPerStep, MidiBuffer& out) noexcept
 {
     const auto& s = settings;
-    const int len = jlimit (1, 16, s.length);
-    const int stepNo = (int) (((stepIndex % len) + len) % len);
+    int slot = 0, pat = 0, stepNo = 0;
+    s.locate (stepIndex, slot, pat, stepNo);
     currentStep.store (stepNo);
+    currentPattern.store (pat);
+    currentSlot.store (slot);
     if (numHeld == 0)
         return;
-    const auto& step = s.steps[(size_t) stepNo];
+    const auto& step = s.patterns[(size_t) pat].steps[(size_t) stepNo];
     if (! step.on)
         return;
 
@@ -256,7 +330,7 @@ void Arpeggiator::trigger (int64 stepIndex, int pos, int numSamples, double samp
     const auto gateSamples = (int64) jmax (1.0, s.gate * samplesPerStep - 1.0);
     for (int c = 0; c < numChosen; ++c)
     {
-        const int note = jlimit (0, 127, chosen[c] + 12 * step.octave);
+        const int note = jlimit (0, 127, chosen[c] + step.transpose);
         // Same note still sounding? Switch it off first.
         for (int i = 0; i < numSounding; ++i)
             if (sounding[(size_t) i].note == note)
@@ -287,6 +361,8 @@ void Arpeggiator::process (const MidiBuffer& in, MidiBuffer& out, int n, double 
             numHeld = 0;
             physical.reset();
             currentStep.store (-1);
+            currentPattern.store (-1);
+            currentSlot.store (-1);
             publishHeld();
         }
         wasEnabled = false;

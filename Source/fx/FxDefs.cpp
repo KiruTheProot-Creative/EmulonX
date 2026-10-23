@@ -138,7 +138,7 @@ std::vector<TypeDef> buildDefs()
           fixed (P ("center", "CENTER", 100, 5000, 800, Fmt::hz, true)), fixed (P ("fb", "FEEDBACK", -0.95f, 0.95f, 0.5f, Fmt::bi)),
           fixed (P ("stereo", "STEREO", 0, 1, 0.5f, Fmt::pct)), fixed (P ("mix", "MIX", 0, 1, 0.5f, Fmt::pct)) }, {} };
 
-    d[(int) Type::reverb] = { Type::reverb, "reverb", "Reverb", { "Room", "Hall", "Plate", "Ambience" }, 1,
+    d[(int) Type::reverb] = { Type::reverb, "reverb", "Reverb", { "Room", "Hall", "Plate", "Ambience", "Cathedral", "Spring", "Shimmer" }, 1,
         { fixed (P ("size", "SIZE", 0, 1, 0.5f, Fmt::pct)), fixed (P ("decay", "DECAY", 0.1f, 20, 2.5f, Fmt::sec, true)),
           fixed (P ("pre", "PRE-DELAY", 0, 250, 10, Fmt::ms)), fixed (P ("damp", "DAMPING", 1000, 20000, 7000, Fmt::hz, true)),
           fixed (P ("lo", "LOW CUT", 20, 1000, 120, Fmt::hz, true)), fixed (P ("width", "WIDTH", 0, 1, 1, Fmt::pct)),

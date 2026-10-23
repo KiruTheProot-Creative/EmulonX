@@ -12,6 +12,8 @@ ZoneParams ZoneParams::defaultsFor (const SampleData& s)
     p.loopMode  = hasLoop ? LoopMode::loop : LoopMode::off;
     p.loopStart = hasLoop ? s.loopStart : n / 2;
     p.loopEnd   = hasLoop ? s.loopEnd : n;
+    p.sampleStart = 0;
+    p.sampleEnd = n;
     p.clampTo (n);
     return p;
 }
@@ -19,6 +21,9 @@ ZoneParams ZoneParams::defaultsFor (const SampleData& s)
 void ZoneParams::clampTo (int n) noexcept
 {
     n = juce::jmax (1, n);
+    if (sampleEnd <= 0 || sampleEnd > n)
+        sampleEnd = n;
+    sampleStart = juce::jlimit (0, juce::jmax (0, sampleEnd - 1), sampleStart);
     loopEnd   = juce::jlimit (1, n, loopEnd);
     loopStart = juce::jlimit (0, loopEnd - 1, loopStart);
     crossfade = juce::jmax (0, crossfade);

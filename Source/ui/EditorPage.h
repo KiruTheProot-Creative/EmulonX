@@ -22,7 +22,7 @@ public:
     void zoomAll();
     void zoomAround (int frame, int halfWidth = 1000);
     bool snapToZero = false;
-    std::function<void (int which, int frame)> onMarkerMoved;   // which: 0 start, 1 end
+    std::function<void (int which, int frame)> onMarkerMoved;   // which: 0 loop start, 1 loop end, 2 sample start, 3 sample end
 
     void tick();   // playheads
     void paint (juce::Graphics&) override;
@@ -38,7 +38,7 @@ private:
     const ModelZone* zone() const;
     juce::Range<double> view (const ModelZone&);
     void setView (const ModelZone&, double start, double end);
-    int hitMarker (const ModelZone&, float x);
+    int hitMarker (const ModelZone&, juce::Point<float>);
     double frameAt (const ModelZone&, float x);
 
     EmulonXProcessor& proc;
@@ -97,7 +97,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void refresh();
     void edit (std::function<void (ZoneParams&)>);
-    void setLoopPoint (int which, int frame, bool exact);
+    void setLoopPoint (int which, int frame, bool exact);   // 0/1 loop start/end, 2/3 sample start/end
 
     EmulonXProcessor& proc;
     juce::SharedResourcePointer<Settings> settings;
@@ -115,6 +115,8 @@ private:
     juce::TextButton zeroStart { "ZERO-X" }, zeroEnd { "ZERO-X" }, snapButton { "SNAP" };
     juce::TextButton zoomAllButton { "ALL" }, zoomStartButton { "ZOOM S" }, zoomEndButton { "ZOOM E" };
     LedDisplay loopInfo;
+    class FrameSlider;
+    std::unique_ptr<FrameSlider> sliders[5];   // sample start, sample end, loop start, loop end, crossfade
 
     // Zone settings
     ValueControl root { "Root", ValueControl::Style::knob }, loKey { "Low key", ValueControl::Style::knob },

@@ -4,17 +4,28 @@ A free, open-source sampler plugin inspired by the E-mu Emulator X.
 Load whole sound banks, edit and loop samples, stack effects, and modulate
 everything with drawable envelopes and macros.
 
-> Status: **milestone 5.5** — arpeggiator, mono / legato / glide, new background.
+> Status: **version 1.1** — advanced arpeggiator, sample start / end, seven reverb types.
 
 ## Using it
 
 - **ARP tab:** switch **ARP ON** and hold a chord. Choose the order (Up, Down,
   Up/Down, Down/Up, As played, Random, Chord), the step length (**BEATS** /
   division, straight, dotted or triplet), **OCTAVES**, **GATE** and **SWING**.
-  **LATCH** keeps it playing after you let go. In the pattern, drag the bars to
-  set each step's velocity, click a step number to make it a rest, and click
-  the octave cell under it to shift that step up or down. While your DAW plays,
-  the steps follow its beat grid.
+  **LATCH** keeps it playing after you let go.
+  - **Patterns A-H:** each has its own length and 16 steps. Drag the bars for
+    velocity, click a step number to make a rest, and set the bottom row to
+    transpose a step by semitones (drag, mouse wheel, click +1, right-click -1,
+    double-click resets). **COPY** / **PASTE** copy a pattern.
+  - **Arrange:** the bar above the pattern sets the order patterns play in
+    (for example A A B A), in a loop. Click a slot to choose its pattern, **+** to
+    add one, right-click to remove one.
+  - While your DAW plays, the steps follow its beat grid.
+- **Sample start / end (Editor tab):** drag the amber markers (flags at the
+  bottom of the waveform) or use the **SMP START** / **SMP END** sliders. The
+  sliders under the waveform also move the loop start / end and the crossfade;
+  hold shift for fine moves.
+- **Reverb types:** Room, Hall, Plate, Ambience, Cathedral, Spring and Shimmer,
+  each built differently (early reflections, density, size, movement, tone).
 - **Voice (Editor tab):** **POLY** plays chords; **MONO** plays one note at a
   time and returns to a key you still hold. In mono, **LEGATO** makes
   overlapping notes slide without restarting, and **GLIDE** sets how long the

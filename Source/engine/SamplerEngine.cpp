@@ -264,9 +264,10 @@ void SamplerEngine::startVoicesFor (int note, int velocity, float glideFrom, con
         v.k = k;
         v.grain = juce::jmax (256, (int) std::lround (p.grainMs / 1000.0 * sampleRate)) & ~1;
         v.grainCounter = 0;
-        v.pos = 0.0;
-        v.read0 = 0.0;
-        v.read1 = 0.0;   // the second grain is fully audible at the start, so the attack is intact
+        const int startAt = juce::jlimit (0, juce::jmax (0, z.sample->length() - 1), p.sampleStart);
+        v.pos = startAt;
+        v.read0 = startAt;
+        v.read1 = startAt;   // the second grain is fully audible at the start, so the attack is intact
         v.glide = glideFrom;
         v.glideStep = glideStepFor (glideFrom);
         v.level = 0.0f;
@@ -330,6 +331,7 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
     const int ls = juce::jlimit (0, juce::jmax (0, n - 1), z.loopStart);
     const int le = juce::jmax (ls + 1, juce::jmin (z.loopEnd, n));
     const int loopLen = le - ls;
+    const int playEnd = z.sampleEnd > 0 ? juce::jmin (n, z.sampleEnd) : n;   // sample end marker
     const bool looping = z.loopMode != LoopMode::off && ! (z.loopMode == LoopMode::untilRelease && v.released) && loopLen >= 16;
     const int xf = looping ? juce::jmax (0, juce::jmin (z.crossfade, ls, loopLen / 2)) : 0;
     const float* table = mode == Interp::sinc ? SincTables::get().forStep (step) : nullptr;
@@ -451,7 +453,7 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
                 v.pos -= loopLen;
         }
 
-        if (! looping && v.pos >= n)
+        if (! looping && v.pos >= playEnd)
         {
             v.active = false;
             return;

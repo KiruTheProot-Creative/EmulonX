@@ -1,4 +1,4 @@
-// Emulon X — the ARP tab: arpeggiator settings and its 16-step pattern.
+// Emulon X — the ARP tab: arpeggiator settings, 8 patterns and an arrangement.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
@@ -9,6 +9,7 @@ namespace emx
 {
 class EmulonXProcessor;
 class StepGrid;
+class ArrangeBar;
 
 class ArpPage final : public juce::Component,
                       private juce::ChangeListener
@@ -21,12 +22,19 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
+    int getEditPattern() const noexcept { return editPattern; }
+    void setEditPattern (int p);
+    void edit (std::function<void (ArpSettings&)>);
+    EmulonXProcessor& getProcessor() noexcept { return proc; }
+
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void refresh();
-    void edit (std::function<void (ArpSettings&)>);
 
     EmulonXProcessor& proc;
+    int editPattern = 0, shownPlayingPattern = -2;
+    std::optional<ArpPattern> clipboard;
+
     juce::TextButton onButton { "ARP OFF" }, latchButton { "LATCH" };
     juce::TextButton velPattern { "PATTERN" }, velPlayed { "AS PLAYED" };
     juce::ComboBox modeBox, denBox;
@@ -35,10 +43,13 @@ private:
                  gate { "Gate", ValueControl::Style::knob }, swing { "Swing", ValueControl::Style::knob },
                  length { "Steps", ValueControl::Style::knob };
     LedDisplay rateLed, heldLed;
+    juce::OwnedArray<juce::TextButton> patternTabs;
+    juce::TextButton copyButton { "COPY" }, pasteButton { "PASTE" };
+    std::unique_ptr<ArrangeBar> arrange;
     std::unique_ptr<StepGrid> grid;
-    juce::TextButton allOn { "ALL ON" }, accents { "ACCENTS" }, randomVel { "RANDOM" }, flat { "FLAT" }, clearOct { "OCTAVES 0" };
+    juce::TextButton allOn { "ALL ON" }, accents { "ACCENTS" }, randomVel { "RANDOM" }, flat { "FLAT" }, clearNotes { "NOTES 0" };
 
-    juce::Rectangle<float> topArea, patternArea, bottomArea, gridArea;
-    juce::Rectangle<float> modeLabel, velLabel, rateLabel;
+    juce::Rectangle<float> topArea, patternArea, bottomArea;
+    juce::Rectangle<float> modeLabel, velLabel, rateLabel, arrangeLabel, patternLabel;
 };
 } // namespace emx

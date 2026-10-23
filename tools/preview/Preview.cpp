@@ -228,8 +228,14 @@ int main (int argc, char** argv)
     // Arpeggiator through the whole processor, and mono mode.
     {
         auto a = proc.getArpSettings();
-        a.enabled = true; a.mode = emx::ArpSettings::upDown; a.octaves = 2; a.length = 12; a.swing = 0.2f;
-        a.steps[3].on = false; a.steps[6].octave = 1; a.steps[9].velocity = 0.35f;
+        a.enabled = true; a.mode = emx::ArpSettings::upDown; a.octaves = 2; a.swing = 0.2f;
+        auto& pa = a.patterns[0];
+        pa.length = 12;
+        pa.steps[3].on = false; pa.steps[6].transpose = 7; pa.steps[9].velocity = 0.35f; pa.steps[10].transpose = -5;
+        a.patterns[1].length = 8;
+        a.patterns[1].steps[2].transpose = 12;
+        a.arrangementLength = 4;
+        a.arrangement = { 0, 0, 1, 0 };
         proc.setArpSettings (a);
         AudioBuffer<float> b (2, 512);
         int maxVoices = 0;
@@ -276,6 +282,14 @@ int main (int argc, char** argv)
     };
 
     proc.selectZone (proc.getZones().size() > 1 ? proc.getZones()[1].id : 0);
+    if (auto* sz = proc.getSelectedZone(); sz != nullptr && sz->sample != nullptr)
+    {
+        auto q = sz->params;
+        q.sampleStart = 6000;
+        q.sampleEnd = sz->sample->length() - 4000;
+        q.crossfade = 3000;
+        proc.setZoneParams (sz->id, q);
+    }
     proc.keyboardState.noteOn (1, 60, 0.8f);   // shows a held key on the editor keyboard
     {
         AudioBuffer<float> b (2, 512);

@@ -7,43 +7,142 @@ namespace emx
 {
 using namespace juce;
 
+static String patternLetter (int p) { return String::charToString ((juce_wchar) ('A' + jlimit (0, 7, p))); }
+
 //==================================================================================
-// 16 steps: velocity bars, on/off, octave
+// Arrangement: which pattern each slot plays, in a loop
 //==================================================================================
-class StepGrid final : public Component
+class ArrangeBar final : public Component, public SettableTooltipClient
 {
 public:
-    explicit StepGrid (EmulonXProcessor& p) : proc (p) {}
+    explicit ArrangeBar (ArpPage& p) : page (p)
+    {
+        setTooltip ("Click a slot to choose its pattern - click + to add a slot - right-click removes a slot");
+    }
 
     void tick()
     {
-        const int s = proc.getArp().currentStep.load();
-        if (s != shownStep)
-        {
-            shownStep = s;
-            repaint();
-        }
+        const int s = page.getProcessor().getArp().currentSlot.load();
+        if (s != shownSlot) { shownSlot = s; repaint(); }
     }
 
     void paint (Graphics& g) override
     {
-        const auto& a = proc.getArpSettings();
-        const float colW = (float) getWidth() / 16.0f;
-        const auto bars = barsArea(), nums = numbersArea(), octs = octaveArea();
-        theme::drawLed (g, bars, {});
+        const auto& a = page.getProcessor().getArpSettings();
+        const float w = (float) getWidth() / (float) ArpSettings::maxSlots;
+        for (int i = 0; i < ArpSettings::maxSlots; ++i)
+        {
+            auto r = Rectangle<float> ((float) i * w, 0.0f, w, (float) getHeight()).reduced (2.0f, 1.0f);
+            if (i < a.arrangementLength)
+            {
+                const int pat = a.arrangement[(size_t) i];
+                const bool playing = i == shownSlot && a.enabled;
+                const bool editing = pat == page.getEditPattern();
+                if (playing)
+                    DropShadow (theme::red.withAlpha (0.8f), 8, {}).drawForRectangle (g, r.toNearestInt());
+                g.setGradientFill (ColourGradient::vertical (playing ? Colour (0xffff4a4a) : editing ? Colour (0xff9a1a1a) : Colour (0xff5a1010), r.getY(),
+                                                             playing ? Colour (0xffa50f0f) : Colour (0xff2a0606), r.getBottom()));
+                g.fillRoundedRectangle (r, 4.0f);
+                g.setColour (Colours::black);
+                g.drawRoundedRectangle (r, 4.0f, 1.0f);
+                g.setColour (Colours::white);
+                g.setFont (theme::font (10.0f, 900, 0.06f));
+                g.drawText (patternLetter (pat), r, Justification::centred, false);
+            }
+            else
+            {
+                theme::drawLed (g, r, i == a.arrangementLength ? "+" : "", 10.0f, Justification::centred, theme::redDark);
+            }
+        }
+    }
 
-        // guide lines at 25 / 50 / 75 %
+    void mouseDown (const MouseEvent& e) override
+    {
+        auto& proc = page.getProcessor();
+        const auto& a = proc.getArpSettings();
+        const int i = (int) (e.position.x / ((float) getWidth() / (float) ArpSettings::maxSlots));
+        if (i < 0 || i >= ArpSettings::maxSlots)
+            return;
+        if (i >= a.arrangementLength)
+        {
+            if (i == a.arrangementLength && ! e.mods.isPopupMenu())
+            {
+                const int pat = page.getEditPattern();
+                page.edit ([pat] (ArpSettings& s) { s.arrangement[(size_t) s.arrangementLength] = pat; ++s.arrangementLength; });
+            }
+            return;
+        }
+        if (e.mods.isPopupMenu())
+        {
+            if (a.arrangementLength > 1)
+                page.edit ([i] (ArpSettings& s) { removeSlot (s, i); });
+            return;
+        }
+        PopupMenu m;
+        m.addSectionHeader ("Slot " + String (i + 1));
+        for (int p = 0; p < ArpSettings::numPatterns; ++p)
+            m.addItem ("Play pattern " + patternLetter (p), true, a.arrangement[(size_t) i] == p,
+                       [this, i, p] { page.edit ([i, p] (ArpSettings& s) { s.arrangement[(size_t) i] = p; }); });
+        m.addSeparator();
+        m.addItem ("Edit pattern " + patternLetter (a.arrangement[(size_t) i]), [this, p = a.arrangement[(size_t) i]] { page.setEditPattern (p); });
+        m.addItem ("Insert a slot after this one", a.arrangementLength < ArpSettings::maxSlots, false, [this, i]
+        {
+            page.edit ([i] (ArpSettings& s)
+            {
+                for (int k = s.arrangementLength; k > i + 1; --k)
+                    s.arrangement[(size_t) k] = s.arrangement[(size_t) k - 1];
+                s.arrangement[(size_t) i + 1] = s.arrangement[(size_t) i];
+                ++s.arrangementLength;
+            });
+        });
+        m.addItem ("Remove this slot", a.arrangementLength > 1, false, [this, i] { page.edit ([i] (ArpSettings& s) { removeSlot (s, i); }); });
+        m.showMenuAsync (PopupMenu::Options().withTargetComponent (this));
+    }
+
+private:
+    static void removeSlot (ArpSettings& s, int i)
+    {
+        for (int k = i; k < s.arrangementLength - 1; ++k)
+            s.arrangement[(size_t) k] = s.arrangement[(size_t) k + 1];
+        s.arrangementLength = jmax (1, s.arrangementLength - 1);
+    }
+
+    ArpPage& page;
+    int shownSlot = -1;
+};
+
+//==================================================================================
+// 16 steps of the pattern being edited: velocity bars, on/off, transpose (semitones)
+//==================================================================================
+class StepGrid final : public Component
+{
+public:
+    explicit StepGrid (ArpPage& p) : page (p) {}
+
+    void tick()
+    {
+        auto& arp = page.getProcessor().getArp();
+        const int s = arp.currentPattern.load() == page.getEditPattern() ? arp.currentStep.load() : -1;
+        if (s != shownStep) { shownStep = s; repaint(); }
+    }
+
+    void paint (Graphics& g) override
+    {
+        const auto& a = page.getProcessor().getArpSettings();
+        const auto& pat = a.patterns[(size_t) page.getEditPattern()];
+        const float colW = (float) getWidth() / 16.0f;
+        const auto bars = barsArea(), nums = numbersArea(), notes = transposeArea();
+        theme::drawLed (g, bars, {});
         g.setColour (theme::red.withAlpha (0.08f));
         for (int i = 1; i < 4; ++i)
             g.fillRect (bars.getX(), bars.getY() + bars.getHeight() * (float) i / 4.0f, bars.getWidth(), 1.0f);
 
         for (int i = 0; i < 16; ++i)
         {
-            const auto& st = a.steps[(size_t) i];
-            const bool inUse = i < a.length;
+            const auto& st = pat.steps[(size_t) i];
+            const bool inUse = i < pat.length;
             const bool playing = i == shownStep && a.enabled;
             auto col = Rectangle<float> ((float) i * colW, bars.getY(), colW, bars.getHeight()).reduced (4.0f, 6.0f);
-
             if (playing)
             {
                 g.setColour (theme::red.withAlpha (0.18f));
@@ -64,7 +163,6 @@ public:
                 }
             }
 
-            // Step number (click to switch off)
             auto nb = Rectangle<float> ((float) i * colW, nums.getY(), colW, nums.getHeight()).reduced (3.0f, 1.0f);
             const bool lit = st.on && inUse;
             g.setColour (lit ? (playing ? Colour (0xffff3030) : Colour (0xff8a1818)) : Colour (0xff2a2629));
@@ -75,15 +173,14 @@ public:
             g.setFont (theme::font (8.5f, 700, 0.04f));
             g.drawText (String (i + 1), nb, Justification::centred, false);
 
-            // Octave cell
-            auto ob = Rectangle<float> ((float) i * colW, octs.getY(), colW, octs.getHeight()).reduced (3.0f, 1.0f);
-            theme::drawLed (g, ob, st.octave == 0 ? String ("0") : (st.octave > 0 ? "+" : "") + String (st.octave), 8.0f,
-                            Justification::centred, inUse ? (st.octave == 0 ? theme::redDark : theme::red) : theme::redDark.withAlpha (0.4f));
+            auto tb = Rectangle<float> ((float) i * colW, notes.getY(), colW, notes.getHeight()).reduced (3.0f, 1.0f);
+            const int t = st.transpose;
+            theme::drawLed (g, tb, t == 0 ? String ("0") : (t > 0 ? "+" : "") + String (t), 8.0f, Justification::centred,
+                            inUse ? (t == 0 ? theme::redDark : theme::red) : theme::redDark.withAlpha (0.4f));
         }
 
-        // Length marker
-        const float lx = (float) a.length * colW;
-        if (a.length < 16)
+        const float lx = (float) pat.length * colW;
+        if (pat.length < 16)
         {
             g.setColour (Colours::black.withAlpha (0.45f));
             g.fillRect (Rectangle<float> (lx, bars.getY(), (float) getWidth() - lx, bars.getHeight()).reduced (0.0f, 2.0f));
@@ -94,59 +191,98 @@ public:
 
     void mouseDown (const MouseEvent& e) override
     {
+        mode = Mode::none;
         const int i = stepAt (e.position.x);
         if (i < 0)
             return;
-        auto a = proc.getArpSettings();
+        const int pat = page.getEditPattern();
         if (barsArea().contains (e.position))
         {
-            dragging = true;
-            setVelocity (a, i, e.position.y);
-            proc.setArpSettings (a);
+            mode = Mode::velocity;
+            setVelocity (i, e.position.y);
         }
         else if (numbersArea().contains (e.position))
+            page.edit ([pat, i] (ArpSettings& a) { auto& s = a.patterns[(size_t) pat].steps[(size_t) i]; s.on = ! s.on; });
+        else if (transposeArea().contains (e.position))
         {
-            a.steps[(size_t) i].on = ! a.steps[(size_t) i].on;
-            proc.setArpSettings (a);
-        }
-        else if (octaveArea().contains (e.position))
-        {
-            auto& o = a.steps[(size_t) i].octave;
-            o = e.mods.isPopupMenu() ? (o <= -1 ? 2 : o - 1) : (o >= 2 ? -1 : o + 1);
-            proc.setArpSettings (a);
+            mode = Mode::transpose;
+            dragStep = i;
+            dragStart = page.getProcessor().getArpSettings().patterns[(size_t) pat].steps[(size_t) i].transpose;
+            moved = false;
         }
     }
 
     void mouseDrag (const MouseEvent& e) override
     {
-        if (! dragging)
-            return;
-        const int i = stepAt (e.position.x);
-        if (i < 0)
-            return;
-        auto a = proc.getArpSettings();
-        setVelocity (a, i, e.position.y);
-        proc.setArpSettings (a);
+        if (mode == Mode::velocity)
+        {
+            const int i = stepAt (e.position.x);
+            if (i >= 0)
+                setVelocity (i, e.position.y);
+        }
+        else if (mode == Mode::transpose && std::abs (e.getDistanceFromDragStartY()) > 2)
+        {
+            moved = true;
+            setTranspose (dragStep, dragStart - e.getDistanceFromDragStartY() / 6);   // 6 px per semitone
+        }
     }
 
-    void mouseUp (const MouseEvent&) override { dragging = false; }
+    void mouseUp (const MouseEvent& e) override
+    {
+        if (mode == Mode::transpose && ! moved)
+            setTranspose (dragStep, dragStart + (e.mods.isPopupMenu() ? -1 : 1));   // click +1, right-click -1
+        mode = Mode::none;
+    }
+
+    void mouseDoubleClick (const MouseEvent& e) override
+    {
+        if (transposeArea().contains (e.position))
+            if (const int i = stepAt (e.position.x); i >= 0)
+                setTranspose (i, 0);
+    }
+
+    void mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w) override
+    {
+        if (! transposeArea().contains (e.position))
+            return;
+        if (const int i = stepAt (e.position.x); i >= 0)
+        {
+            const int cur = page.getProcessor().getArpSettings().patterns[(size_t) page.getEditPattern()].steps[(size_t) i].transpose;
+            setTranspose (i, cur + (w.deltaY > 0 ? 1 : -1));
+        }
+    }
 
 private:
-    Rectangle<float> barsArea() const    { return getLocalBounds().toFloat().withTrimmedBottom (62.0f); }
-    Rectangle<float> numbersArea() const { return getLocalBounds().toFloat().withTop ((float) getHeight() - 56.0f).withHeight (26.0f); }
-    Rectangle<float> octaveArea() const  { return getLocalBounds().toFloat().withTop ((float) getHeight() - 24.0f); }
+    enum class Mode { none, velocity, transpose };
+    Rectangle<float> barsArea() const      { return getLocalBounds().toFloat().withTrimmedBottom (62.0f); }
+    Rectangle<float> numbersArea() const   { return getLocalBounds().toFloat().withTop ((float) getHeight() - 56.0f).withHeight (26.0f); }
+    Rectangle<float> transposeArea() const { return getLocalBounds().toFloat().withTop ((float) getHeight() - 24.0f); }
     int stepAt (float x) const { const int i = (int) (x / ((float) getWidth() / 16.0f)); return i >= 0 && i < 16 ? i : -1; }
-    void setVelocity (ArpSettings& a, int i, float y) const
+
+    void setVelocity (int i, float y)
     {
         const auto b = barsArea().reduced (0.0f, 6.0f);
-        a.steps[(size_t) i].velocity = jlimit (0.0f, 1.0f, (b.getBottom() - y) / b.getHeight());
-        if (a.steps[(size_t) i].velocity > 0.02f)
-            a.steps[(size_t) i].on = true;
+        const float v = jlimit (0.0f, 1.0f, (b.getBottom() - y) / b.getHeight());
+        const int pat = page.getEditPattern();
+        page.edit ([pat, i, v] (ArpSettings& a)
+        {
+            auto& s = a.patterns[(size_t) pat].steps[(size_t) i];
+            s.velocity = v;
+            if (v > 0.02f) s.on = true;
+        });
     }
 
-    EmulonXProcessor& proc;
-    int shownStep = -1;
-    bool dragging = false;
+    void setTranspose (int i, int semis)
+    {
+        const int pat = page.getEditPattern();
+        const int v = jlimit (-24, 24, semis);
+        page.edit ([pat, i, v] (ArpSettings& a) { a.patterns[(size_t) pat].steps[(size_t) i].transpose = v; });
+    }
+
+    ArpPage& page;
+    int shownStep = -1, dragStep = 0, dragStart = 0;
+    bool moved = false;
+    Mode mode = Mode::none;
 };
 
 //==================================================================================
@@ -167,10 +303,14 @@ ArpPage::ArpPage (EmulonXProcessor& p)
           for (int n = 0; n < 128; ++n)
               if ((proc.getArp().heldMask[n >> 6].load() >> (n & 63)) & 1)
                   t << noteName (n) << "  ";
-          return t.isEmpty() ? String ("HOLD SOME KEYS...") : "PLAYING FROM:  " + t;
-      }, 9.0f),
-      grid (std::make_unique<StepGrid> (p))
+          const int pat = proc.getArp().currentPattern.load();
+          String playing = pat >= 0 && proc.getArpSettings().enabled ? "   |   PATTERN " + patternLetter (pat) : String();
+          return (t.isEmpty() ? String ("HOLD SOME KEYS...") : "PLAYING FROM:  " + t) + playing;
+      }, 9.0f)
 {
+    arrange = std::make_unique<ArrangeBar> (*this);
+    grid = std::make_unique<StepGrid> (*this);
+
     onButton.setClickingTogglesState (false);
     onButton.setTooltip ("Switch the arpeggiator on / off");
     onButton.onClick = [this] { edit ([] (ArpSettings& a) { a.enabled = ! a.enabled; }); };
@@ -204,7 +344,7 @@ ArpPage::ArpPage (EmulonXProcessor& p)
     octaves.setRange (NormalisableRange<double> (1, 4, 1), 1);
     octaves.format = [] (double v) { return String (roundToInt (v)) + " OCT"; };
     octaves.onChange = [this] (double v) { edit ([v] (ArpSettings& a) { a.octaves = roundToInt (v); }); };
-    octaves.slider.setTooltip ("Repeat the notes over this many octaves");
+    octaves.slider.setTooltip ("Repeat the held notes over this many octaves");
     gate.setRange (NormalisableRange<double> (0.05, 1.0, 0.01), 0.75);
     gate.format = [] (double v) { return String (roundToInt (v * 100.0)) + "%"; };
     gate.onChange = [this] (double v) { edit ([v] (ArpSettings& a) { a.gate = (float) v; }); };
@@ -215,28 +355,50 @@ ArpPage::ArpPage (EmulonXProcessor& p)
     swing.slider.setTooltip ("Pushes every second step later for a shuffled feel");
     length.setRange (NormalisableRange<double> (1, 16, 1), 8);
     length.format = [] (double v) { return String (roundToInt (v)); };
-    length.onChange = [this] (double v) { edit ([v] (ArpSettings& a) { a.length = roundToInt (v); }); };
-    length.slider.setTooltip ("Pattern length in steps");
+    length.onChange = [this] (double v) { const int pat = editPattern; edit ([v, pat] (ArpSettings& a) { a.patterns[(size_t) pat].length = roundToInt (v); }); };
+    length.slider.setTooltip ("Length of this pattern in steps");
 
-    allOn.setTooltip ("Switch every step on");
-    allOn.onClick = [this] { edit ([] (ArpSettings& a) { for (auto& s : a.steps) s.on = true; }); };
-    accents.setTooltip ("Loud first step of every four, the rest softer");
-    accents.onClick = [this] { edit ([] (ArpSettings& a) { for (size_t i = 0; i < a.steps.size(); ++i) a.steps[i].velocity = i % 4 == 0 ? 1.0f : 0.6f; }); };
-    randomVel.setTooltip ("Random velocities");
-    randomVel.onClick = [this]
+    for (int i = 0; i < ArpSettings::numPatterns; ++i)
     {
-        edit ([] (ArpSettings& a) { auto& r = Random::getSystemRandom(); for (auto& s : a.steps) s.velocity = 0.35f + 0.65f * r.nextFloat(); });
+        auto* b = patternTabs.add (new TextButton (patternLetter (i)));
+        b->setTooltip ("Edit pattern " + patternLetter (i) + " - put it in the arrangement above to play it");
+        b->onClick = [this, i] { setEditPattern (i); };
+        addAndMakeVisible (b);
+    }
+    copyButton.setTooltip ("Copy this pattern");
+    copyButton.onClick = [this] { clipboard = proc.getArpSettings().patterns[(size_t) editPattern]; pasteButton.setEnabled (true); };
+    pasteButton.setTooltip ("Replace this pattern with the copied one");
+    pasteButton.setEnabled (false);
+    pasteButton.onClick = [this]
+    {
+        if (! clipboard) return;
+        const auto c = *clipboard;
+        const int pat = editPattern;
+        edit ([c, pat] (ArpSettings& a) { a.patterns[(size_t) pat] = c; });
     };
+
+    auto forSteps = [this] (std::function<void (ArpStep&, size_t)> f)
+    {
+        const int pat = editPattern;
+        edit ([f, pat] (ArpSettings& a) { auto& st = a.patterns[(size_t) pat].steps; for (size_t i = 0; i < st.size(); ++i) f (st[i], i); });
+    };
+    allOn.setTooltip ("Switch every step on");
+    allOn.onClick = [forSteps] { forSteps ([] (ArpStep& s, size_t) { s.on = true; }); };
+    accents.setTooltip ("Loud first step of every four, the rest softer");
+    accents.onClick = [forSteps] { forSteps ([] (ArpStep& s, size_t i) { s.velocity = i % 4 == 0 ? 1.0f : 0.6f; }); };
+    randomVel.setTooltip ("Random velocities");
+    randomVel.onClick = [forSteps] { forSteps ([] (ArpStep& s, size_t) { s.velocity = 0.35f + 0.65f * Random::getSystemRandom().nextFloat(); }); };
     flat.setTooltip ("All steps the same velocity");
-    flat.onClick = [this] { edit ([] (ArpSettings& a) { for (auto& s : a.steps) s.velocity = 0.8f; }); };
-    clearOct.setTooltip ("Reset every step's octave to 0");
-    clearOct.onClick = [this] { edit ([] (ArpSettings& a) { for (auto& s : a.steps) s.octave = 0; }); };
+    flat.onClick = [forSteps] { forSteps ([] (ArpStep& s, size_t) { s.velocity = 0.8f; }); };
+    clearNotes.setTooltip ("Reset every step's transpose to 0");
+    clearNotes.onClick = [forSteps] { forSteps ([] (ArpStep& s, size_t) { s.transpose = 0; }); };
 
     for (Component* c : { (Component*) &onButton, (Component*) &latchButton, (Component*) &velPattern, (Component*) &velPlayed,
                           (Component*) &modeBox, (Component*) &denBox, (Component*) &dots[0], (Component*) &dots[1], (Component*) &dots[2],
                           (Component*) &beats, (Component*) &octaves, (Component*) &gate, (Component*) &swing, (Component*) &length,
-                          (Component*) &rateLed, (Component*) &heldLed, (Component*) grid.get(), (Component*) &allOn,
-                          (Component*) &accents, (Component*) &randomVel, (Component*) &flat, (Component*) &clearOct })
+                          (Component*) &rateLed, (Component*) &heldLed, (Component*) arrange.get(), (Component*) grid.get(),
+                          (Component*) &copyButton, (Component*) &pasteButton, (Component*) &allOn, (Component*) &accents,
+                          (Component*) &randomVel, (Component*) &flat, (Component*) &clearNotes })
         addAndMakeVisible (c);
 
     proc.addChangeListener (this);
@@ -252,6 +414,12 @@ void ArpPage::edit (std::function<void (ArpSettings&)> f)
     auto a = proc.getArpSettings();
     f (a);
     proc.setArpSettings (a);
+}
+
+void ArpPage::setEditPattern (int p)
+{
+    editPattern = jlimit (0, ArpSettings::numPatterns - 1, p);
+    refresh();
 }
 
 void ArpPage::refresh()
@@ -270,16 +438,27 @@ void ArpPage::refresh()
     octaves.setValue (a.octaves);
     gate.setValue (a.gate);
     swing.setValue (a.swing);
-    length.setValue (a.length);
+    length.setValue (a.patterns[(size_t) editPattern].length);
+    for (int i = 0; i < patternTabs.size(); ++i)
+        patternTabs[i]->setToggleState (i == editPattern, dontSendNotification);
     rateLed.refresh();
+    arrange->repaint();
     grid->repaint();
+    repaint (patternArea.toNearestInt());
 }
 
 void ArpPage::tick()
 {
     grid->tick();
+    arrange->tick();
     heldLed.refresh();
     rateLed.refresh();
+    const int playing = proc.getArpSettings().enabled ? proc.getArp().currentPattern.load() : -1;
+    if (playing != shownPlayingPattern)
+    {
+        shownPlayingPattern = playing;
+        repaint (patternArea.toNearestInt());
+    }
 }
 
 void ArpPage::resized()
@@ -330,19 +509,33 @@ void ArpPage::resized()
     t.removeFromLeft (10);
     latchButton.setBounds (t.removeFromLeft (80).withSizeKeepingCentre (80, 32));
 
-    // Pattern
+    // Pattern panel: arrangement row, then [pattern tabs | grid], then tools.
     auto pa = patternArea.toNearestInt().reduced (11, 9);
     pa.removeFromTop (26);
+    auto arrRow = pa.removeFromTop (26);
+    arrangeLabel = arrRow.removeFromLeft (84).toFloat();
+    arrange->setBounds (arrRow);
+    pa.removeFromTop (10);
     auto tools = pa.removeFromBottom (26);
     pa.removeFromBottom (8);
+
     auto side = pa.removeFromLeft (76);
-    length.setBounds (side.withSizeKeepingCentre (62, kh));
+    patternLabel = side.removeFromTop (14).toFloat();
+    auto tabs = side.removeFromTop (4 * 26);
+    for (int i = 0; i < patternTabs.size(); ++i)
+        patternTabs[i]->setBounds (tabs.getX() + (i % 2) * 38, tabs.getY() + (i / 2) * 26, 35, 23);
+    side.removeFromTop (6);
+    length.setBounds (side.removeFromTop (kh).withSizeKeepingCentre (62, kh));
+    side.removeFromTop (6);
+    copyButton.setBounds (side.removeFromTop (22).withWidth (73));
+    side.removeFromTop (4);
+    pasteButton.setBounds (side.removeFromTop (22).withWidth (73));
     pa.removeFromLeft (8);
-    gridArea = pa.toFloat();
     grid->setBounds (pa);
-    for (auto* b : { &allOn, &accents, &randomVel, &flat, &clearOct })
+
+    for (auto* b : { &allOn, &accents, &randomVel, &flat, &clearNotes })
     {
-        b->setBounds (tools.removeFromLeft (b == &clearOct ? 100 : 82));
+        b->setBounds (tools.removeFromLeft (b == &clearNotes ? 90 : 82));
         tools.removeFromLeft (6);
     }
 
@@ -363,8 +556,20 @@ void ArpPage::paint (Graphics& g)
     g.drawText ("RATE", rateLabel, Justification::bottomLeft, false);
 
     theme::drawPanel (g, patternArea.reduced (1.0f));
-    theme::drawHeading (g, patternArea.reduced (10.0f, 9.0f), "Pattern",
-                        "drag the bars for velocity - click a number to make a rest - click an octave cell to change it (right-click goes down)");
+    theme::drawHeading (g, patternArea.reduced (10.0f, 9.0f), "Patterns",
+                        "bars = velocity - number = step on/off - bottom row = semitones (drag, wheel, click +1, right-click -1, double-click 0)");
+    g.setColour (theme::textMuted);
+    g.setFont (theme::font (8.0f, 700, 0.1f));
+    g.drawText ("ARRANGE", arrangeLabel, Justification::centredLeft, false);
+    g.drawText ("PATTERN", patternLabel, Justification::bottomLeft, false);
+
+    // Mark the pattern that is playing right now.
+    if (shownPlayingPattern >= 0 && shownPlayingPattern < patternTabs.size())
+    {
+        auto r = patternTabs[shownPlayingPattern]->getBounds().toFloat().expanded (2.0f);
+        g.setColour (Colours::white.withAlpha (0.8f));
+        g.drawRoundedRectangle (r, 5.0f, 1.5f);
+    }
 
     theme::drawPanel (g, bottomArea.reduced (1.0f));
     theme::drawHeading (g, bottomArea.reduced (10.0f, 9.0f), "Notes",

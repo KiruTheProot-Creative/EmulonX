@@ -157,10 +157,56 @@ static int bench()
     return 0;
 }
 
+/** EmulonXTests --reverb-demo file.wav : the same pluck through each reverb type (2.5 s each). */
+static int reverbDemo (const File& file)
+{
+    using namespace emx::fx;
+    const double SR = 48000.0;
+    const int seg = (int) (SR * 2.5);
+    const int numModes = (int) def (Type::reverb).modes.size();
+    AudioBuffer<float> outBuf (2, seg * numModes);
+    outBuf.clear();
+    for (int m = 0; m < numModes; ++m)
+    {
+        auto rv = makeModule (Type::reverb, 1, SR);
+        setMode (rv, m);
+        rv.norm[6] = def (Type::reverb).slots[6].spec.toNorm (0.4f);   // 40% mix
+        std::vector<float> l ((size_t) seg, 0.0f), r ((size_t) seg, 0.0f);
+        // A short plucked minor chord (decaying saw-ish tones).
+        const double freqs[] { 220.0, 261.63, 329.63, 440.0 };
+        for (int i = 0; i < (int) (SR * 0.5); ++i)
+        {
+            double v = 0;
+            for (double f : freqs)
+                v += std::sin (MathConstants<double>::twoPi * f * i / SR) + 0.3 * std::sin (MathConstants<double>::twoPi * 2.0 * f * i / SR);
+            const float e = (float) (0.12 * std::exp (-i / (SR * 0.12)));
+            l[(size_t) i] = r[(size_t) i] = (float) v * e;
+        }
+        float v8[maxSlots] {};
+        for (int i = 0; i < maxSlots; ++i)
+            v8[i] = rv.value (i);
+        for (int p0 = 0; p0 < seg; p0 += 64)
+            rv.processor->process (v8, rv.settings, l.data() + p0, r.data() + p0, std::min (64, seg - p0), SR, 120.0);
+        for (int i = 0; i < seg; ++i)
+        {
+            outBuf.setSample (0, m * seg + i, l[(size_t) i]);
+            outBuf.setSample (1, m * seg + i, r[(size_t) i]);
+        }
+        std::printf ("%d: %s\n", m + 1, def (Type::reverb).modes[(size_t) m]);
+    }
+    file.deleteFile();
+    std::unique_ptr<OutputStream> os (file.createOutputStream().release());
+    if (auto w = WavAudioFormat().createWriterFor (os, AudioFormatWriterOptions{}.withSampleRate (SR).withNumChannels (2).withBitsPerSample (16)))
+        w->writeFromAudioSampleBuffer (outBuf, 0, outBuf.getNumSamples());
+    return 0;
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1 && String (argv[1]) == "--bench")
         return bench();
+    if (argc > 2 && String (argv[1]) == "--reverb-demo")
+        return reverbDemo (File (String (argv[2])));
     const double SR = 48000.0;
     auto a440 = sine (SR, 1.0, 440.0);   // 1 second of A4
 
@@ -437,6 +483,19 @@ int main (int argc, char** argv)
     }
     tmp.deleteRecursively();
 
+    //== Sample start / end ===========================================================
+    {
+        auto p = basic (*a440, 69);
+        p.loopMode = LoopMode::off;
+        p.sampleStart = a440->length() / 2;
+        auto r = play (a440, p, 69, 1.4);
+        p.sampleStart = 0;
+        p.sampleEnd = a440->length() / 4;
+        auto r2 = play (a440, p, 69, 1.4);
+        check (near (r.aliveSeconds, 0.5, 0.02) && near (r2.aliveSeconds, 0.25, 0.02), "sample start and end markers",
+               String (r.aliveSeconds, 3) + " s from the middle, " + String (r2.aliveSeconds, 3) + " s to a quarter");
+    }
+
     //== Arpeggiator ================================================================
     {
         struct Ev { juce::int64 t; int note; bool on; };
@@ -492,10 +551,43 @@ int main (int argc, char** argv)
         auto host = ons (runArp (a, chord, 0.5, 0.1));
         check (! host.empty() && host[0].t == 3600, "arp follows the DAW's beat grid", host.empty() ? String ("none") : String (host[0].t));
 
-        a.steps[1].on = false;
+        a.patterns[0].steps[1].on = false;
         auto rest = ons (runArp (a, chord, 0.5));
         check (rest.size() >= 2 && rest[1].t == 100 + 12000, "a switched-off step is a rest");
-        a.steps[1].on = true;
+        a.patterns[0].steps[1].on = true;
+
+        // Per-step transpose in semitones, and an arrangement A A B (B is 2 steps, shifted +7).
+        {
+            ArpSettings t;
+            t.enabled = true; t.mode = ArpSettings::up; t.den = 16;
+            t.patterns[0].length = 2;
+            t.patterns[0].steps[1].transpose = 5;
+            t.patterns[1].length = 2;
+            t.patterns[1].steps[0].transpose = 7;
+            t.patterns[1].steps[1].transpose = -12;
+            t.arrangementLength = 3;
+            t.arrangement = { 0, 0, 1 };
+            auto seq = ons (runArp (t, { { 0, 60, true } }, 1.0));
+            const int expect[] { 60, 65, 60, 65, 67, 48, 60, 65 };
+            bool okSeq = seq.size() >= 8;
+            String got;
+            for (size_t i = 0; i < std::min<size_t> (8, seq.size()); ++i)
+            {
+                got << seq[i].note << " ";
+                okSeq = okSeq && seq[i].note == expect[i];
+            }
+            check (okSeq, "arp arrangement A A B with semitone steps", got);
+        }
+        // Old presets: octave cells become +/-12 semitones, single pattern.
+        {
+            auto old = JSON::parse (R"({"enabled":true,"length":4,"steps":[{"on":true,"velocity":1,"octave":1},{"on":false,"velocity":0.5,"octave":-1}]})");
+            const auto conv = ArpSettings::fromJson (old);
+            check (conv.patterns[0].length == 4 && conv.patterns[0].steps[0].transpose == 12 && ! conv.patterns[0].steps[1].on
+                   && conv.patterns[0].steps[1].transpose == -12 && conv.arrangementLength == 1,
+                   "older arp settings load (octaves become semitones)");
+            const auto again = ArpSettings::fromJson (JSON::parse (JSON::toString (conv.toJson())));
+            check (again == conv, "arp patterns and arrangement save and load");
+        }
 
         auto released = runArp (a, { { 100, 60, true }, { 100, 64, true }, { 20000, 60, false }, { 20000, 64, false } }, 1.0);
         juce::int64 lastOn = 0;
@@ -654,6 +746,79 @@ int main (int argc, char** argv)
             auto out = runFx (rv, in);
             const auto tail = level (out, (size_t) (SR * 0.5), (size_t) (SR * 0.9));
             check (tail > 0.003, "reverb tail rings after the note", "tail rms " + String (tail, 4));
+        }
+
+        // Reverb types must sound clearly different: compare their impulse responses.
+        {
+            const int numModes = (int) def (Type::reverb).modes.size();
+            std::vector<std::vector<double>> env ((size_t) numModes);   // energy envelope in dB, 20 ms bins, 0..2 s
+            std::vector<double> early ((size_t) numModes), tail ((size_t) numModes), bright ((size_t) numModes);
+            String table;
+            for (int m = 0; m < numModes; ++m)
+            {
+                auto rv = makeModule (Type::reverb, 1, SR);
+                setMode (rv, m);
+                rv.norm[6] = 1.0f;   // 100% wet
+                std::vector<float> imp ((size_t) (SR * 2.0), 0.0f);
+                imp[0] = 1.0f;
+                auto out = runFx (rv, imp);
+                const size_t bin = (size_t) (SR * 0.02);
+                for (size_t b0 = 0; b0 + bin <= out.size(); b0 += bin)
+                    env[(size_t) m].push_back (20.0 * std::log10 (level (out, b0, b0 + bin) + 1e-9));
+                early[(size_t) m] = 20.0 * std::log10 (level (out, 0, (size_t) (SR * 0.08)) + 1e-9);
+                tail[(size_t) m] = 20.0 * std::log10 (level (out, (size_t) (SR * 0.6), (size_t) (SR * 1.6)) + 1e-9);
+                double diff = 0, total = 0;   // brightness: energy of the difference signal vs the signal
+                for (size_t i = (size_t) (SR * 0.1); i < (size_t) (SR * 0.8); ++i)
+                {
+                    diff += (double) (out[i] - out[i - 1]) * (out[i] - out[i - 1]);
+                    total += (double) out[i] * out[i];
+                }
+                bright[(size_t) m] = 10.0 * std::log10 (diff / (total + 1e-12) + 1e-12);
+                table << def (Type::reverb).modes[(size_t) m] << " " << roundToInt (early[(size_t) m]) << "/" << roundToInt (tail[(size_t) m])
+                      << "/" << roundToInt (bright[(size_t) m]) << "  ";
+            }
+            double minDist = 1e9;
+            String closest;
+            for (int a2 = 0; a2 < numModes; ++a2)
+                for (int b2 = a2 + 1; b2 < numModes; ++b2)
+                {
+                    double d = 0;
+                    const size_t nb = std::min (env[(size_t) a2].size(), env[(size_t) b2].size());
+                    for (size_t k = 0; k < nb; ++k)
+                        d += std::abs (env[(size_t) a2][k] - env[(size_t) b2][k]);
+                    d = d / (double) nb + std::abs (bright[(size_t) a2] - bright[(size_t) b2]) * 2.0;
+                    if (d < minDist)
+                    {
+                        minDist = d;
+                        closest = String (def (Type::reverb).modes[(size_t) a2]) + " vs " + def (Type::reverb).modes[(size_t) b2];
+                    }
+                }
+            std::printf ("      reverb early/tail dB/brightness: %s\n", table.toRawUTF8());
+            check (minDist > 3.0 && tail[3] < tail[1] - 15.0 && tail[4] > tail[1],
+                   "the 7 reverb types sound clearly different", "closest pair " + closest + ": " + String (minDist, 1));
+        }
+
+        // Every reverb type stays stable at maximum size and decay (Shimmer feeds itself).
+        {
+            String unstable;
+            for (int m = 0; m < (int) def (Type::reverb).modes.size(); ++m)
+            {
+                auto rv = makeModule (Type::reverb, 1, SR);
+                setMode (rv, m);
+                rv.norm[0] = 1.0f;   // size
+                rv.norm[1] = 1.0f;   // decay 20 s
+                rv.norm[6] = 1.0f;
+                auto in = tone (330, 0.5, 0.5f);
+                in.resize ((size_t) (SR * 8.0), 0.0f);
+                auto out = runFx (rv, in);
+                const auto peakEarly = level (out, 0, (size_t) (SR * 1.0));
+                const auto peakLate = level (out, (size_t) (SR * 7.0), (size_t) (SR * 8.0));
+                bool finite = true;
+                for (auto x : out) finite = finite && std::isfinite (x);
+                if (! finite || peakLate > peakEarly * 1.2)
+                    unstable << def (Type::reverb).modes[(size_t) m] << " (" << String (peakLate / (peakEarly + 1e-9), 2) << "x) ";
+            }
+            check (unstable.isEmpty(), "reverb stays stable at maximum size and decay", unstable);
         }
 
         // Compressor: a loud tone comes out quieter and reports gain reduction.

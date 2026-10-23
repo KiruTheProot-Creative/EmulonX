@@ -14,7 +14,13 @@ struct ArpStep
 {
     bool on = true;
     float velocity = 0.8f;   // 0..1
-    int octave = 0;          // -1 .. +2
+    int transpose = 0;       // semitones, -24 .. +24
+};
+
+struct ArpPattern
+{
+    int length = 8;          // 1..16 steps
+    std::array<ArpStep, 16> steps {};
 };
 
 struct ArpSettings
@@ -30,11 +36,16 @@ struct ArpSettings
     float swing = 0.0f;               // 0..1 (delays every second step by up to half a step)
     bool latch = false;
     bool playedVelocity = false;      // use the velocity you played instead of the pattern's
-    int length = 8;                   // 1..16 steps
-    std::array<ArpStep, 16> steps {};
+    static constexpr int numPatterns = 8, maxSlots = 16;
+    std::array<ArpPattern, numPatterns> patterns {};   // A..H
+    std::array<int, maxSlots> arrangement {};          // which pattern each slot plays
+    int arrangementLength = 1;                         // 1..16 slots, played in a loop
 
     ArpSettings();
     double stepBeats() const noexcept;   // length of one step in quarter-note beats
+    int totalSteps() const noexcept;     // one pass through the arrangement
+    /** Which slot / pattern / step a running step counter is at. */
+    void locate (juce::int64 stepIndex, int& slot, int& pattern, int& step) const noexcept;
     juce::var toJson() const;
     static ArpSettings fromJson (const juce::var&);
     bool operator== (const ArpSettings&) const noexcept;
@@ -57,7 +68,7 @@ public:
     bool isActive() const noexcept { return settings.enabled || numSounding > 0; }
 
     // For the UI (any thread)
-    std::atomic<int> currentStep { -1 };
+    std::atomic<int> currentStep { -1 }, currentPattern { -1 }, currentSlot { -1 };
     std::atomic<juce::uint64> heldMask[2] {};
 
 private:

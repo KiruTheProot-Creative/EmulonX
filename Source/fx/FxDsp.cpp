@@ -35,83 +35,184 @@ inline float readBack (const std::vector<float>& b, int w, double d)
     return (float) (b[(size_t) i0] + (b[(size_t) i1] - b[(size_t) i0]) * f);
 }
 
-//== Reverb: 8-line feedback delay network with diffusion ========================
+//== Reverb: seven types, each built differently ==================================
 class Reverb final : public Processor
 {
 public:
+    enum Mode { room, hall, plate, ambience, cathedral, spring, shimmer, numModes };
+
     void prepare (double sr) override
     {
-        mx = (int) std::ceil (73.1 * 1.35 * 2.0 * sr / 1000.0) + 64;
+        mx = (int) std::ceil (0.34 * sr) + 256;
         for (auto& l : lines) { l.b.assign ((size_t) mx, 0.0f); l.lp = 0; }
         pre.assign ((size_t) std::ceil (sr * 0.3) + 4, 0.0f);
-        for (int k = 0; k < 4; ++k)
+        er.assign ((size_t) std::ceil (sr * 0.32) + 4, 0.0f);
+        for (int k = 0; k < maxDiffusers; ++k)
         {
-            ap[k].b.assign ((size_t) std::ceil (apMs[k] * sr / 1000.0) + 2, 0.0f);
-            ap[k].n = juce::jmax (1, (int) std::round (apMs[k] * sr / 1000.0));
+            ap[k].b.assign ((size_t) std::ceil (0.03 * sr) + 4, 0.0f);
             ap[k].i = 0;
         }
-        w = pw = 0; ph = hl = hr = 0;
+        for (auto& s : springs)
+        {
+            s.line.assign ((size_t) std::ceil (0.12 * sr) + 8, 0.0f);
+            s.w = 0;
+            for (auto& d : s.disp) d = {};
+            s.lp = s.hp = s.inLp = s.inHp = 0;
+        }
+        pitch.assign (4096, 0.0f);
+        pw = 0; phase = 0;
+        w = pwi = ewi = 0; ph = hl = hr = inLp = shimmerLp = 0;
         std::fill (std::begin (y), std::end (y), 0.0);
     }
 
     void process (const float* v, const Settings& s, float* L, float* R, int N, double sr, double) noexcept override
     {
         if (mx == 0) return;
-        const int mode = juce::jlimit (0, 3, s.mode);
-        const double size = v[0], decay = v[1], preMs = v[2], damp = v[3], lo = v[4], width = v[5], mix = v[6];
-        const double sc = scale[mode] * (0.4 + 1.6 * size);
+        const int mode = juce::jlimit (0, numModes - 1, s.mode);
+        if (mode == spring)
+            processSpring (v, L, R, N, sr);
+        else
+            processRoom (mode, v, L, R, N, sr);
+    }
+
+private:
+    struct ModeDef
+    {
+        double scale, modMs, modHz, diffGain;
+        int diffStages;
+        double erLevel, lateLevel, dampMul, decayMul, decayCap, outGain;
+        int erSet;
+    };
+    static const ModeDef& modeDef (int m)
+    {
+        static const ModeDef defs[numModes] {
+            //  scale  mod   rate  diffG stg  er    late  damp  decay cap   out  erSet
+            {   0.42, 0.25, 0.80, 0.62, 3,   0.85, 0.75, 0.75, 1.0,  20.0, 1.30, 0 },   // room
+            {   1.15, 0.90, 0.30, 0.70, 4,   0.35, 1.00, 0.90, 1.0,  20.0, 1.45, 1 },   // hall
+            {   0.62, 0.55, 1.30, 0.78, 6,   0.00, 1.00, 2.20, 1.0,  20.0, 1.20, -1 },  // plate
+            {   0.30, 0.10, 0.50, 0.50, 2,   1.10, 0.22, 0.60, 0.25, 0.8,  1.20, 2 },   // ambience
+            {   2.10, 1.60, 0.17, 0.72, 4,   0.22, 1.15, 0.55, 1.7,  30.0, 1.55, 3 },   // cathedral
+            {   1.00, 0.00, 0.00, 0.00, 0,   0.00, 1.00, 1.00, 1.0,  20.0, 1.00, -1 },  // spring (own path)
+            {   1.20, 1.10, 0.25, 0.72, 4,   0.25, 1.00, 1.10, 1.3,  30.0, 1.35, 1 },   // shimmer
+        };
+        return defs[juce::jlimit (0, numModes - 1, m)];
+    }
+
+    struct Tap { float ms, gain, pan; };
+    static const std::vector<Tap>& erTaps (int set)
+    {
+        static const std::vector<Tap> sets[4] {
+            { { 3.1f, .9f, -.6f }, { 5.3f, .8f, .7f }, { 7.9f, .75f, -.3f }, { 11.2f, .7f, .5f }, { 13.7f, .6f, -.8f },
+              { 17.3f, .55f, .2f }, { 21.1f, .5f, -.4f }, { 24.8f, .45f, .8f }, { 29.3f, .4f, -.1f }, { 34.6f, .35f, .4f } },
+            { { 12.4f, .7f, -.7f }, { 19.8f, .6f, .6f }, { 27.1f, .55f, -.2f }, { 36.5f, .5f, .8f }, { 47.2f, .42f, -.5f },
+              { 58.9f, .36f, .3f }, { 71.4f, .3f, -.8f }, { 86.3f, .25f, .5f } },
+            { { 1.2f, .9f, .3f }, { 2.9f, .85f, -.5f }, { 4.4f, .8f, .7f }, { 6.1f, .78f, -.2f }, { 8.3f, .72f, .5f },
+              { 10.2f, .7f, -.8f }, { 13.0f, .66f, .1f }, { 15.7f, .6f, -.4f }, { 19.4f, .55f, .8f }, { 23.1f, .5f, -.6f },
+              { 28.0f, .45f, .4f }, { 33.6f, .4f, -.1f }, { 40.2f, .34f, .6f }, { 47.9f, .28f, -.7f } },
+            { { 21.0f, .6f, -.5f }, { 33.0f, .55f, .6f }, { 49.0f, .5f, -.8f }, { 66.0f, .45f, .3f }, { 84.0f, .4f, -.2f },
+              { 103.0f, .35f, .7f }, { 125.0f, .3f, -.6f }, { 142.0f, .25f, .4f } } };
+        return sets[juce::jlimit (0, 3, set)];
+    }
+
+    static float readCirc (const std::vector<float>& b, int writePos, double delay)
+    {
+        const int len = (int) b.size();
+        delay = juce::jlimit (1.0, (double) len - 2.0, delay);
+        double p = (double) writePos - delay;
+        if (p < 0) p += len;
+        const int i0 = juce::jmin (len - 1, (int) p);
+        const double f = p - i0;
+        const int i1 = i0 + 1 >= len ? 0 : i0 + 1;
+        return (float) (b[(size_t) i0] + (b[(size_t) i1] - b[(size_t) i0]) * f);
+    }
+
+    //== Room, Hall, Plate, Ambience, Cathedral, Shimmer: early reflections + 8-line FDN
+    void processRoom (int mode, const float* v, float* L, float* R, int N, double sr) noexcept
+    {
+        const auto& M = modeDef (mode);
+        const double size = v[0], damp = v[3], lo = v[4], width = v[5], mix = v[6];
+        const double decay = juce::jmin (M.decayCap, v[1] * M.decayMul);
+        const double sc = M.scale * (0.4 + 1.6 * size);
         double lens[8], gs[8], md[8];
+        const double modDepth = M.modMs * 0.001 * sr;
         for (int j = 0; j < 8; ++j)
         {
-            lens[j] = juce::jmin ((double) mx - 24.0, lineMs[j] * sc * sr / 1000.0);
+            lens[j] = juce::jmin ((double) mx - modDepth - 8.0, lineMs[j] * sc * sr / 1000.0);
             gs[j] = std::pow (10.0, -3.0 * lens[j] / (decay * sr));
         }
-        const double dc = onePole (damp, sr), lc = 1.0 - std::exp (-twoPi * lo / sr);
+        const double dc = onePole (damp * M.dampMul, sr), lc = 1.0 - std::exp (-twoPi * lo / sr);
+        const double inC = mode == plate ? 1.0 : onePole (juce::jmin (sr * 0.45, damp * 1.3), sr);
         const int plen = (int) pre.size();
-        const int pd = juce::jlimit (1, plen - 1, (int) std::round (preMs * 0.001 * sr));
-        const double gd = diffusion[mode];
+        const int pd = juce::jlimit (1, plen - 1, (int) std::round (v[2] * 0.001 * sr));
         ph += N / sr;
         for (int j = 0; j < 8; ++j)
-            md[j] = lens[j] + (mode == 2 ? 2.0 : 5.0) * std::sin (twoPi * ph * (0.5 + j * 0.07) + j);
+            md[j] = lens[j] + modDepth * std::sin (twoPi * ph * M.modHz * (0.7 + 0.11 * j) + j * 1.7);
+
+        // Diffuser lengths (scaled with the room size)
+        int apn[maxDiffusers];
+        for (int k = 0; k < maxDiffusers; ++k)
+            apn[k] = juce::jlimit (1, (int) ap[k].b.size() - 2, (int) std::round (apMs[k] * std::sqrt (sc) * sr / 1000.0));
+
+        // Early reflection taps
+        const auto& taps = M.erSet >= 0 ? erTaps (M.erSet) : erTaps (0);
+        const double erScale = 0.5 + size;
+        const int elen = (int) er.size();
 
         for (int i = 0; i < N; ++i)
         {
             const double xl = L[i], xr = R[i];
-            pre[(size_t) pw] = (float) ((xl + xr) * 0.5);
-            int rp = pw - pd;
+            pre[(size_t) pwi] = (float) ((xl + xr) * 0.5);
+            int rp = pwi - pd;
             if (rp < 0) rp += plen;
-            double d = pre[(size_t) rp];
-            if (++pw >= plen) pw = 0;
-            for (int k = 0; k < 4; ++k)
+            const double dry = pre[(size_t) rp];
+            if (++pwi >= plen) pwi = 0;
+
+            // Early reflections (from the pre-delayed input)
+            double el = 0, erR = 0;
+            er[(size_t) ewi] = (float) dry;
+            if (M.erSet >= 0 && M.erLevel > 0)
+                for (auto& t : taps)
+                {
+                    const double val = readCirc (er, ewi, t.ms * erScale * 0.001 * sr) * t.gain;
+                    el += val * std::sqrt ((1.0 - t.pan) * 0.5);
+                    erR += val * std::sqrt ((1.0 + t.pan) * 0.5);
+                }
+            if (++ewi >= elen) ewi = 0;
+
+            // Input: tone, then diffusion
+            inLp += (dry - inLp) * inC;
+            double d = inLp;
+            for (int k = 0; k < M.diffStages && k < maxDiffusers; ++k)
             {
                 auto& A = ap[k];
-                const double bo = A.b[(size_t) A.i], yv = bo - gd * d;
-                A.b[(size_t) A.i] = (float) (d + gd * yv);
-                if (++A.i >= A.n) A.i = 0;
+                if (A.i >= apn[k]) A.i = 0;
+                const double bo = A.b[(size_t) A.i], yv = bo - M.diffGain * d;
+                A.b[(size_t) A.i] = (float) (d + M.diffGain * yv);
+                ++A.i;
                 d = yv;
             }
+
+            // Late tail: 8 modulated delay lines with a Householder mix
             double sum = 0;
             for (int j = 0; j < 8; ++j)
             {
                 auto& Ln = lines[j];
-                double p = w - md[j];
-                if (p < 0) p += mx;
-                const int i0 = juce::jmin (mx - 1, (int) p);
-                const double f = p - i0;
-                const int i1 = i0 + 1 >= mx ? 0 : i0 + 1;
-                double yy = Ln.b[(size_t) i0] + (Ln.b[(size_t) i1] - Ln.b[(size_t) i0]) * f;
+                double yy = readCirc (Ln.b, w, md[j]);
                 Ln.lp += (yy - Ln.lp) * dc;
                 yy = Ln.lp * gs[j];
                 y[j] = yy;
                 sum += yy;
             }
+            double shim = 0;
+            if (mode == shimmer)
+                shim = shimmerTap (sum * 0.25) * 0.32;
             sum *= 0.25;
             for (int j = 0; j < 8; ++j)
-                lines[j].b[(size_t) w] = (float) (y[j] - sum + ((j & 1) ? -d : d) * 0.5);
+                lines[j].b[(size_t) w] = (float) (y[j] - sum + ((j & 1) ? -d : d) * 0.5 + shim);
             if (++w >= mx) w = 0;
 
-            const double og = outGain[mode];
-            double ol = (y[0] + y[2] + y[4] + y[6]) * og, orr = (y[1] + y[3] + y[5] + y[7]) * og;
+            double ol = (y[0] + y[2] + y[4] + y[6]) * M.outGain * M.lateLevel + el * M.erLevel * 0.6;
+            double orr = (y[1] + y[3] + y[5] + y[7]) * M.outGain * M.lateLevel + erR * M.erLevel * 0.6;
             const double m = (ol + orr) * 0.5, sd = (ol - orr) * 0.5 * width;
             ol = m + sd; orr = m - sd;
             hl += (ol - hl) * lc; ol -= hl;
@@ -121,19 +222,87 @@ public:
         }
     }
 
-private:
+    /** Octave-up pitch shifter (two crossfading read heads) for the Shimmer tail. */
+    double shimmerTap (double x) noexcept
+    {
+        const int W = (int) pitch.size();
+        pitch[(size_t) pw] = (float) x;
+        phase -= 1.0 / (W - 8);
+        if (phase < 0) phase += 1.0;
+        double out = 0;
+        for (int h = 0; h < 2; ++h)
+        {
+            double p = phase + 0.5 * h;
+            if (p >= 1.0) p -= 1.0;
+            const double win = std::sin (pi * p);
+            out += win * win * readCirc (pitch, pw, 2.0 + p * (W - 8));
+        }
+        if (++pw >= W) pw = 0;
+        shimmerLp += (out - shimmerLp) * 0.35;   // soften the top end
+        return shimmerLp;
+    }
+
+    //== Spring: a delay line with a chain of dispersive all-passes ("boing")
+    void processSpring (const float* v, float* L, float* R, int N, double sr) noexcept
+    {
+        const double size = v[0], decay = v[1], damp = v[3], lo = v[4], width = v[5], mix = v[6];
+        static constexpr double baseMs[2] { 31.0, 37.3 };   // two springs of different length
+        const double lc = 1.0 - std::exp (-twoPi * juce::jmax (lo, 120.0) / sr);
+        const double hc = onePole (juce::jmin (damp, 5000.0), sr);
+        double D[2], fb[2];
+        for (int c = 0; c < 2; ++c)
+        {
+            const int len = (int) springs[c].line.size();
+            D[c] = juce::jlimit (8.0, (double) len - 4.0, baseMs[c] * (0.6 + 1.4 * size) * 0.001 * sr);
+            fb[c] = std::pow (10.0, -3.0 * D[c] / (juce::jmax (0.1, decay) * sr));
+        }
+        for (int i = 0; i < N; ++i)
+        {
+            const double x = (L[i] + R[i]) * 0.5;
+            double out[2];
+            for (int c = 0; c < 2; ++c)
+            {
+                auto& sp = springs[c];
+                // band-limit the input like a spring tank (no deep lows, no air)
+                sp.inHp += (x - sp.inHp) * lc;
+                double in = x - sp.inHp;
+                sp.inLp += (in - sp.inLp) * hc;
+                in = sp.inLp;
+                double t = readCirc (sp.line, sp.w, D[c]);
+                // dispersion: high frequencies arrive at a different time -> the chirp
+                for (auto& ap1 : sp.disp)
+                {
+                    const double yv = -dispersion * t + ap1.x1 + dispersion * ap1.y1;
+                    ap1.x1 = t;
+                    ap1.y1 = yv;
+                    t = yv;
+                }
+                sp.lp += (t - sp.lp) * hc;
+                sp.line[(size_t) sp.w] = (float) (in + sp.lp * fb[c]);
+                if (++sp.w >= (int) sp.line.size()) sp.w = 0;
+                sp.hp += (sp.lp - sp.hp) * lc;
+                out[c] = (sp.lp - sp.hp) * 1.6;
+            }
+            const double m = (out[0] + out[1]) * 0.5, sd = (out[0] - out[1]) * 0.5 * width;
+            L[i] = (float) (L[i] * (1 - mix) + (m + sd) * mix);
+            R[i] = (float) (R[i] * (1 - mix) + (m - sd) * mix);
+        }
+    }
+
     static constexpr double lineMs[8] { 29.7, 37.1, 41.1, 43.7, 53.3, 59.9, 67.7, 73.1 };
-    static constexpr double apMs[4] { 4.7, 3.6, 12.7, 9.3 };
-    static constexpr double scale[4] { 0.55, 1.35, 0.9, 0.3 };
-    static constexpr double diffusion[4] { 0.5, 0.62, 0.75, 0.45 };
-    static constexpr double outGain[4] { 1.1, 1.6, 1.3, 0.9 };
+    static constexpr int maxDiffusers = 6;
+    static constexpr double apMs[maxDiffusers] { 4.7, 3.6, 12.7, 9.3, 2.1, 7.4 };
+    static constexpr double dispersion = 0.62;
     struct Line { std::vector<float> b; double lp = 0; };
-    struct AllPass { std::vector<float> b; int n = 1, i = 0; };
+    struct AllPass { std::vector<float> b; int i = 0; };
+    struct Disp { double x1 = 0, y1 = 0; };
+    struct Spring { std::vector<float> line; int w = 0; std::array<Disp, 18> disp {}; double lp = 0, hp = 0, inLp = 0, inHp = 0; };
     Line lines[8];
-    AllPass ap[4];
-    std::vector<float> pre;
-    int mx = 0, w = 0, pw = 0;
-    double ph = 0, hl = 0, hr = 0, y[8] {};
+    AllPass ap[maxDiffusers];
+    Spring springs[2];
+    std::vector<float> pre, er, pitch;
+    int mx = 0, w = 0, pwi = 0, ewi = 0, pw = 0;
+    double ph = 0, hl = 0, hr = 0, y[8] {}, inLp = 0, phase = 0, shimmerLp = 0;
 };
 
 //== Compressor / Limiter / OTT ==================================================
