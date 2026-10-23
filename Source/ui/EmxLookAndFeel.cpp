@@ -1,0 +1,128 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+#include "EmxLookAndFeel.h"
+#include "Theme.h"
+
+namespace emx
+{
+using namespace juce;
+
+EmxLookAndFeel::EmxLookAndFeel()
+{
+    setColour (TextButton::textColourOffId, Colour (0xffdddddd));
+    setColour (TextButton::textColourOnId, Colours::white);
+    setColour (PopupMenu::backgroundColourId, Colour (0xff141217));
+    setColour (PopupMenu::textColourId, Colour (0xffff5050));
+    setColour (PopupMenu::highlightedBackgroundColourId, Colour (0xffa01010));
+    setColour (PopupMenu::highlightedTextColourId, Colours::white);
+    setColour (Label::textColourId, theme::red);
+    setColour (Label::textWhenEditingColourId, theme::red);
+    setColour (TextEditor::backgroundColourId, theme::ledBg);
+    setColour (TextEditor::textColourId, theme::red);
+    setColour (TextEditor::highlightColourId, theme::red.withAlpha (0.35f));
+    setColour (TextEditor::outlineColourId, Colours::black);
+    setColour (TextEditor::focusedOutlineColourId, theme::red);
+    setColour (CaretComponent::caretColourId, theme::red);
+}
+
+//== Knob: your knob artwork + a glowing pointer ================================
+void EmxLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int h, float pos,
+                                       float startAngle, float endAngle, Slider&)
+{
+    const auto size = (float) jmin (w, h);
+    const auto r = Rectangle<float> (size, size).withCentre (Rectangle<int> (x, y, w, h).toFloat().getCentre());
+
+    g.setImageResamplingQuality (Graphics::highResamplingQuality);
+    g.drawImage (theme::image (theme::Img::knob), r, RectanglePlacement::centred);
+
+    const auto angle = startAngle + pos * (endAngle - startAngle);
+    const auto c = r.getCentre();
+    // Pointer runs from near the centre (2%) to 42% of the knob size, like the prototype.
+    Line<float> line (c.x, c.y - size * 0.02f, c.x, c.y - size * 0.42f);
+    Path pointer;
+    pointer.addLineSegment (line, jmax (2.0f, size * 0.055f));
+    pointer.applyTransform (AffineTransform::rotation (angle, c.x, c.y));
+
+    DropShadow (theme::red.withAlpha (0.9f), roundToInt (size * 0.12f), {}).drawForPath (g, pointer);
+    ColourGradient grad (Colours::white, c.x + std::sin (angle) * size * 0.42f, c.y - std::cos (angle) * size * 0.42f,
+                         theme::red, c.x, c.y, false);
+    g.setGradientFill (grad);
+    g.fillPath (pointer);
+}
+
+//== Fader: your slider artwork + a metal cap ===================================
+void EmxLookAndFeel::drawLinearSlider (Graphics& g, int x, int y, int w, int h, float pos, float, float,
+                                       Slider::SliderStyle style, Slider& s)
+{
+    if (style != Slider::LinearVertical)
+    {
+        LookAndFeel_V4::drawLinearSlider (g, x, y, w, h, pos, 0, 0, style, s);
+        return;
+    }
+
+    const auto track = Rectangle<float> ((float) x, (float) y, (float) w, (float) h);
+    g.setImageResamplingQuality (Graphics::highResamplingQuality);
+    g.drawImage (theme::image (theme::Img::slider), track.withSizeKeepingCentre (jmin ((float) w, h * 0.234f), (float) h),
+                 RectanglePlacement::stretchToFit);
+
+    const auto capH = 16.0f;
+    auto cap = Rectangle<float> (track.getCentreX() - w * 0.5f - 4.0f, pos - capH * 0.5f, w + 8.0f, capH);
+    g.setGradientFill (ColourGradient::vertical (Colour (0xff8a8590), cap.getY(), Colour (0xff202025), cap.getBottom()));
+    g.fillRoundedRectangle (cap, 4.0f);
+    g.setColour (Colours::black);
+    g.drawRoundedRectangle (cap, 4.0f, 1.0f);
+    g.setColour (theme::red);
+    g.fillRect (cap.reduced (3.0f, 0).withSizeKeepingCentre (cap.getWidth() - 6.0f, 2.0f));
+}
+
+//== Buttons: brushed metal, glowing red when switched on =======================
+void EmxLookAndFeel::drawButtonBackground (Graphics& g, Button& b, const Colour&, bool highlighted, bool down)
+{
+    auto r = b.getLocalBounds().toFloat().reduced (0.5f, 1.0f);
+    if (down)
+        r = r.translated (0, 1.0f);
+
+    if (b.getToggleState())
+    {
+        DropShadow (theme::red.withAlpha (0.45f), 10, {}).drawForRectangle (g, r.toNearestInt());
+        g.setGradientFill (ColourGradient::vertical (Colour (0xffc62828), r.getY(), Colour (0xff5a0808), r.getBottom()));
+    }
+    else
+    {
+        g.setGradientFill (ColourGradient::vertical (Colour (0xff55515a), r.getY(), Colour (0xff1d1b20), r.getBottom()));
+    }
+    g.fillRoundedRectangle (r, 5.0f);
+
+    g.setColour ((b.getToggleState() ? Colour (0xffff7a7a) : Colour (0xff7a747f)).withAlpha (highlighted ? 1.0f : 0.8f));
+    g.fillRect (r.getX() + 4.0f, r.getY() + 1.0f, r.getWidth() - 8.0f, 1.0f);
+    g.setColour (Colours::black);
+    g.drawRoundedRectangle (r, 5.0f, 1.0f);
+}
+
+Font EmxLookAndFeel::getTextButtonFont (TextButton&, int buttonHeight)
+{
+    return theme::font (jmin (10.0f, buttonHeight * 0.42f), 700, 0.08f);
+}
+
+//== Menus =======================================================================
+void EmxLookAndFeel::drawPopupMenuBackground (Graphics& g, int w, int h)
+{
+    g.setGradientFill (ColourGradient::vertical (Colour (0xff26232a), 0.0f, Colour (0xff111014), (float) h));
+    g.fillAll();
+    g.setColour (Colours::black);
+    g.drawRect (0, 0, w, h);
+}
+
+Font EmxLookAndFeel::getPopupMenuFont() { return theme::font (11.0f, 500, 0.06f); }
+
+void EmxLookAndFeel::drawPopupMenuSectionHeader (Graphics& g, const Rectangle<int>& area, const String& name)
+{
+    g.setFont (theme::font (9.0f, 700, 0.14f));
+    g.setColour (Colours::white);
+    g.drawText (name.toUpperCase(), area.reduced (12, 0), Justification::bottomLeft, true);
+}
+
+Font EmxLookAndFeel::getLabelFont (Label& l)
+{
+    return theme::font ((float) jmax (8, l.getHeight() / 2), 500, 0.04f);
+}
+} // namespace emx

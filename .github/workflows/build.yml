@@ -1,0 +1,91 @@
+# Builds Emulon X in the cloud on every push.
+# Download the finished plugin from the run's "Artifacts" section on GitHub.
+# Pushing a tag like v0.1.0 also publishes a GitHub Release with the downloads.
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*" ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows (VST3 + Standalone)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache JUCE download
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: juce-9.0.4-windows
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Collect files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item -Recurse "build/EmulonX_artefacts/Release/VST3/Emulon X.vst3" "dist/Emulon X.vst3"
+          Copy-Item "build/EmulonX_artefacts/Release/Standalone/Emulon X.exe" "dist/Emulon X.exe"
+          Copy-Item README.md, LICENSE dist/
+          Compress-Archive -Path dist/* -DestinationPath EmulonX-Windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EmulonX-Windows
+          path: dist/
+
+      - name: Publish release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: EmulonX-Windows.zip
+
+  macos:
+    name: macOS (VST3 + AU + Standalone)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache JUCE download
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: juce-9.0.4-macos
+
+      - name: Configure
+        run: cmake -S . -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Collect files
+        run: |
+          mkdir -p dist
+          cp -R "build/EmulonX_artefacts/Release/VST3/Emulon X.vst3" dist/
+          cp -R "build/EmulonX_artefacts/Release/AU/Emulon X.component" dist/
+          cp -R "build/EmulonX_artefacts/Release/Standalone/Emulon X.app" dist/
+          cp README.md LICENSE dist/
+          ditto -c -k --sequesterRsrc --keepParent dist EmulonX-macOS.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EmulonX-macOS
+          path: dist/
+
+      - name: Publish release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: EmulonX-macOS.zip

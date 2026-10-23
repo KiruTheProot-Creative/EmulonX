@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+#include "Widgets.h"
+#include "Theme.h"
+
+namespace emx
+{
+using namespace juce;
+
+//== EmxKnob ====================================================================
+class EmxKnob::NameLabel final : public Label
+{
+public:
+    NameLabel()
+    {
+        setEditable (false, true, false);
+        setJustificationType (Justification::centred);
+    }
+
+    void paint (Graphics& g) override
+    {
+        if (! isBeingEdited())
+            theme::drawLed (g, getLocalBounds().toFloat(), getText(), 8.0f);
+    }
+};
+
+EmxKnob::EmxKnob (AudioProcessorValueTreeState& state, const String& paramId, const String& captionText, int size)
+    : caption (captionText.toUpperCase()), knobSize (size)
+{
+    slider.setSliderStyle (Slider::RotaryVerticalDrag);
+    slider.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+    slider.setRotaryParameters (MathConstants<float>::pi * 1.25f, MathConstants<float>::pi * 2.75f, true);
+    slider.setMouseDragSensitivity (160);
+    slider.setPopupMenuEnabled (false);
+    addAndMakeVisible (slider);
+
+    attachment = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (state, paramId, slider);
+
+    if (auto* p = state.getParameter (paramId))
+    {
+        slider.setDoubleClickReturnValue (true, p->convertFrom0to1 (p->getDefaultValue()));
+        slider.setTooltip (p->getName (64) + " - drag up/down, double-click to reset");
+    }
+
+    slider.onValueChange = [this] { repaint (ledArea.toNearestInt().expanded (2)); };
+}
+
+EmxKnob::~EmxKnob() = default;
+
+void EmxKnob::setEditableCaption (std::function<String()> getName, std::function<void (const String&)> setName)
+{
+    nameLabel = std::make_unique<NameLabel>();
+    nameLabel->setText (getName(), dontSendNotification);
+    nameLabel->setTooltip ("Double-click to rename");
+    nameLabel->onTextChange = [this, getName, setName]
+    {
+        setName (nameLabel->getText());
+        nameLabel->setText (getName(), dontSendNotification);
+    };
+    addAndMakeVisible (*nameLabel);
+    resized();
+}
+
+void EmxKnob::resized()
+{
+    auto r = getLocalBounds().toFloat();
+    slider.setBounds (r.removeFromTop ((float) knobSize).withSizeKeepingCentre ((float) knobSize, (float) knobSize).toNearestInt());
+    r.removeFromTop (4.0f);
+    ledArea = r.removeFromTop (16.0f).withSizeKeepingCentre (jmin (r.getWidth(), 62.0f), 16.0f);
+    r.removeFromTop (3.0f);
+    captionArea = r.removeFromTop (14.0f);
+    if (nameLabel != nullptr)
+        nameLabel->setBounds (captionArea.withSizeKeepingCentre (jmin (captionArea.getWidth(), 74.0f), 14.0f).toNearestInt());
+}
+
+void EmxKnob::paint (Graphics& g)
+{
+    theme::drawLed (g, ledArea, slider.getTextFromValue (slider.getValue()), 9.0f);
+    if (nameLabel == nullptr)
+    {
+        g.setColour (Colours::white);
+        g.setFont (theme::font (8.0f, 700, 0.12f));
+        g.drawText (caption, captionArea, Justification::centredTop, false);
+    }
+}
+
+//== LedDisplay =================================================================
+LedDisplay::LedDisplay (std::function<String()> textSource, float h) : source (std::move (textSource)), textHeight (h) {}
+
+void LedDisplay::refresh()
+{
+    auto t = source();
+    if (t != shown)
+    {
+        shown = t;
+        repaint();
+    }
+}
+
+void LedDisplay::paint (Graphics& g)
+{
+    if (shown.isEmpty())
+        shown = source();
+    theme::drawLed (g, getLocalBounds().toFloat(), shown, textHeight);
+}
+
+//== GearButton =================================================================
+GearButton::GearButton() : Button ("Settings") { setTooltip ("Settings"); }
+
+void GearButton::paintButton (Graphics& g, bool highlighted, bool down)
+{
+    getLookAndFeel().drawButtonBackground (g, *this, {}, highlighted, down);
+
+    const auto c = getLocalBounds().toFloat().getCentre().translated (0, down ? 1.0f : 0.0f);
+    const float R = 7.0f, r = 5.0f;
+    Path gear;
+    gear.addEllipse (c.x - r, c.y - r, 2 * r, 2 * r);
+    for (int i = 0; i < 8; ++i)
+    {
+        Path tooth;
+        tooth.addRectangle (c.x - 1.6f, c.y - R - 0.5f, 3.2f, 4.0f);
+        tooth.applyTransform (AffineTransform::rotation (MathConstants<float>::twoPi * (float) i / 8.0f, c.x, c.y));
+        gear.addPath (tooth);
+    }
+    g.setColour (highlighted ? Colours::white : Colour (0xffdddddd));
+    g.fillPath (gear);
+    g.setColour (Colour (0xff2b292f));
+    g.fillEllipse (c.x - 2.2f, c.y - 2.2f, 4.4f, 4.4f);
+}
+
+//== LevelMeter =================================================================
+void LevelMeter::push (float l, float r)
+{
+    level[0] = jmax (l, level[0] * 0.88f);
+    level[1] = jmax (r, level[1] * 0.88f);
+    repaint();
+}
+
+float LevelMeter::getPeakDb() const noexcept { return Decibels::gainToDecibels (jmax (level[0], level[1]), -100.0f); }
+
+void LevelMeter::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    theme::drawLed (g, r, {});
+    r = r.reduced (4.0f);
+    const float barW = (r.getWidth() - 3.0f) * 0.5f;
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        const auto db = Decibels::gainToDecibels (level[ch], -60.0f);
+        const auto h = jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f) * r.getHeight();
+        auto bar = Rectangle<float> (r.getX() + (float) ch * (barW + 3.0f), r.getBottom() - h, barW, h);
+        ColourGradient grad (Colour (0xffffd0d0), 0.0f, r.getY(), Colour (0xff7a0000), 0.0f, r.getBottom(), false);
+        grad.addColour (0.3, theme::red);
+        g.setGradientFill (grad);
+        g.fillRoundedRectangle (bar, 2.0f);
+    }
+}
+
+//== ComingSoonPanel ============================================================
+ComingSoonPanel::ComingSoonPanel (String t, String s, String m) : title (std::move (t)), subtitle (std::move (s)), message (std::move (m)) {}
+
+void ComingSoonPanel::paint (Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (1.0f);
+    theme::drawPanel (g, r);
+    auto inner = theme::drawHeading (g, r.reduced (10.0f, 8.0f), title, subtitle);
+    theme::drawLed (g, inner.withSizeKeepingCentre (jmin (inner.getWidth(), 520.0f), 34.0f), message, 10.0f);
+}
+} // namespace emx
