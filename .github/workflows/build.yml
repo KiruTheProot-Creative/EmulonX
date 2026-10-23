@@ -24,12 +24,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-9.0.4-windows
+          key: juce-9.0.4-windows-v2
 
       - name: Configure
         shell: pwsh
         run: |
-          cmake -S . -B build -A x64 2>&1 | Tee-Object -FilePath configure.log
+          cmake -S . -B build -A x64 -DEMX_BUILD_TESTS=ON 2>&1 | Tee-Object -FilePath configure.log
           if ($LASTEXITCODE -ne 0) {
             $t = ((Get-Content configure.log -Tail 40) -join "`n").Replace('%','%25').Replace("`r",'').Replace("`n",'%0A')
             Write-Output "::error title=Configure failed::$t"; exit 1 }
@@ -42,6 +42,15 @@ jobs:
             $lines = Select-String -Path build.log -Pattern ' error |error C|error LNK|CMake Error' | Select-Object -First 40 | ForEach-Object { $_.Line }
             $t = ($lines -join "`n").Replace('%','%25').Replace("`r",'').Replace("`n",'%0A')
             Write-Output "::error title=Build failed::$t"; exit 1 }
+
+      - name: Engine tests
+        shell: pwsh
+        run: |
+          & "build/EmulonXTests_artefacts/Release/EmulonXTests.exe" 2>&1 | Tee-Object -FilePath tests.log
+          if ($LASTEXITCODE -ne 0) {
+            $t = ((Select-String -Path tests.log -Pattern '^FAIL' | ForEach-Object { $_.Line }) -join "`n").Replace('%','%25').Replace("`n",'%0A')
+            Write-Output "::error title=Engine tests failed::$t"; exit 1 }
+          & "build/EmulonXTests_artefacts/Release/EmulonXTests.exe" --bench
 
       - name: Collect files
         shell: pwsh
@@ -73,12 +82,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: juce-9.0.4-macos
+          key: juce-9.0.4-macos-v2
 
       - name: Configure
         run: |
           set -o pipefail
-          if ! cmake -S . -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" 2>&1 | tee configure.log; then
+          if ! cmake -S . -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DEMX_BUILD_TESTS=ON 2>&1 | tee configure.log; then
             echo "::error title=Configure failed::$(tail -40 configure.log | sed 's/%/%25/g' | awk '{printf "%s%%0A",$0}')"; exit 1; fi
 
       - name: Build
@@ -86,6 +95,12 @@ jobs:
           set -o pipefail
           if ! cmake --build build --config Release --parallel 2>&1 | tee build.log; then
             echo "::error title=Build failed::$(grep -E 'error:|error [A-Z]|CMake Error' build.log | head -40 | sed 's/%/%25/g' | awk '{printf "%s%%0A",$0}')"; exit 1; fi
+
+      - name: Engine tests
+        run: |
+          set -o pipefail
+          if ! build/EmulonXTests_artefacts/Release/EmulonXTests 2>&1 | tee tests.log; then
+            echo "::error title=Engine tests failed::$(grep '^FAIL' tests.log | sed 's/%/%25/g' | awk '{printf "%s%%0A",$0}')"; exit 1; fi
 
       - name: Collect files
         run: |

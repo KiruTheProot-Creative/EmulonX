@@ -12,7 +12,9 @@
 
 namespace emx
 {
-class EmulonXEditor final : public juce::AudioProcessorEditor, private juce::Timer
+class EmulonXEditor final : public juce::AudioProcessorEditor,
+                            public juce::FileDragAndDropTarget,
+                            private juce::Timer
 {
 public:
     static constexpr int baseWidth = 1280, baseHeight = 800;
@@ -23,6 +25,13 @@ public:
     void resized() override;
     void setUiScale (float scale);
     void showPage (int index) { root->showPage (index); }
+
+    //== Drop audio files / presets anywhere on the window =====================
+    bool isInterestedInFileDrag (const juce::StringArray&) override;
+    void fileDragEnter (const juce::StringArray&, int, int) override { dragging = true; repaint(); }
+    void fileDragExit (const juce::StringArray&) override              { dragging = false; repaint(); }
+    void filesDropped (const juce::StringArray&, int, int) override;
+    void paintOverChildren (juce::Graphics&) override;
 
 private:
     void timerCallback() override;
@@ -54,6 +63,7 @@ private:
     juce::TooltipWindow tooltips { this, 600 };
     std::unique_ptr<Root> root;
     float uiScale = 1.0f;
+    bool dragging = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EmulonXEditor)
 };

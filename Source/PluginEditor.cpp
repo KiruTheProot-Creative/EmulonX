@@ -122,6 +122,38 @@ void EmulonXEditor::resized()
     root->setBounds (0, 0, baseWidth, baseHeight);
 }
 
+bool EmulonXEditor::isInterestedInFileDrag (const StringArray& files)
+{
+    for (auto& f : files)
+        if (loader::isSupported (File (f)))
+            return true;
+    return false;
+}
+
+void EmulonXEditor::filesDropped (const StringArray& files, int, int)
+{
+    dragging = false;
+    repaint();
+    Array<File> list;
+    for (auto& f : files)
+        list.add (File (f));
+    proc.loadFiles (list);
+    root->showPage (0);
+}
+
+void EmulonXEditor::paintOverChildren (Graphics& g)
+{
+    if (! dragging)
+        return;
+    auto r = getLocalBounds().toFloat().reduced (20.0f * uiScale);
+    g.setColour (Colours::black.withAlpha (0.55f));
+    g.fillRoundedRectangle (r, 12.0f * uiScale);
+    g.setColour (theme::red);
+    g.drawRoundedRectangle (r, 12.0f * uiScale, 3.0f * uiScale);
+    theme::drawGlowText (g, "DROP TO ADD ZONES", r, theme::font (28.0f * uiScale, 900, 0.14f), Colours::white,
+                         theme::red, roundToInt (14.0f * uiScale), Justification::centred);
+}
+
 void EmulonXEditor::timerCallback()
 {
     root->voicesLed.refresh();

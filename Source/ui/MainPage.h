@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Widgets.h"
+#include "ZonesPanel.h"
 
 namespace emx
 {
@@ -15,13 +16,14 @@ public:
 
     /** Called ~30x per second by the editor to update meters. */
     void tick();
+    ZonesPanel& getZonesPanel() noexcept { return zonesPanel; }
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
     EmulonXProcessor& proc;
-    ComingSoonPanel presetPanel, bankPanel;
+    ZonesPanel zonesPanel;
     EmxKnob masterKnob;
     LevelMeter meter;
     LedDisplay peakLed;

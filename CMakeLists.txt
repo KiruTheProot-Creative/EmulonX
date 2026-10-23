@@ -2,7 +2,7 @@
 # Licensed under the GNU AGPLv3 (see LICENSE).
 
 cmake_minimum_required(VERSION 3.22)
-project(EmulonX VERSION 0.1.0 LANGUAGES C CXX)
+project(EmulonX VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -63,7 +63,11 @@ set(EMX_SOURCES
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/Settings.cpp
-    Source/engine/TestTone.cpp
+    Source/engine/Zone.cpp
+    Source/engine/Interpolator.cpp
+    Source/engine/SamplerEngine.cpp
+    Source/engine/SampleLoader.cpp
+    Source/ui/ZonesPanel.cpp
     Source/ui/Theme.cpp
     Source/ui/EmxLookAndFeel.cpp
     Source/ui/Widgets.cpp
@@ -96,8 +100,24 @@ if(EMX_BUILD_PREVIEW)
     juce_add_console_app(EmulonXPreview PRODUCT_NAME "EmulonXPreview")
     target_sources(EmulonXPreview PRIVATE tools/preview/Preview.cpp ${EMX_SOURCES})
     target_include_directories(EmulonXPreview PRIVATE Source)
-    target_compile_definitions(EmulonXPreview PRIVATE ${EMX_DEFINITIONS} JUCE_STANDALONE_APPLICATION=1)
+    target_compile_definitions(EmulonXPreview PRIVATE ${EMX_DEFINITIONS} JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=1)
     target_link_libraries(EmulonXPreview PRIVATE
-        EmulonXAssets juce::juce_gui_extra juce::juce_audio_processors juce::juce_dsp
+        EmulonXAssets juce::juce_gui_extra juce::juce_audio_processors juce::juce_audio_formats juce::juce_dsp
         juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+endif()
+
+# --- Engine tests (no GUI needed; run in CI) ---------------------------------
+option(EMX_BUILD_TESTS "Build the EmulonXTests engine test program" OFF)
+if(EMX_BUILD_TESTS)
+    juce_add_console_app(EmulonXTests PRODUCT_NAME "EmulonXTests")
+    target_sources(EmulonXTests PRIVATE
+        tools/tests/EngineTests.cpp
+        Source/engine/Zone.cpp
+        Source/engine/Interpolator.cpp
+        Source/engine/SamplerEngine.cpp
+        Source/engine/SampleLoader.cpp)
+    target_include_directories(EmulonXTests PRIVATE Source)
+    target_compile_definitions(EmulonXTests PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_STANDALONE_APPLICATION=1)
+    target_link_libraries(EmulonXTests PRIVATE
+        juce::juce_audio_formats juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 endif()

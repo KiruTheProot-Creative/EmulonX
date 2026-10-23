@@ -9,8 +9,7 @@ using namespace juce;
 
 MainPage::MainPage (EmulonXProcessor& p)
     : proc (p),
-      presetPanel ("Preset", ".emxp", "PRESETS ARRIVE IN MILESTONE 3"),
-      bankPanel ("Bank", ".emxb", "BANKS ARRIVE IN MILESTONE 3"),
+      zonesPanel (p),
       masterKnob (p.apvts, masterParamId, "Volume", 58),
       peakLed ([this]
       {
@@ -18,8 +17,7 @@ MainPage::MainPage (EmulonXProcessor& p)
           return db < -59.0f ? String ("-INF DB") : (db > 0 ? "+" : "") + String (db, 1) + " DB";
       }, 10.0f)
 {
-    addAndMakeVisible (presetPanel);
-    addAndMakeVisible (bankPanel);
+    addAndMakeVisible (zonesPanel);
     addAndMakeVisible (masterKnob);
     addAndMakeVisible (meter);
     addAndMakeVisible (peakLed);
@@ -42,11 +40,9 @@ void MainPage::tick()
 void MainPage::resized()
 {
     auto r = getLocalBounds();
-    auto top = r.removeFromTop (178);
+    auto top = r.removeFromTop (210);
     const int w3 = (top.getWidth() - 16) / 3;
-    presetPanel.setBounds (top.removeFromLeft (w3));
-    top.removeFromLeft (8);
-    bankPanel.setBounds (top.removeFromLeft (w3));
+    zonesPanel.setBounds (top.removeFromLeft (2 * w3 + 8));
     top.removeFromLeft (8);
     masterArea = top.toFloat();
 
@@ -81,7 +77,7 @@ void MainPage::paint (Graphics& g)
     auto hint = getLocalBounds().toFloat().withTrimmedTop (macroArea.getBottom() + 10.0f).removeFromTop (16.0f);
     g.setColour (theme::textMuted);
     g.setFont (theme::font (9.0f, 500, 0.06f));
-    g.drawText ("MILESTONE 1 - PLAY MIDI NOTES TO HEAR A TEST TONE. THE SAMPLER ENGINE REPLACES IT IN MILESTONE 2.",
+    g.drawText ("MILESTONE 2 - THE SAMPLER ENGINE. EDIT LOOPS, ENVELOPES AND KEY RANGES IN THE EDITOR TAB (MILESTONE 4).",
                 hint, Justification::centredLeft, true);
 }
 } // namespace emx

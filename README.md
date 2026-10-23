@@ -4,9 +4,22 @@ A free, open-source sampler plugin inspired by the E-mu Emulator X.
 Load whole sound banks, edit and loop samples, stack effects, and modulate
 everything with drawable envelopes and macros.
 
-> Status: **milestone 1** — the plugin window, artwork, interface scaling,
-> master volume and 20 automatable macros. MIDI plays a simple test tone.
-> The sampler engine arrives in milestone 2.
+> Status: **milestone 2** — the sampler engine. Drop audio files or a preset
+> made in the browser prototype onto the window and play.
+
+## Using it (milestone 2)
+
+- **Add sounds:** drag WAV, AIFF, FLAC, OGG or MP3 files onto the plugin window,
+  or press **LOAD...**. A `.emxp` preset from the browser prototype loads with all
+  its zones, loops and envelopes.
+- **Root notes** are read from WAV loop markers or from file names such as
+  `Piano_C4.wav` or `Pad A#3.wav`. Dropping several files at once spreads them
+  across the keyboard automatically (**AUTO MAP** does it again any time).
+- **Interpolation:** *Sinc HQ* sounds cleanest; *Linear* uses the least CPU.
+- **Keep speed** changes pitch without changing length (turn it off for drums).
+- Sustain pedal, pitch bend (±2 semitones) and up to 64 voices work.
+- Everything is saved with your DAW project. Samples are referenced from where
+  they are on disk, so don't move or delete them.
 
 ## Install (Windows, e.g. for Ableton Live)
 
