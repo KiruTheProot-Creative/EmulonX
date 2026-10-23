@@ -18,7 +18,7 @@ jobs:
     name: Windows (VST3 + Standalone)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Cache JUCE download
         uses: actions/cache@v4
@@ -27,10 +27,21 @@ jobs:
           key: juce-9.0.4-windows
 
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        shell: pwsh
+        run: |
+          cmake -S . -B build -A x64 2>&1 | Tee-Object -FilePath configure.log
+          if ($LASTEXITCODE -ne 0) {
+            $t = ((Get-Content configure.log -Tail 40) -join "`n").Replace('%','%25').Replace("`r",'').Replace("`n",'%0A')
+            Write-Output "::error title=Configure failed::$t"; exit 1 }
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            $lines = Select-String -Path build.log -Pattern ' error |error C|error LNK|CMake Error' | Select-Object -First 40 | ForEach-Object { $_.Line }
+            $t = ($lines -join "`n").Replace('%','%25').Replace("`r",'').Replace("`n",'%0A')
+            Write-Output "::error title=Build failed::$t"; exit 1 }
 
       - name: Collect files
         shell: pwsh
@@ -56,7 +67,7 @@ jobs:
     name: macOS (VST3 + AU + Standalone)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Cache JUCE download
         uses: actions/cache@v4
@@ -65,10 +76,16 @@ jobs:
           key: juce-9.0.4-macos
 
       - name: Configure
-        run: cmake -S . -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+        run: |
+          set -o pipefail
+          if ! cmake -S . -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" 2>&1 | tee configure.log; then
+            echo "::error title=Configure failed::$(tail -40 configure.log | sed 's/%/%25/g' | awk '{printf "%s%%0A",$0}')"; exit 1; fi
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: |
+          set -o pipefail
+          if ! cmake --build build --config Release --parallel 2>&1 | tee build.log; then
+            echo "::error title=Build failed::$(grep -E 'error:|error [A-Z]|CMake Error' build.log | head -40 | sed 's/%/%25/g' | awk '{printf "%s%%0A",$0}')"; exit 1; fi
 
       - name: Collect files
         run: |
