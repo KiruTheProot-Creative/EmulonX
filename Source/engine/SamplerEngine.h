@@ -102,5 +102,6 @@ private:
     float glideTime = 0.0f;
     int noteStack[128] {}, stackSize = 0, monoNote = -1, lastNote = -1, monoVelocity = 100;
     std::bitset<128> keysDown;
+    juce::Random random;
 };
 } // namespace emx

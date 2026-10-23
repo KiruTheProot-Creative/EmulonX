@@ -951,6 +951,7 @@ void EmulonXProcessor::writeZonesToState()
          .setProperty ("loop", (int) p.loopMode, nullptr).setProperty ("ls", p.loopStart, nullptr)
          .setProperty ("le", p.loopEnd, nullptr).setProperty ("xf", p.crossfade, nullptr)
          .setProperty ("ss", p.sampleStart, nullptr).setProperty ("se", p.sampleEnd, nullptr)
+         .setProperty ("rs", p.randomStart, nullptr).setProperty ("re", p.randomEnd, nullptr)
          .setProperty ("a", p.attack, nullptr).setProperty ("d", p.decay, nullptr)
          .setProperty ("s", p.sustain, nullptr).setProperty ("r", p.release, nullptr)
          .setProperty ("gain", p.gainDb, nullptr).setProperty ("pan", p.pan, nullptr)
@@ -1036,6 +1037,7 @@ void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
         p.loopMode = (LoopMode) jlimit (0, 2, (int) c["loop"]);
         p.loopStart = c["ls"]; p.loopEnd = c["le"]; p.crossfade = c["xf"];
         p.sampleStart = c["ss"]; p.sampleEnd = c["se"];
+        p.randomStart = c["rs"]; p.randomEnd = c["re"];
         p.attack = c["a"]; p.decay = c["d"]; p.sustain = c["s"]; p.release = c["r"];
         p.gainDb = c["gain"]; p.pan = c["pan"]; p.tuneCents = c["tune"];
         p.keepSpeed = c["ks"]; p.grainMs = c["grain"];

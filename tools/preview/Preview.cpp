@@ -288,6 +288,8 @@ int main (int argc, char** argv)
         q.sampleStart = 6000;
         q.sampleEnd = sz->sample->length() - 4000;
         q.crossfade = 3000;
+        q.randomStart = true;
+        q.randomEnd = 20000;
         proc.setZoneParams (sz->id, q);
     }
     proc.keyboardState.noteOn (1, 60, 0.8f);   // shows a held key on the editor keyboard

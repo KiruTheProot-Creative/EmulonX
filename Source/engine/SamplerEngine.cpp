@@ -264,7 +264,20 @@ void SamplerEngine::startVoicesFor (int note, int velocity, float glideFrom, con
         v.k = k;
         v.grain = juce::jmax (256, (int) std::lround (p.grainMs / 1000.0 * sampleRate)) & ~1;
         v.grainCounter = 0;
-        const int startAt = juce::jlimit (0, juce::jmax (0, z.sample->length() - 1), p.sampleStart);
+        int startAt = juce::jlimit (0, juce::jmax (0, z.sample->length() - 1), p.sampleStart);
+        if (p.randomStart && p.randomEnd > startAt)
+        {
+            // Random start inside the marked area, moved to the nearest rising zero crossing (no click).
+            int r = startAt + random.nextInt (p.randomEnd - startAt + 1);
+            const float* d = z.sample->audio.getReadPointer (0);
+            const int len = z.sample->length();
+            for (int o = 0; o < 256; ++o)
+            {
+                if (r + o > 0 && r + o < len && d[r + o - 1] < 0.0f && d[r + o] >= 0.0f) { r += o; break; }
+                if (r - o > 0 && r - o < len && d[r - o - 1] < 0.0f && d[r - o] >= 0.0f) { r -= o; break; }
+            }
+            startAt = juce::jlimit (startAt, juce::jmax (startAt, p.randomEnd), r);
+        }
         v.pos = startAt;
         v.read0 = startAt;
         v.read1 = startAt;   // the second grain is fully audible at the start, so the attack is intact

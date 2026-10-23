@@ -24,6 +24,10 @@ everything with drawable envelopes and macros.
   bottom of the waveform) or use the **SMP START** / **SMP END** sliders. The
   sliders under the waveform also move the loop start / end and the crossfade;
   hold shift for fine moves.
+- **Random start (Editor tab):** switch **RANDOM** on and every note starts at a
+  different spot between the sample start and the dashed amber **RND TO**
+  marker (drag it, or use the **RND TO** slider), so repeated notes sound less
+  alike. Starts land on zero crossings, so they don't click.
 - **Reverb types:** Room, Hall, Plate, Ambience, Cathedral, Spring and Shimmer,
   each built differently (early reflections, density, size, movement, tone).
 - **Voice (Editor tab):** **POLY** plays chords; **MONO** plays one note at a

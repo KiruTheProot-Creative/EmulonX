@@ -24,6 +24,7 @@ void ZoneParams::clampTo (int n) noexcept
     if (sampleEnd <= 0 || sampleEnd > n)
         sampleEnd = n;
     sampleStart = juce::jlimit (0, juce::jmax (0, sampleEnd - 1), sampleStart);
+    randomEnd = juce::jlimit (sampleStart, juce::jmax (sampleStart, sampleEnd - 1), randomEnd);
     loopEnd   = juce::jlimit (1, n, loopEnd);
     loopStart = juce::jlimit (0, loopEnd - 1, loopStart);
     crossfade = juce::jmax (0, crossfade);

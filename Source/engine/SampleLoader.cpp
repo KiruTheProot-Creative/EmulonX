@@ -127,6 +127,8 @@ ZoneParams paramsFromJson (const var& j, const SampleData& s, bool v1)
         p.crossfade = (int) num ("loopCrossfade", 0);
         p.sampleStart = (int) num ("sampleStart", 0);
         p.sampleEnd   = (int) num ("sampleEnd", n);
+        p.randomStart = (bool) j.getProperty ("randomStart", false);
+        p.randomEnd   = (int) num ("randomEnd", 0);
         p.attack    = (float) envNum ("attack", p.attack);
         p.decay     = (float) envNum ("decay", p.decay);
         p.sustain   = (float) envNum ("sustain", p.sustain);
@@ -156,6 +158,8 @@ static var paramsToJson (const String& sampleFile, const ZoneParams& p)
     z->setProperty ("loopCrossfade", p.crossfade);
     z->setProperty ("sampleStart", p.sampleStart);
     z->setProperty ("sampleEnd", p.sampleEnd);
+    z->setProperty ("randomStart", p.randomStart);
+    z->setProperty ("randomEnd", p.randomEnd);
     auto* env = new DynamicObject();
     env->setProperty ("attack", p.attack);
     env->setProperty ("decay", p.decay);

@@ -22,7 +22,7 @@ public:
     void zoomAll();
     void zoomAround (int frame, int halfWidth = 1000);
     bool snapToZero = false;
-    std::function<void (int which, int frame)> onMarkerMoved;   // which: 0 loop start, 1 loop end, 2 sample start, 3 sample end
+    std::function<void (int which, int frame)> onMarkerMoved;   // which: 0 loop start, 1 loop end, 2 sample start, 3 sample end, 4 random area end
 
     void tick();   // playheads
     void paint (juce::Graphics&) override;
@@ -117,6 +117,8 @@ private:
     LedDisplay loopInfo;
     class FrameSlider;
     std::unique_ptr<FrameSlider> sliders[5];   // sample start, sample end, loop start, loop end, crossfade
+    std::unique_ptr<FrameSlider> randomSlider; // end of the random start area
+    juce::TextButton randomButton { "RANDOM" };
 
     // Zone settings
     ValueControl root { "Root", ValueControl::Style::knob }, loKey { "Low key", ValueControl::Style::knob },

@@ -82,10 +82,10 @@ int WaveformView::hitMarker (const ModelZone& z, Point<float> pos)
     const bool upper = pos.y < (float) getHeight() * 0.5f;   // loop flags sit at the top, sample flags at the bottom
     int best = -1;
     float bestScore = 1.0e9f;
-    const int frames[4] { p.loopStart, p.loopEnd, p.sampleStart, p.sampleEnd > 0 ? p.sampleEnd : z.sample->length() };
-    for (int i = 0; i < 4; ++i)
+    const int frames[5] { p.loopStart, p.loopEnd, p.sampleStart, p.sampleEnd > 0 ? p.sampleEnd : z.sample->length(), p.randomEnd };
+    for (int i = 0; i < 5; ++i)
     {
-        if (i < 2 && ! loopOn)
+        if ((i < 2 && ! loopOn) || (i == 4 && ! p.randomStart))
             continue;
         const float d = std::abs (px (frames[i]) - pos.x);
         if (d >= 8.0f)
@@ -252,6 +252,24 @@ void WaveformView::paint (Graphics& g)
             if (which == 0) flag.addTriangle (px, H - 15.0f, px + 13.0f, H - 7.5f, px, H);
             else            flag.addTriangle (px, H - 15.0f, px - 13.0f, H - 7.5f, px, H);
             g.fillPath (flag);
+        }
+    }
+
+    // Random start area: shaded from the sample start to its own (dashed) marker
+    if (p.randomStart && p.randomEnd > p.sampleStart)
+    {
+        const Colour amber (0xffffb030);
+        g.setColour (amber.withAlpha (0.16f));
+        g.fillRect (Rectangle<float>::leftTopRightBottom (X (p.sampleStart), 0.0f, X (p.randomEnd), H));
+        const float px = std::round (X (p.randomEnd));
+        if (px >= -20.0f && px <= W + 20.0f)
+        {
+            g.setColour (amber);
+            for (float yy = 0.0f; yy < H; yy += 8.0f)
+                g.fillRect (px - 1.0f, yy, 2.0f, 4.0f);
+            Path diamond;
+            diamond.addQuadrilateral (px, H - 16.0f, px + 6.0f, H - 9.0f, px, H - 2.0f, px - 6.0f, H - 9.0f);
+            g.fillPath (diamond);
         }
     }
 
@@ -685,7 +703,7 @@ private:
 
     String label;
     int value = 0, maxValue = 1, dragStart = 0;
-    static constexpr float labelW = 52.0f;
+    static constexpr float labelW = 44.0f;
     Rectangle<float> track;
 };
 
@@ -781,7 +799,7 @@ EditorPage::EditorPage (EmulonXProcessor& p)
     zoomEndButton.setTooltip ("Zoom in on the loop end");
     zoomEndButton.onClick = [this] { if (auto* z = proc.getSelectedZone()) wave.zoomAround (z->params.loopEnd); };
 
-    const char* sliderNames[] { "SMP START", "SMP END", "LOOP START", "LOOP END", "X-FADE" };
+    const char* sliderNames[] { "START", "END", "L START", "L END", "X-FADE" };
     const char* sliderTips[] { "Where the sample starts playing (amber marker) - shift-drag for fine moves",
                                "Where the sample stops when it isn't looping (amber marker)",
                                "Loop start (white S flag)", "Loop end (white E flag)", "Crossfade length at the loop seam" };
@@ -796,6 +814,21 @@ EditorPage::EditorPage (EmulonXProcessor& p)
     sliders[2]->onChange = [this] (int v) { setLoopPoint (0, v, true); };
     sliders[3]->onChange = [this] (int v) { setLoopPoint (1, v, true); };
     sliders[4]->onChange = [this] (int v) { edit ([v] (ZoneParams& q) { q.crossfade = jlimit (0, q.loopEnd - q.loopStart, v); }); };
+    randomSlider = std::make_unique<FrameSlider> ("RND TO");
+    randomSlider->setTooltip ("End of the random start area (dashed amber marker): each note starts somewhere between SMP START and here");
+    randomSlider->onChange = [this] (int v) { setLoopPoint (4, v, true); };
+    addAndMakeVisible (*randomSlider);
+    randomButton.setTooltip ("Random start: every note starts at a different spot inside the shaded area, so repeated notes sound less alike");
+    randomButton.onClick = [this]
+    {
+        edit ([] (ZoneParams& q)
+        {
+            q.randomStart = ! q.randomStart;
+            if (q.randomStart && q.randomEnd <= q.sampleStart)   // first time: a quarter of the sample
+                q.randomEnd = q.sampleStart + jmax (1, ((q.sampleEnd > 0 ? q.sampleEnd : q.loopEnd) - q.sampleStart) / 4);
+        });
+    };
+    addAndMakeVisible (randomButton);
 
     //== Zone settings =============================================================
     auto noteFmt = [] (double v) { return noteName (roundToInt (v)); };
@@ -917,8 +950,9 @@ void EditorPage::setLoopPoint (int which, int frame, bool exact)
     if (which == 0)      q.loopStart = jlimit (0, jmax (0, q.loopEnd - 16), frame);
     else if (which == 1) q.loopEnd = jlimit (jmin (n, q.loopStart + 16), n, frame);
     else if (which == 2) q.sampleStart = jlimit (0, jmax (0, se - 16), frame);
-    else                 q.sampleEnd = jlimit (jmin (n, q.sampleStart + 16), n, frame);
-    if (q.loopStart != z->params.loopStart || q.loopEnd != z->params.loopEnd
+    else if (which == 3) q.sampleEnd = jlimit (jmin (n, q.sampleStart + 16), n, frame);
+    else                 q.randomEnd = jlimit (q.sampleStart, jmax (q.sampleStart, se - 1), frame);
+    if (q.loopStart != z->params.loopStart || q.loopEnd != z->params.loopEnd || q.randomEnd != z->params.randomEnd
         || q.sampleStart != z->params.sampleStart || q.sampleEnd != z->params.sampleEnd)
         proc.setZoneParams (z->id, q);
 }
@@ -962,7 +996,13 @@ void EditorPage::refresh()
         sliders[2]->setValue (q.loopStart);
         sliders[3]->setValue (q.loopEnd);
         sliders[4]->setValue (q.crossfade);
+        randomSlider->setRange (n);
+        randomSlider->setValue (q.randomEnd);
     }
+    randomButton.setToggleState (hasAudio && z->params.randomStart, dontSendNotification);
+    randomButton.setEnabled (hasAudio);
+    randomSlider->setEnabled (hasAudio && z->params.randomStart);
+    randomSlider->repaint();
     sliders[0]->setEnabled (hasAudio);
     sliders[1]->setEnabled (hasAudio);
     for (int i = 2; i < 5; ++i)
@@ -1060,11 +1100,13 @@ void EditorPage::resized()
         auto row = s.removeFromBottom (24);
         s.removeFromBottom (6);
         auto sliderRow = s.removeFromBottom (20);
-        const int sw = (sliderRow.getWidth() - 4 * 10) / 5;
-        for (auto& sl : sliders)
+        randomButton.setBounds (sliderRow.removeFromLeft (66));
+        sliderRow.removeFromLeft (8);
+        const int sw = (sliderRow.getWidth() - 5 * 8) / 6;
+        for (auto* sl : { sliders[0].get(), sliders[1].get(), randomSlider.get(), sliders[2].get(), sliders[3].get(), sliders[4].get() })
         {
             sl->setBounds (sliderRow.removeFromLeft (sw));
-            sliderRow.removeFromLeft (10);
+            sliderRow.removeFromLeft (8);
         }
         s.removeFromBottom (7);
         waveArea = s.toFloat();

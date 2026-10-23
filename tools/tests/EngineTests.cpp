@@ -2,6 +2,7 @@
 // Exits with code 1 if anything fails (so the GitHub build turns red).
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <set>
 #include "engine/SamplerEngine.h"
 #include "engine/SampleLoader.h"
 #include "fx/FxEngine.h"
@@ -494,6 +495,35 @@ int main (int argc, char** argv)
         auto r2 = play (a440, p, 69, 1.4);
         check (near (r.aliveSeconds, 0.5, 0.02) && near (r2.aliveSeconds, 0.25, 0.02), "sample start and end markers",
                String (r.aliveSeconds, 3) + " s from the middle, " + String (r2.aliveSeconds, 3) + " s to a quarter");
+    }
+
+    //== Random start =================================================================
+    {
+        auto p = basic (*a440, 69);
+        p.loopMode = LoopMode::off;
+        p.sampleStart = 4800;
+        p.randomStart = true;
+        p.randomEnd = 24000;
+        auto set = std::make_shared<ZoneSet>();
+        set->zones.push_back ({ 1, a440, p });
+        SamplerEngine e;
+        e.prepare (SR);
+        e.setZoneSet (set);
+        std::set<int> starts;
+        bool inside = true;
+        for (int i = 0; i < 12; ++i)
+        {
+            e.reset();
+            e.noteOn (69, 100);
+            SamplerEngine::Playhead ph[4];
+            if (e.getPlayheads (ph, 4) == 1)
+            {
+                starts.insert ((int) ph[0].position);
+                inside = inside && ph[0].position >= 4800 && ph[0].position <= 24000;
+            }
+        }
+        check (starts.size() >= 8 && inside, "random start picks a different spot inside the area each note",
+               String ((int) starts.size()) + " different starts");
     }
 
     //== Arpeggiator ================================================================

@@ -32,6 +32,8 @@ struct ZoneParams
     LoopMode loopMode = LoopMode::off;
     int loopStart = 0, loopEnd = 0, crossfade = 0;   // in sample frames
     int sampleStart = 0, sampleEnd = 0;              // where playback starts / stops (0 end = whole sample)
+    bool randomStart = false;                        // each note starts somewhere between sampleStart and randomEnd
+    int randomEnd = 0;
     float attack = 0.002f, decay = 0.3f, sustain = 1.0f, release = 0.25f;   // seconds / level
     float gainDb = 0.0f, pan = 0.0f;                 // pan: -100 (left) .. +100 (right)
     float tuneCents = 0.0f;
