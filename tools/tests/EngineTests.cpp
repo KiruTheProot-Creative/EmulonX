@@ -619,6 +619,66 @@ int main (int argc, char** argv)
             check (again == conv, "arp patterns and arrangement save and load");
         }
 
+        // No skipped steps, even when steps land exactly on block boundaries or the host's position jitters.
+        {
+            ArpSettings b;
+            b.enabled = true; b.mode = ArpSettings::up; b.den = 16;   // 6000 samples per step at 120 BPM
+            String bad;
+            for (int blockSize : { 500, 512, 480, 1000, 64, 333 })
+                for (int hostMode = 0; hostMode < 3; ++hostMode)
+                {
+                    Arpeggiator arp;
+                    arp.prepare (SR);
+                    arp.setSettings (b);
+                    MidiBuffer in, out;
+                    int count = 0;
+                    double ppq = 0.0;
+                    const int total = (int) (SR * 4.0);
+                    for (int pos = 0; pos < total; pos += blockSize)
+                    {
+                        in.clear();
+                        if (pos == 0)
+                            in.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 0);
+                        std::optional<double> songPos;
+                        if (hostMode == 1) songPos = ppq;                                  // exact song position
+                        if (hostMode == 2) songPos = ppq + ((pos / blockSize) % 3 - 1) * 1.0e-7;   // tiny jitter, like real hosts
+                        arp.process (in, out, blockSize, 120.0, songPos);
+                        for (const auto meta : out)
+                            if (meta.getMessage().isNoteOn())
+                                ++count;
+                        ppq += blockSize / SR * 2.0;
+                    }
+                    if (count < 32)
+                        bad << blockSize << "/" << (hostMode == 0 ? "free" : hostMode == 1 ? "host" : "jitter") << ":" << count << " ";
+                }
+            check (bad.isEmpty(), "arp never skips a step (32 steps in 4 s, any block size)", bad);
+        }
+
+        // When the DAW loops back, the arp follows at once (first step of the loop plays right at the jump).
+        {
+            ArpSettings b;
+            b.enabled = true; b.mode = ArpSettings::up; b.den = 16;
+            Arpeggiator arp;
+            arp.prepare (SR);
+            arp.setSettings (b);
+            MidiBuffer in, out;
+            const int bs = 512;
+            double ppq = 0.0;
+            juce::int64 firstAfterJump = -1, jumpAt = -1;
+            for (int blk = 0; blk < 300; ++blk)
+            {
+                in.clear();
+                if (blk == 0) in.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 0);
+                if (blk == 150) { ppq = 0.0; jumpAt = (juce::int64) blk * bs; }   // loop back to bar 1
+                arp.process (in, out, bs, 120.0, ppq);
+                for (const auto meta : out)
+                    if (meta.getMessage().isNoteOn() && jumpAt >= 0 && firstAfterJump < 0)
+                        firstAfterJump = (juce::int64) blk * bs + meta.samplePosition;
+                ppq += bs / SR * 2.0;
+            }
+            check (firstAfterJump == jumpAt, "arp follows the DAW when it loops back", String (firstAfterJump - jumpAt) + " samples late");
+        }
+
         auto released = runArp (a, { { 100, 60, true }, { 100, 64, true }, { 20000, 60, false }, { 20000, 64, false } }, 1.0);
         juce::int64 lastOn = 0;
         int balance = 0;

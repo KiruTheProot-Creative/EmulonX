@@ -402,17 +402,20 @@ void Arpeggiator::process (const MidiBuffer& in, MidiBuffer& out, int n, double 
     {
         const int nextEvent = it != in.end() ? jlimit (0, n - 1, (*it).samplePosition) : n;
 
-        // Next step boundary at or after `pos`.
-        const double ppqHere = hostPpq.has_value() ? *hostPpq + pos * beatsPerSample : internalPpq + pos * beatsPerSample;
-        int64 k = (int64) std::floor (ppqHere / stepBeats);
-        if (hostPpq.has_value() && (k < lastStep - 1 || k > lastStep + 100000))
-            lastStep = k - 1;   // the host jumped (loop, relocate): follow it
-        if (stepStart (k) < ppqHere - 1.0e-9)
-            ++k;
-        if (k <= lastStep)
-            k = lastStep + 1;
+        // The next step is always the one after the last step played. If it is a hair late
+        // (it fell right on the edge of the previous block, or the host's position jitters),
+        // it plays now instead of being skipped.
+        const double blockStartPpq = hostPpq.has_value() ? *hostPpq : internalPpq;
+        const double ppqHere = blockStartPpq + pos * beatsPerSample;
+        if (hostPpq.has_value())
+        {
+            const auto kNow = (int64) std::floor (ppqHere / stepBeats);
+            if (kNow > lastStep + 2 || kNow < lastStep - 1)   // the host jumped (loop, relocate): follow it
+                lastStep = stepStart (kNow) < ppqHere - 1.0e-6 ? kNow : kNow - 1;
+        }
+        const int64 k = lastStep + 1;
         const double tk = stepStart (k);
-        const int stepPos = (int) std::ceil ((tk - (ppqHere - pos * beatsPerSample)) / beatsPerSample - 1.0e-6);
+        const int stepPos = jmax (pos, (int) std::ceil ((tk - blockStartPpq) / beatsPerSample - 1.0e-6));
 
         if (nextEvent <= stepPos && nextEvent < n)
         {
