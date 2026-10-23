@@ -44,6 +44,7 @@ juce_add_plugin(EmulonX
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
     COPY_PLUGIN_AFTER_BUILD     FALSE
     VST3_CATEGORIES             Instrument Sampler
+    ICON_BIG                    "${CMAKE_CURRENT_SOURCE_DIR}/installer/icon-256.png"
     AU_MAIN_TYPE                kAudioUnitType_MusicDevice
     FORMATS                     ${EMX_FORMATS})
 

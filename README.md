@@ -102,15 +102,22 @@ everything with drawable envelopes and macros.
 
 ## Install (Windows, e.g. for Ableton Live)
 
-1. Download `EmulonX-Windows` from the latest run on the **Actions** tab
-   (or from **Releases** once there is one) and unzip it.
-2. Copy the folder **`Emulon X.vst3`** to
-   `C:\Program Files\Common Files\VST3\`
+1. Download **EmulonX-Setup-x.y.z.exe** from the latest release (or the
+   `EmulonX-Windows-Installer` artifact of the latest run on the **Actions** tab).
+2. Run it. It puts the plugin into `C:\Program Files\Common Files\VST3` (you can
+   pick another folder), creates `Documents\Emulon X\Base Banks` and
+   `Documents\Emulon X\Presets`, installs the base banks and, if you like, the
+   standalone app.
 3. In Ableton: *Options → Preferences → Plug-Ins*, make sure
-   **Use VST3 Plug-In System Folders** is on, then click **Rescan**.
-4. Find **Emulon X** under *Plug-Ins → VST3 → Emulon*, drag it onto a MIDI
-   track and play.
+   **Use VST3 Plug-In System Folders** is on, then click **Rescan**. Emulon X is
+   under *Plug-Ins → VST3*.
 
+Windows may show a "Windows protected your PC" notice because the installer is
+not code-signed: click **More info → Run anyway**. Uninstall it like any other
+app (Settings → Apps); your presets and banks in Documents are kept.
+
+Without the installer: copy the folder **`Emulon X.vst3`** from the
+`EmulonX-Windows` artifact to `C:\Program Files\Common Files\VST3\`.
 `Emulon X.exe` is a standalone version that runs without a DAW.
 
 ## Roadmap

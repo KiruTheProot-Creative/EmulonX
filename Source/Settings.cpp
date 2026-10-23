@@ -14,12 +14,25 @@ Settings::Settings()
     o.millisecondsBeforeSaving = 500;
     props = std::make_unique<juce::PropertiesFile> (o);
 
-    // First run: suggest the standard Emulon X folders in Documents.
+    // First run: the standard Emulon X folders in Documents (the installer creates them).
+    const auto docs = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Emulon X");
+    const auto baseBanks = docs.getChildFile ("Base Banks");
     if (! props->containsKey ("folders.user"))
     {
-        const auto docs = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Emulon X");
         props->setValue ("folders.user", docs.getChildFile ("Presets").getFullPathName());
-        props->setValue ("folders.base", docs.getChildFile ("Banks").getFullPathName());
+        props->setValue ("folders.base", baseBanks.getFullPathName());
+    }
+    else if (baseBanks.isDirectory())
+    {
+        // Settings from before the installer: swap the old suggested folder for "Base Banks".
+        auto base = getFolders (Folder::base);
+        const auto before = base;
+        const auto oldDefault = docs.getChildFile ("Banks").getFullPathName();
+        if (base.contains (oldDefault) && ! juce::File (oldDefault).isDirectory())
+            base.removeString (oldDefault);
+        base.addIfNotAlreadyThere (baseBanks.getFullPathName());
+        if (base != before)
+            props->setValue ("folders.base", base.joinIntoString ("\n"));
     }
 }
 
