@@ -1103,9 +1103,7 @@ void FxPage::rebuildEnvelopeOptions()
                 [] (Env& e) { e.trigger = Env::retrig; });
         toggle ("FREE", "Keep running on its own clock, ignore notes", [] (const Env& e) { return e.trigger == Env::free; },
                 [] (Env& e) { e.trigger = Env::free; });
-        toggle ("BEAT", "Locked to your DAW's song position and tempo: always lines up with the beat, never restarted by notes",
-                [] (const Env& e) { return e.trigger == Env::beat; }, [] (Env& e) { e.trigger = Env::beat; e.sync = true; e.loop = true; });
-        toggle ("SYNC", "Length follows the tempo", [] (const Env& e) { return e.sync; }, [] (Env& e) { e.sync = ! e.sync; if (! e.sync && e.trigger == Env::beat) e.trigger = Env::free; });
+        toggle ("SYNC", "Length follows the tempo", [] (const Env& e) { return e.sync; }, [] (Env& e) { e.sync = ! e.sync; });
         if (E.sync)
         {
             knob ("Beats", NormalisableRange<double> (1, 32, 1), 1, [] (double v) { return String (roundToInt (v)); },
@@ -1171,35 +1169,32 @@ void FxPage::layoutEnvelopeOptions()
             c->setBounds (r.removeFromLeft (cell).withSizeKeepingCentre (jmin (62, cell), kh));
         return;
     }
-    // LOOP / 1-SHOT, RETRIG / FREE / BEAT  |  SYNC + beats / division  (or SYNC + rate)
-    auto col = r.removeFromLeft (156).withSizeKeepingCentre (156, 54);
+    // LOOP / 1-SHOT, RETRIG / FREE  |  SYNC + beats / division  (or SYNC + rate)
+    auto col = r.removeFromLeft (140).withSizeKeepingCentre (140, 54);
     auto rowA = col.removeFromTop (24);
-    envOptions[0]->setBounds (rowA.removeFromLeft (76));
-    envOptions[1]->setBounds (rowA.removeFromRight (76));
+    envOptions[0]->setBounds (rowA.removeFromLeft (68));
+    envOptions[1]->setBounds (rowA.removeFromRight (68));
     col.removeFromTop (6);
     auto rowB = col.removeFromTop (24);
-    envOptions[2]->setBounds (rowB.removeFromLeft (56));
-    rowB.removeFromLeft (2);
-    envOptions[3]->setBounds (rowB.removeFromLeft (48));
-    rowB.removeFromLeft (2);
-    envOptions[4]->setBounds (rowB);
-    r.removeFromLeft (10);
-    envOptions[5]->setBounds (r.removeFromLeft (50).withSizeKeepingCentre (50, 24));
-    r.removeFromLeft (4);
-    if (E.sync && envOptions.size() >= 11)
+    envOptions[2]->setBounds (rowB.removeFromLeft (68));
+    envOptions[3]->setBounds (rowB.removeFromRight (68));
+    r.removeFromLeft (12);
+    envOptions[4]->setBounds (r.removeFromLeft (52).withSizeKeepingCentre (52, 24));
+    r.removeFromLeft (6);
+    if (E.sync && envOptions.size() >= 10)
     {
-        envOptions[6]->setBounds (r.removeFromLeft (58).withSizeKeepingCentre (58, kh));
+        envOptions[5]->setBounds (r.removeFromLeft (60).withSizeKeepingCentre (60, kh));
         auto c2 = r.removeFromLeft (100).withSizeKeepingCentre (100, 52);
-        envOptions[7]->setBounds (c2.removeFromTop (22));
+        envOptions[6]->setBounds (c2.removeFromTop (22));
         c2.removeFromTop (6);
-        for (int i = 8; i < 11; ++i)
+        for (int i = 7; i < 10; ++i)
         {
             envOptions[i]->setBounds (c2.removeFromLeft (32).withHeight (22));
             c2.removeFromLeft (2);
         }
     }
-    else if (envOptions.size() >= 7)
-        envOptions[6]->setBounds (r.removeFromLeft (62).withSizeKeepingCentre (62, kh));
+    else if (envOptions.size() >= 6)
+        envOptions[5]->setBounds (r.removeFromLeft (62).withSizeKeepingCentre (62, kh));
 }
 
 void FxPage::syncValues()

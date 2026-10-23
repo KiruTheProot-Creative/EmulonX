@@ -285,11 +285,8 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
         renderPiece (pos, len);
 
         // Effects: each zone's own channel first, then the whole-preset chain.
-        std::optional<double> blockPpq;
-        if (hostPpq.has_value())
-            blockPpq = *hostPpq + (double) start / currentSampleRate * bpm / 60.0;
         fxEngine.beginBlock (len, currentSampleRate, bpm, engine.getNoteOnCount(), engine.isGateOpen(),
-                             macros01, numMacros, engine.getModWheel(), blockPpq);
+                             macros01, numMacros, engine.getModWheel());
         for (int b = 0; b < numBuses; ++b)
         {
             fxEngine.processChain (*busChains[b], busData[b][0], busData[b][1], len);

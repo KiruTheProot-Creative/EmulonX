@@ -34,9 +34,9 @@ struct Envelope
 {
     bool ahdsr = false;
     std::vector<EnvPoint> points;
-    enum Trigger { retrig = 0, free = 1, beat = 2 };
+    enum Trigger { retrig = 0, free = 1 };
     bool loop = true, sync = true;
-    int trigger = retrig;   // restart on notes / free-running / locked to the DAW's beat
+    int trigger = retrig;   // restart with every note, or keep running freely
     int num = 1, den = 4, dot = 0;
     float hz = 2.0f;
     int grid = 8;

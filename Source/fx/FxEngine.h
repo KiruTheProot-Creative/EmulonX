@@ -4,7 +4,6 @@
 
 #include "FxModel.h"
 #include <atomic>
-#include <optional>
 
 namespace emx::fx
 {
@@ -45,9 +44,8 @@ public:
     const Snapshot* getSnapshot() const noexcept { return snap; }
 
     /** Call once per sub-block before processing chains. */
-    /** hostPpq: the DAW's song position in beats while it plays (for envelopes in BEAT mode). */
     void beginBlock (int numSamples, double sampleRate, double bpm, juce::uint32 noteOnCount, bool gateOpen,
-                     const float* macros01, int numMacros, float modWheel, std::optional<double> hostPpq = {}) noexcept;
+                     const float* macros01, int numMacros, float modWheel) noexcept;
     void processChain (const Snapshot::ChainRT&, float* L, float* R, int n) noexcept;
     /** Master volume 0..1 (linear dB knob) after modulation. */
     float modulateVolume (float norm01) noexcept;
@@ -72,7 +70,7 @@ private:
     float modulated (float base, const std::vector<Snapshot::RouteRT>& routes, int slot) const noexcept;
 
     const Snapshot* snap = nullptr;
-    double sr = 44100.0, bpmNow = 120.0, beatPos = 0.0;   // beatPos: song position in beats (own clock when the DAW is stopped)
+    double sr = 44100.0, bpmNow = 120.0;
     juce::int64 T = 0;
     juce::uint32 lastNoteOns = 0;
     bool lastGate = false;
