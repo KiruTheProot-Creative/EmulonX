@@ -13,7 +13,7 @@ EmulonXEditor::Root::Root (EmulonXEditor& e)
       cpuLed ([&e] { return "CPU " + String (roundToInt (e.proc.getCpuLoad() * 100.0)) + "%"; }),
       explorer (e.proc),
       mainPage (e.proc),
-      editorPage ("Editor", "zones - loops - keymap", "THE ZONE EDITOR ARRIVES IN MILESTONE 4"),
+      editorPage (e.proc),
       fxPage ("FX", "chains - envelopes - modulation", "EFFECTS AND MODULATION ARRIVE IN MILESTONE 5")
 {
     int index = 0;
@@ -30,6 +30,7 @@ EmulonXEditor::Root::Root (EmulonXEditor& e)
                           (Component*) &mainPage, (Component*) &editorPage, (Component*) &fxPage })
         addAndMakeVisible (c);
 
+    mainPage.getPresetPanel().onOpenZone = [this] { showPage (1); };
     showPage (0);
 }
 
@@ -102,6 +103,7 @@ EmulonXEditor::EmulonXEditor (EmulonXProcessor& p)
     root = std::make_unique<Root> (*this);
     addAndMakeVisible (*root);
     setResizable (false, false);
+    setWantsKeyboardFocus (true);
     setUiScale (settings->getUiScale());
     updateTooltips();
     settings->addChangeListener (this);
@@ -201,12 +203,30 @@ void EmulonXEditor::paintOverChildren (Graphics& g)
                          theme::red, roundToInt (14.0f * uiScale), Justification::centred);
 }
 
+bool EmulonXEditor::keyPressed (const KeyPress& k)
+{
+    const auto m = k.getModifiers();
+    if (m.isCommandDown() && (k.getKeyCode() == 'Z' || k.getKeyCode() == 'z'))
+    {
+        if (m.isShiftDown()) proc.redo(); else proc.undo();
+        return true;
+    }
+    if (m.isCommandDown() && (k.getKeyCode() == 'Y' || k.getKeyCode() == 'y'))
+    {
+        proc.redo();
+        return true;
+    }
+    return false;
+}
+
 void EmulonXEditor::timerCallback()
 {
     root->voicesLed.refresh();
     root->cpuLed.refresh();
     if (root->mainPage.isVisible())
         root->mainPage.tick();
+    if (root->editorPage.isVisible())
+        root->editorPage.tick();
 }
 
 } // namespace emx

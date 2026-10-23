@@ -95,6 +95,69 @@ void EmxKnob::paint (Graphics& g)
     }
 }
 
+//== ValueControl ==============================================================
+ValueControl::ValueControl (const String& captionText, Style st, int size)
+    : caption (captionText.toUpperCase()), style (st), controlSize (size)
+{
+    slider.setSliderStyle (style == Style::knob ? Slider::RotaryVerticalDrag : Slider::LinearVertical);
+    slider.setTextBoxStyle (Slider::NoTextBox, false, 0, 0);
+    if (style == Style::knob)
+        slider.setRotaryParameters (MathConstants<float>::pi * 1.25f, MathConstants<float>::pi * 2.75f, true);
+    slider.setPopupMenuEnabled (false);
+    slider.onValueChange = [this]
+    {
+        repaint (ledArea.toNearestInt().expanded (2));
+        if (onChange)
+            onChange (slider.getValue());
+    };
+    slider.setTooltip ("Drag up/down, mouse wheel, double-click to reset");
+    setSensitivity (1);
+    addAndMakeVisible (slider);
+}
+
+void ValueControl::setRange (NormalisableRange<double> range, double defaultValue)
+{
+    slider.setNormalisableRange (range);
+    slider.setDoubleClickReturnValue (true, defaultValue);
+}
+
+void ValueControl::setValue (double v)
+{
+    if (std::abs (slider.getValue() - v) > 1.0e-9)
+    {
+        slider.setValue (v, dontSendNotification);
+        repaint (ledArea.toNearestInt().expanded (2));
+    }
+}
+
+void ValueControl::setSensitivity (int level)
+{
+    if (style == Style::knob)
+        slider.setMouseDragSensitivity (level == 0 ? 90 : level == 2 ? 400 : 160);
+}
+
+void ValueControl::resized()
+{
+    auto r = getLocalBounds().toFloat();
+    if (style == Style::knob)
+        slider.setBounds (r.removeFromTop ((float) controlSize).withSizeKeepingCentre ((float) controlSize, (float) controlSize).toNearestInt());
+    else
+        slider.setBounds (r.removeFromTop ((float) controlSize).withSizeKeepingCentre (24.0f, (float) controlSize).toNearestInt());
+    r.removeFromTop (4.0f);
+    ledArea = r.removeFromTop (16.0f).withSizeKeepingCentre (jmin (r.getWidth(), 56.0f), 16.0f);
+    r.removeFromTop (3.0f);
+    captionArea = r.removeFromTop (14.0f);
+}
+
+void ValueControl::paint (Graphics& g)
+{
+    const auto v = slider.getValue();
+    theme::drawLed (g, ledArea, format ? format (v) : String (v, 2), 8.5f);
+    g.setColour (isEnabled() ? Colours::white : theme::textMuted);
+    g.setFont (theme::font (8.0f, 700, 0.12f));
+    g.drawText (caption, captionArea, Justification::centredTop, false);
+}
+
 //== LedLabel ==================================================================
 LedLabel::LedLabel (float h, bool singleClick) : textHeight (h)
 {

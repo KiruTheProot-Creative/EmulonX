@@ -141,6 +141,31 @@ int main (int argc, char** argv)
     std::printf ("bank reopened: '%s' with %d presets; loaded '%s' (%d zones)\n", proc.getBankName().toRawUTF8(),
                  (int) proc.getBank().size(), proc.getPresetName().toRawUTF8(), (int) proc.getZones().size());
 
+    // Zone editing + undo / redo.
+    {
+        const int id = proc.getZones()[0].id;
+        const int ls0 = proc.getZones()[0].params.loopStart;
+        auto q = proc.getZones()[0].params;
+        q.loopStart = 1000;
+        proc.setZoneParams (id, q);
+        q.loopStart = 1200;                     // same gesture: must merge into one undo step
+        proc.setZoneParams (id, q);
+        const bool edited = proc.getZones()[0].params.loopStart == 1200;
+        proc.undo();
+        const bool undone = proc.getZones()[0].params.loopStart == ls0;
+        proc.redo();
+        const bool redone = proc.getZones()[0].params.loopStart == 1200;
+        const auto count = proc.getZones().size();
+        proc.duplicateZone (id);
+        const bool duplicated = proc.getZones().size() == count + 1 && proc.getSelectedIndex() == 1;
+        proc.undo();
+        const bool dupUndone = proc.getZones().size() == count;
+        std::printf ("editing: edit %s, undo %s, redo %s, duplicate %s, undo duplicate %s\n",
+                     edited ? "ok" : "FAIL", undone ? "ok" : "FAIL", redone ? "ok" : "FAIL",
+                     duplicated ? "ok" : "FAIL", dupUndone ? "ok" : "FAIL");
+        proc.undo();   // back to the original loop
+    }
+
     // Show the demo folders in the explorer.
     auto& settings = proc.getSettings();
     settings.setFolders (emx::Settings::Folder::samples, { File::getSpecialLocation (File::userHomeDirectory).getFullPathName() });
@@ -168,12 +193,20 @@ int main (int argc, char** argv)
         std::printf ("wrote %s (%d x %d)\n", file.getFullPathName().toRawUTF8(), img.getWidth(), img.getHeight());
     };
 
+    proc.selectZone (proc.getZones().size() > 1 ? proc.getZones()[1].id : 0);
+    proc.keyboardState.noteOn (1, 60, 0.8f);   // shows a held key on the editor keyboard
+    {
+        AudioBuffer<float> b (2, 512);
+        MidiBuffer m;
+        for (int i = 0; i < 30; ++i) { m.clear(); proc.processBlock (b, m); }   // let the note start (playhead)
+    }
     const char* pages[] { "main", "editor", "fx" };
     for (int p = 0; p < 3; ++p)
     {
         editor.showPage (p);
         save (String ("preview-") + pages[p] + "-100");
     }
+    proc.keyboardState.allNotesOff (0);
     editor.showPage (0);
     editor.getExplorer().showTab (0);
     save ("preview-main-samples");

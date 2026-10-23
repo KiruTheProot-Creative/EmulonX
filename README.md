@@ -4,9 +4,25 @@ A free, open-source sampler plugin inspired by the E-mu Emulator X.
 Load whole sound banks, edit and loop samples, stack effects, and modulate
 everything with drawable envelopes and macros.
 
-> Status: **milestone 3** — presets, banks, the Explorer and the settings window.
+> Status: **milestone 4** — the Editor tab: waveform, loop points, zone settings and keymap.
 
-## Using it (milestone 3)
+## Using it (milestone 4)
+
+- **Editor tab:** double-click a zone on the Main tab (or use **<** / **>**) to edit it.
+  - **Waveform:** mouse wheel zooms, dragging scrolls, double-click shows everything.
+    Drag the white **S** / **E** flags to move the loop points, or type exact
+    values (in sample frames). **ZERO-X** moves a point to the nearest zero
+    crossing; **SNAP** does that automatically while dragging.
+  - **Loop modes:** *Off*, *Loop* (keeps looping during the release) and
+    *Until release* (plays on to the end after you let go). **X-FADE** blends
+    the loop seam.
+  - **Mapping, Pitch, Amp, Envelope:** root note, key and velocity ranges, fine
+    tune, keep speed and grain size, gain, pan, and an ADSR envelope per zone.
+  - **Keymap:** each bar is a zone. Click it to edit, drag it to move, drag its
+    ends to change the key range. Click keys to play (lower on the key = louder),
+    shift-click a key to set the root note.
+  - **UNDO / REDO** (Ctrl+Z / Ctrl+Shift+Z) for every zone change.
+
 
 - **Add sounds:** drag WAV, AIFF, FLAC, OGG or MP3 files onto the window, press
   **LOAD...**, or double-click them in the Explorer's **SAMPLES** tab (a single

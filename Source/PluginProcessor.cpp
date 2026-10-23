@@ -183,6 +183,9 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
         }
     };
 
+    // Notes from the on-screen keyboard join the incoming MIDI (and the keyboard shows what is held).
+    keyboardState.processNextMidiBuffer (midi, 0, n, true);
+
     // Sample-accurate MIDI, with the channel filter and velocity curve from the settings.
     const int channel = setMidiChannel.load(), curve = setVelocityCurve.load();
     int pos = 0;
@@ -232,6 +235,16 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
         engine.stealOne();
 
     activeVoices.store (engine.getActiveVoiceCount());
+    {
+        SamplerEngine::Playhead ph[maxPlayheads];
+        const int count = engine.getPlayheads (ph, maxPlayheads);
+        for (int i = 0; i < count; ++i)
+        {
+            playheadZone[i].store (ph[i].zoneId, std::memory_order_relaxed);
+            playheadPos[i].store (ph[i].position, std::memory_order_relaxed);
+        }
+        playheadCount.store (count, std::memory_order_release);
+    }
     for (int ch = 0; ch < jmin (2, buffer.getNumChannels()); ++ch)
     {
         const auto m = buffer.getMagnitude (ch, 0, n);
@@ -318,6 +331,9 @@ void EmulonXProcessor::applyMacros (const MacroList& macros)
 
 void EmulonXProcessor::publish()
 {
+    if (getSelectedZone() == nullptr)
+        selectedZoneId = zones.empty() ? 0 : zones.front().id;
+
     auto set = std::make_shared<ZoneSet>();
     set->interp = interp;
     auto ordered = zones;
@@ -352,6 +368,7 @@ void EmulonXProcessor::setPresetName (const String& n)
 
 void EmulonXProcessor::newPreset()
 {
+    clearUndo();
     zones.clear();
     presetName = "Init";
     presetFile = File();
@@ -386,12 +403,16 @@ void EmulonXProcessor::savePresetAs (const File& file)
 
 void EmulonXProcessor::setInterpolation (Interp i)
 {
+    if (i == interp)
+        return;
+    pushUndo ("interp");
     interp = i;
     publish();
 }
 
 void EmulonXProcessor::setKeepSpeedForAll (bool ks)
 {
+    pushUndo ("keepspeed");
     for (auto& z : zones)
         z.params.keepSpeed = ks;
     publish();
@@ -407,18 +428,34 @@ bool EmulonXProcessor::allKeepSpeed() const
 
 void EmulonXProcessor::removeZone (int id)
 {
+    pushUndo ("remove");
+    if (id == selectedZoneId)
+    {
+        const int idx = getSelectedIndex();
+        if (idx + 1 < (int) zones.size())
+            selectedZoneId = zones[(size_t) idx + 1].id;
+        else if (idx > 0)
+            selectedZoneId = zones[(size_t) idx - 1].id;
+    }
     zones.erase (std::remove_if (zones.begin(), zones.end(), [id] (auto& z) { return z.id == id; }), zones.end());
     publish();
 }
 
 void EmulonXProcessor::clearZones()
 {
+    pushUndo ("clear");
     zones.clear();
     lastMessage = {};
     publish();
 }
 
 void EmulonXProcessor::autoMap()
+{
+    pushUndo ("automap");
+    mapByRoots();
+}
+
+void EmulonXProcessor::mapByRoots()
 {
     std::vector<int> roots;
     for (auto& z : zones)
@@ -432,6 +469,139 @@ void EmulonXProcessor::autoMap()
         z.params.hiKey = i + 1 < roots.size() ? (roots[i] + roots[i + 1]) / 2 : 127;
     }
     publish();
+}
+
+//== Zone editing =================================================================
+const ModelZone* EmulonXProcessor::getSelectedZone() const noexcept
+{
+    for (auto& z : zones)
+        if (z.id == selectedZoneId)
+            return &z;
+    return nullptr;
+}
+
+int EmulonXProcessor::getSelectedIndex() const noexcept
+{
+    for (size_t i = 0; i < zones.size(); ++i)
+        if (zones[i].id == selectedZoneId)
+            return (int) i;
+    return -1;
+}
+
+void EmulonXProcessor::selectZone (int id)
+{
+    if (id == selectedZoneId)
+        return;
+    selectedZoneId = id;
+    sendChangeMessage();
+}
+
+void EmulonXProcessor::selectNextZone (int direction)
+{
+    if (zones.empty())
+        return;
+    const int n = (int) zones.size();
+    const int idx = getSelectedIndex();
+    selectZone (zones[(size_t) (((idx < 0 ? 0 : idx + direction) % n + n) % n)].id);
+}
+
+void EmulonXProcessor::setZoneParams (int id, ZoneParams p)
+{
+    for (auto& z : zones)
+        if (z.id == id)
+        {
+            if (z.sample != nullptr)
+                p.clampTo (z.sample->length());
+            p.attack = jlimit (0.001f, 10.0f, p.attack);
+            p.decay = jlimit (0.001f, 10.0f, p.decay);
+            p.release = jlimit (0.001f, 10.0f, p.release);
+            p.sustain = jlimit (0.0f, 1.0f, p.sustain);
+            p.gainDb = jlimit (-48.0f, 24.0f, p.gainDb);
+            p.pan = jlimit (-100.0f, 100.0f, p.pan);
+            p.tuneCents = jlimit (-100.0f, 100.0f, p.tuneCents);
+            p.grainMs = jlimit (20.0f, 150.0f, p.grainMs);
+            pushUndo ("params" + String (id));
+            z.params = p;
+            publish();
+            return;
+        }
+}
+
+void EmulonXProcessor::duplicateZone (int id)
+{
+    for (size_t i = 0; i < zones.size(); ++i)
+        if (zones[i].id == id)
+        {
+            pushUndo ("duplicate");
+            auto copy = zones[i];
+            copy.id = nextZoneId++;
+            zones.insert (zones.begin() + (std::ptrdiff_t) i + 1, copy);
+            for (size_t k = 0; k < zones.size(); ++k)
+                zones[k].order = (int) k;
+            nextOrder = (int) zones.size();
+            selectedZoneId = copy.id;
+            publish();
+            return;
+        }
+}
+
+void EmulonXProcessor::pushUndo (const String& tag)
+{
+    const auto now = Time::getMillisecondCounter();
+    const bool sameGesture = tag == lastUndoTag && now - lastUndoTime < 1500 && ! undoStack.empty();
+    lastUndoTag = tag;
+    lastUndoTime = now;
+    if (sameGesture)
+        return;
+    undoStack.push_back ({ zones, interp, selectedZoneId });
+    if (undoStack.size() > 100)
+        undoStack.erase (undoStack.begin());
+    redoStack.clear();
+}
+
+void EmulonXProcessor::clearUndo()
+{
+    undoStack.clear();
+    redoStack.clear();
+    lastUndoTag = {};
+}
+
+void EmulonXProcessor::undo()
+{
+    if (undoStack.empty())
+        return;
+    redoStack.push_back ({ zones, interp, selectedZoneId });
+    auto st = std::move (undoStack.back());
+    undoStack.pop_back();
+    zones = std::move (st.zones);
+    interp = st.interp;
+    selectedZoneId = st.selected;
+    lastUndoTag = {};
+    message ("Undo");
+    publish();
+}
+
+void EmulonXProcessor::redo()
+{
+    if (redoStack.empty())
+        return;
+    undoStack.push_back ({ zones, interp, selectedZoneId });
+    auto st = std::move (redoStack.back());
+    redoStack.pop_back();
+    zones = std::move (st.zones);
+    interp = st.interp;
+    selectedZoneId = st.selected;
+    lastUndoTag = {};
+    message ("Redo");
+    publish();
+}
+
+int EmulonXProcessor::getPlayheads (SamplerEngine::Playhead* out, int maxCount) const noexcept
+{
+    const int count = jmin (maxCount, playheadCount.load (std::memory_order_acquire));
+    for (int i = 0; i < count; ++i)
+        out[i] = { playheadZone[i].load (std::memory_order_relaxed), playheadPos[i].load (std::memory_order_relaxed) };
+    return count;
 }
 
 //== Loading ======================================================================
@@ -485,6 +655,7 @@ void EmulonXProcessor::addLoaded (LoadResult&& r, bool autoMapAfter, const File&
             message (r.errors.isEmpty() ? String ("The preset has no zones") : r.errors.joinIntoString ("; "));
             return;
         }
+        clearUndo();
         zones.clear();
         presetName = r.presetName;
         presetFx = r.fx;
@@ -496,6 +667,10 @@ void EmulonXProcessor::addLoaded (LoadResult&& r, bool autoMapAfter, const File&
         updateHostDisplay (ChangeDetails().withProgramChanged (true));
     }
 
+    if (! r.isPreset && ! r.zones.empty())
+        pushUndo ("add" + String (nextZoneId));
+    if (! r.zones.empty())
+        selectedZoneId = nextZoneId;   // the first new zone opens in the editor
     for (auto& lz : r.zones)
     {
         ModelZone z;
@@ -518,7 +693,7 @@ void EmulonXProcessor::addLoaded (LoadResult&& r, bool autoMapAfter, const File&
         message ("Added " + String ((int) r.zones.size()) + " zone(s)");
 
     if (autoMapAfter)
-        autoMap();
+        mapByRoots();
     else
         publish();
 }
@@ -660,6 +835,7 @@ void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
     loaderThread.removeAllJobs (true, 2000);
     ++loadGeneration;
     pendingJobs = 0;
+    clearUndo();
     {
         const ScopedLock sl (embedLock);
         embedBuilding = false;

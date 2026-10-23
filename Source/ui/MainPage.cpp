@@ -104,7 +104,7 @@ void MainPage::paint (Graphics& g)
     auto hint = getLocalBounds().toFloat().withTrimmedTop (macroArea.getBottom() + 10.0f).removeFromTop (16.0f);
     g.setColour (theme::textMuted);
     g.setFont (theme::font (9.0f, 500, 0.06f));
-    g.drawText ("MILESTONE 3 - PRESETS, BANKS, EXPLORER & SETTINGS. THE ZONE EDITOR ARRIVES IN MILESTONE 4.",
+    g.drawText ("DOUBLE-CLICK A ZONE TO EDIT ITS LOOP, ENVELOPE AND KEY RANGE IN THE EDITOR TAB.",
                 hint, Justification::centredLeft, true);
 }
 } // namespace emx

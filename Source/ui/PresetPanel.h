@@ -20,6 +20,7 @@ public:
     void resized() override;
 
     void openLoadDialog();
+    std::function<void()> onOpenZone;   // double-click: edit the zone in the Editor tab
     void save();
     void saveAs();
 
@@ -30,6 +31,9 @@ private:
     int getNumRows() override;
     void paintListBoxItem (int row, juce::Graphics&, int width, int height, bool selected) override;
     void deleteKeyPressed (int lastRowSelected) override;
+    void listBoxItemClicked (int row, const juce::MouseEvent&) override;
+    void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override;
+    void returnKeyPressed (int row) override;
 
     EmulonXProcessor& proc;
     LedLabel nameLabel { 10.0f };

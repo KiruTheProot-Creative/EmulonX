@@ -41,6 +41,37 @@ private:
     juce::Rectangle<float> ledArea, captionArea;
 };
 
+/** Knob or fader for a value that is not a DAW parameter (zone settings in the editor):
+    your artwork, a red LED readout and a caption. */
+class ValueControl final : public juce::Component
+{
+public:
+    enum class Style { knob, fader };
+    ValueControl (const juce::String& caption, Style, int size = 40);
+
+    void setRange (juce::NormalisableRange<double>, double defaultValue);
+    void setValue (double) ;                       // does not call onChange
+    double getValue() const { return slider.getValue(); }
+    void setSensitivity (int level);               // 0 fast, 1 normal, 2 fine
+
+    std::function<juce::String (double)> format;
+    std::function<void (double)> onChange;
+
+    int getPreferredHeight() const noexcept { return controlSize + 4 + 16 + 3 + 14; }
+    int getPreferredWidth() const noexcept  { return style == Style::knob ? 62 : 54; }
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+    juce::Slider slider;
+
+private:
+    juce::String caption;
+    Style style;
+    int controlSize;
+    juce::Rectangle<float> ledArea, captionArea;
+};
+
 /** A red LED text field. Click to type (or double-click, if set). */
 class LedLabel final : public juce::Label
 {

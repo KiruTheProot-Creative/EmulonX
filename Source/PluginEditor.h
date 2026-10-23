@@ -11,6 +11,7 @@
 #include "ui/MainPage.h"
 #include "ui/Explorer.h"
 #include "ui/SettingsPanel.h"
+#include "ui/EditorPage.h"
 
 namespace emx
 {
@@ -37,6 +38,7 @@ public:
     void fileDragExit (const juce::StringArray&) override              { dragging = false; repaint(); }
     void filesDropped (const juce::StringArray&, int, int) override;
     void paintOverChildren (juce::Graphics&) override;
+    bool keyPressed (const juce::KeyPress&) override;   // Ctrl+Z / Ctrl+Shift+Z
 
 private:
     void timerCallback() override;
@@ -59,7 +61,8 @@ private:
         GearButton gear;
         Explorer explorer;
         MainPage mainPage;
-        ComingSoonPanel editorPage, fxPage;
+        EditorPage editorPage;
+        ComingSoonPanel fxPage;
         std::unique_ptr<SettingsPanel> settingsPanel;
         juce::Rectangle<float> titleArea;
     };

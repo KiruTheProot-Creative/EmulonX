@@ -75,7 +75,7 @@ public:
     float takePeak (int channel) noexcept { return peak[channel].exchange (0.0f); }
     int getActiveVoices() const noexcept  { return activeVoices.load(); }
     double getCpuLoad() const noexcept    { return loadMeasurer.getLoadAsProportion(); }
-    void panic() noexcept                 { panicRequested = true; }
+    void panic() noexcept                 { panicRequested = true; keyboardState.allNotesOff (0); }
 
     //== Preset ==================================================================
     const juce::String& getPresetName() const noexcept { return presetName; }
@@ -94,6 +94,30 @@ public:
     void removeZone (int id);
     void clearZones();
     void autoMap();
+
+    //== Zone editing (Editor tab) ===============================================
+    int getSelectedZoneId() const noexcept { return selectedZoneId; }
+    const ModelZone* getSelectedZone() const noexcept;
+    int getSelectedIndex() const noexcept;
+    void selectZone (int id);
+    void selectNextZone (int direction);
+    /** Changes one zone's settings; takes effect immediately, even on sounding notes. */
+    void setZoneParams (int id, ZoneParams);
+    void duplicateZone (int id);
+
+    //== Undo for zone edits ======================================================
+    bool canUndo() const noexcept { return ! undoStack.empty(); }
+    bool canRedo() const noexcept { return ! redoStack.empty(); }
+    void undo();
+    void redo();
+
+    /** Where the newest voice of each zone is playing (for the waveform). */
+    int getPlayheads (SamplerEngine::Playhead* out, int maxCount) const noexcept;
+
+    /** Notes held on MIDI input or on the on-screen keyboard. The editor's keyboard plays
+        through this, and it is safe to use from any thread. */
+    juce::MidiKeyboardState keyboardState;
+    int getKeyboardChannel() const noexcept { return juce::jmax (1, setMidiChannel.load()); }
 
     /** Audio files add zones; a preset replaces the current one; a bank opens in the bank list. */
     void loadFiles (const juce::Array<juce::File>&);
@@ -132,6 +156,16 @@ private:
     PresetToSave makePresetToSave() const;
     MacroList currentMacros() const;
     void message (const juce::String&);
+    void mapByRoots();
+
+    struct UndoState { std::vector<ModelZone> zones; Interp interp; int selected; };
+    /** Remembers the zones before a change. Repeated changes with the same tag within a
+        moment (one knob drag) become one undo step. */
+    void pushUndo (const juce::String& tag);
+    void clearUndo();
+    std::vector<UndoState> undoStack, redoStack;
+    juce::String lastUndoTag;
+    juce::uint32 lastUndoTime = 0;
 
     /** Runs `work` on the loader thread, then `done` with its result on the message thread. */
     template <typename Result>
@@ -142,7 +176,7 @@ private:
     // Model (message thread)
     std::vector<ModelZone> zones;
     Interp interp = Interp::sinc;
-    int nextZoneId = 1, nextOrder = 0, filesWritten = 0;
+    int nextZoneId = 1, nextOrder = 0, filesWritten = 0, selectedZoneId = 0;
     juce::String presetName { "Init" }, lastMessage, bankName { "My Bank" };
     juce::File presetFile;
     juce::var presetFx;
@@ -179,6 +213,9 @@ private:
     std::atomic<float>* masterDb = nullptr;
     std::atomic<float> peak[2] { 0.0f, 0.0f };
     std::atomic<int> activeVoices { 0 };
+    static constexpr int maxPlayheads = 16;
+    std::atomic<int> playheadCount { 0 }, playheadZone[maxPlayheads] {};
+    std::atomic<double> playheadPos[maxPlayheads] {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (EmulonXProcessor)
 };

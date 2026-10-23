@@ -172,6 +172,22 @@ void PresetPanel::paintListBoxItem (int row, Graphics& g, int width, int height,
 
 void PresetPanel::deleteKeyPressed (int) { removeButton.triggerClick(); }
 
+void PresetPanel::listBoxItemClicked (int row, const MouseEvent&)
+{
+    if (row >= 0 && row < (int) proc.getZones().size())
+        proc.selectZone (proc.getZones()[(size_t) row].id);
+}
+
+void PresetPanel::listBoxItemDoubleClicked (int row, const MouseEvent&) { returnKeyPressed (row); }
+
+void PresetPanel::returnKeyPressed (int row)
+{
+    if (row >= 0 && row < (int) proc.getZones().size())
+        proc.selectZone (proc.getZones()[(size_t) row].id);
+    if (onOpenZone)
+        onOpenZone();
+}
+
 void PresetPanel::resized()
 {
     auto r = getLocalBounds().reduced (11, 9);

@@ -2,7 +2,7 @@
 # Licensed under the GNU AGPLv3 (see LICENSE).
 
 cmake_minimum_required(VERSION 3.22)
-project(EmulonX VERSION 0.3.0 LANGUAGES C CXX)
+project(EmulonX VERSION 0.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -71,6 +71,7 @@ set(EMX_SOURCES
     Source/ui/BankPanel.cpp
     Source/ui/Explorer.cpp
     Source/ui/SettingsPanel.cpp
+    Source/ui/EditorPage.cpp
     Source/ui/Theme.cpp
     Source/ui/EmxLookAndFeel.cpp
     Source/ui/Widgets.cpp
