@@ -113,7 +113,7 @@ bool Source::parse (const String& s, Source& out)
     if (s.length() < 2 || ! s.substring (1).containsOnly ("0123456789"))
         return false;
     if (s[0] == 'e') { out = { SrcKind::env, s.substring (1).getIntValue() }; return out.index < maxEnvelopes; }
-    if (s[0] == 'm') { out = { SrcKind::macro, s.substring (1).getIntValue() }; return out.index < 20; }
+    if (s[0] == 'm') { out = { SrcKind::macro, s.substring (1).getIntValue() }; return out.index >= 0 && out.index < maxMacros; }
     return false;
 }
 

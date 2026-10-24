@@ -46,6 +46,7 @@ struct Envelope
 };
 
 inline constexpr int maxEnvelopes = 16;
+inline constexpr int maxMacros = 16;   // matches a full Ableton rack (2 controller pages of 8)
 const std::vector<std::pair<juce::String, std::vector<EnvPoint>>>& shapeLibrary();
 Envelope makeEnvelope (bool ahdsr, const juce::String& shape, int num = 1, int den = 4);
 std::vector<Envelope> defaultEnvelopes();

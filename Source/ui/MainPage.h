@@ -1,4 +1,4 @@
-// Emulon X — the Main tab: preset, bank, master volume + meter, 20 macros.
+// Emulon X — the Main tab: preset, bank, master volume + meter, 16 macros.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 

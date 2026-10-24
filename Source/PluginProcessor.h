@@ -13,7 +13,7 @@
 
 namespace emx
 {
-inline constexpr int numMacros = 20;
+inline constexpr int numMacros = fx::maxMacros;
 inline juce::String macroParamId (int index) { return "macro" + juce::String (index + 1); }
 inline const juce::String masterParamId { "master" };
 

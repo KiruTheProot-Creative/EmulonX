@@ -99,9 +99,10 @@ void MainPage::resized()
     macroArea = r.removeFromTop (2 * macros[0]->getPreferredHeight() + 60).toFloat();
     macroInset = macroArea.reduced (10.0f, 8.0f).withTrimmedTop (22.0f);
     auto grid = macroInset.reduced (6.0f, 8.0f).toNearestInt();
-    const int cellW = grid.getWidth() / 10, cellH = macros[0]->getPreferredHeight();
+    constexpr int perRow = numMacros / 2;   // two rows of 8
+    const int cellW = grid.getWidth() / perRow, cellH = macros[0]->getPreferredHeight();
     for (int i = 0; i < macros.size(); ++i)
-        macros[i]->setBounds (grid.getX() + (i % 10) * cellW, grid.getY() + (i / 10) * (cellH + 10), cellW, cellH);
+        macros[i]->setBounds (grid.getX() + (i % perRow) * cellW, grid.getY() + (i / perRow) * (cellH + 10), cellW, cellH);
 }
 
 void MainPage::paint (Graphics& g)
