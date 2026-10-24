@@ -58,9 +58,12 @@ void EmxLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int h, 
 }
 
 //== Fader: your slider artwork + a metal cap ===================================
-void EmxLookAndFeel::drawLinearSlider (Graphics& g, int x, int y, int w, int h, float pos, float, float,
+void EmxLookAndFeel::drawLinearSlider (Graphics& g, int x, int y, int w, int h, float pos, float minPos, float maxPos,
                                        Slider::SliderStyle style, Slider& s)
 {
+    if (s.getProperties().contains ("emxDrawnByParent"))
+        return;
+    juce::ignoreUnused (minPos, maxPos);
     if (style != Slider::LinearVertical)
     {
         LookAndFeel_V4::drawLinearSlider (g, x, y, w, h, pos, 0, 0, style, s);

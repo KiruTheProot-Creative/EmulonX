@@ -14,6 +14,7 @@
 #include "ui/EditorPage.h"
 #include "ui/FxPage.h"
 #include "ui/ArpPage.h"
+#include "ui/MasterBar.h"
 
 namespace emx
 {
@@ -63,6 +64,7 @@ private:
         EmulonXEditor& owner;
         juce::TextButton tabMain { "MAIN" }, tabEditor { "EDITOR" }, tabFx { "FX" }, tabArp { "ARP" };
         LedDisplay voicesLed, cpuLed;
+        MasterBar masterBar;
         GearButton gear;
         Explorer explorer;
         MainPage mainPage;

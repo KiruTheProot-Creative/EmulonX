@@ -293,34 +293,6 @@ void GearButton::paintButton (Graphics& g, bool highlighted, bool down)
     g.fillEllipse (c.x - 2.2f, c.y - 2.2f, 4.4f, 4.4f);
 }
 
-//== LevelMeter =================================================================
-void LevelMeter::push (float l, float r)
-{
-    level[0] = jmax (l, level[0] * 0.88f);
-    level[1] = jmax (r, level[1] * 0.88f);
-    repaint();
-}
-
-float LevelMeter::getPeakDb() const noexcept { return Decibels::gainToDecibels (jmax (level[0], level[1]), -100.0f); }
-
-void LevelMeter::paint (Graphics& g)
-{
-    auto r = getLocalBounds().toFloat();
-    theme::drawLed (g, r, {});
-    r = r.reduced (4.0f);
-    const float barW = (r.getWidth() - 3.0f) * 0.5f;
-    for (int ch = 0; ch < 2; ++ch)
-    {
-        const auto db = Decibels::gainToDecibels (level[ch], -60.0f);
-        const auto h = jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f) * r.getHeight();
-        auto bar = Rectangle<float> (r.getX() + (float) ch * (barW + 3.0f), r.getBottom() - h, barW, h);
-        ColourGradient grad (theme::hue (0xffffd0d0), 0.0f, r.getY(), theme::hue (0xff7a0000), 0.0f, r.getBottom(), false);
-        grad.addColour (0.3, theme::red);
-        g.setGradientFill (grad);
-        g.fillRoundedRectangle (bar, 2.0f);
-    }
-}
-
 //== ComingSoonPanel ============================================================
 ComingSoonPanel::ComingSoonPanel (String t, String s, String m) : title (std::move (t)), subtitle (std::move (s)), message (std::move (m)) {}
 

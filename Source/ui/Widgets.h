@@ -1,5 +1,5 @@
 // Emulon X — reusable UI pieces: knob with LED readout, LED display,
-// gear button, level meter and "coming soon" panel.
+// gear button and "coming soon" panel.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 
@@ -143,18 +143,6 @@ class GearButton final : public juce::Button
 public:
     GearButton();
     void paintButton (juce::Graphics&, bool highlighted, bool down) override;
-};
-
-/** Two vertical output meters with a smooth fall-off. */
-class LevelMeter final : public juce::Component
-{
-public:
-    void push (float left, float right);
-    float getPeakDb() const noexcept;
-    void paint (juce::Graphics&) override;
-
-private:
-    float level[2] {};
 };
 
 /** Panel shown for parts that arrive in a later milestone. */

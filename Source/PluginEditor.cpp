@@ -11,6 +11,7 @@ EmulonXEditor::Root::Root (EmulonXEditor& e)
     : owner (e),
       voicesLed ([&e] { return "VOICES " + String (e.proc.getActiveVoices()); }),
       cpuLed ([&e] { return "CPU " + String (roundToInt (e.proc.getCpuLoad() * 100.0)) + "%"; }),
+      masterBar (e.proc),
       explorer (e.proc),
       mainPage (e.proc),
       editorPage (e.proc),
@@ -27,7 +28,7 @@ EmulonXEditor::Root::Root (EmulonXEditor& e)
     }
 
     gear.onClick = [this] { owner.showSettings (settingsPanel == nullptr); };
-    for (Component* c : { (Component*) &voicesLed, (Component*) &cpuLed, (Component*) &gear, (Component*) &explorer,
+    for (Component* c : { (Component*) &masterBar, (Component*) &voicesLed, (Component*) &cpuLed, (Component*) &gear, (Component*) &explorer,
                           (Component*) &mainPage, (Component*) &editorPage, (Component*) &fxPage, (Component*) &arpPage })
         addAndMakeVisible (c);
 
@@ -63,7 +64,9 @@ void EmulonXEditor::Root::resized()
     header.removeFromRight (8);
     cpuLed.setBounds (header.removeFromRight (78).withSizeKeepingCentre (78, 24));
     header.removeFromRight (8);
-    voicesLed.setBounds (header.removeFromRight (120).withSizeKeepingCentre (120, 24));
+    voicesLed.setBounds (header.removeFromRight (100).withSizeKeepingCentre (100, 24));
+    header.removeFromRight (16);
+    masterBar.setBounds (header.removeFromRight (jmin (330, header.getWidth())));
 
     r.removeFromTop (8);
     explorer.setBounds (r.removeFromLeft (225));
@@ -240,6 +243,7 @@ void EmulonXEditor::timerCallback()
 {
     root->voicesLed.refresh();
     root->cpuLed.refresh();
+    root->masterBar.tick();
     if (root->mainPage.isVisible())
         root->mainPage.tick();
     if (root->editorPage.isVisible())

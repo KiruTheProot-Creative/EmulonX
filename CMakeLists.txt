@@ -85,6 +85,7 @@ set(EMX_SOURCES
     Source/ui/Theme.cpp
     Source/ui/EmxLookAndFeel.cpp
     Source/ui/Widgets.cpp
+    Source/ui/MasterBar.cpp
     Source/ui/MainPage.cpp)
 
 set(EMX_DEFINITIONS
