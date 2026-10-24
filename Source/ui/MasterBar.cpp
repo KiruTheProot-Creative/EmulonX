@@ -56,7 +56,7 @@ void MasterBar::resized()
 
 void MasterBar::paint (Graphics& g)
 {
-    g.setColour (theme::textMuted);
+    g.setColour (theme::isXp() ? Colours::white : theme::textMuted);   // XP: on the blue title band
     g.setFont (theme::font (8.0f, 700, 0.12f));
     g.drawText ("VOL", labelArea, Justification::centredLeft, false);
 
@@ -99,12 +99,22 @@ void MasterBar::paint (Graphics& g)
     // volume thumb
     const float x = xAt (base);
     const auto thumb = Rectangle<float> (x - 2.5f, t.getY() - 3.0f, 5.0f, t.getHeight() + 6.0f);
-    DropShadow (theme::red.withAlpha (0.7f), 6, {}).drawForRectangle (g, thumb.toNearestInt());
-    g.setColour (Colours::white);
-    g.fillRoundedRectangle (thumb, 2.0f);
+    if (theme::isXp())
+    {
+        g.setColour (theme::getSkin() == theme::Skin::xpLight ? Colour (0xff1c3f94) : Colours::white);
+        g.fillRoundedRectangle (thumb, 2.0f);
+        g.setColour (Colours::black.withAlpha (0.5f));
+        g.drawRoundedRectangle (thumb, 2.0f, 1.0f);
+    }
+    else
+    {
+        DropShadow (theme::red.withAlpha (0.7f), 6, {}).drawForRectangle (g, thumb.toNearestInt());
+        g.setColour (Colours::white);
+        g.fillRoundedRectangle (thumb, 2.0f);
+    }
     if (mod.current >= 0.0f && ! mod.rings.empty())
     {
-        g.setColour (Colours::white.withAlpha (0.85f));
+        g.setColour (theme::textStrong.withAlpha (0.85f));
         g.fillEllipse (xAt (mod.current) - 2.0f, t.getCentreY() - 2.0f, 4.0f, 4.0f);
     }
 
@@ -114,6 +124,6 @@ void MasterBar::paint (Graphics& g)
     const String text = adjusting ? slider.getTextFromValue (slider.getValue())
                                   : (pk < -59.0f ? String ("-INF DB") : (pk > 0 ? "+" : "") + String (pk, 1) + " DB");
     theme::drawLed (g, readoutArea, text.toUpperCase(), 9.0f, Justification::centred,
-                    ! adjusting && Time::getMillisecondCounterHiRes() < clipUntil ? Colours::white : theme::red);
+                    ! adjusting && Time::getMillisecondCounterHiRes() < clipUntil ? (theme::isXp() ? Colour (0xffd03030) : Colours::white) : theme::red);
 }
 } // namespace emx

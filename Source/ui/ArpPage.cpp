@@ -45,7 +45,7 @@ public:
                 g.fillRoundedRectangle (r, 4.0f);
                 g.setColour (Colours::black);
                 g.drawRoundedRectangle (r, 4.0f, 1.0f);
-                g.setColour (Colours::white);
+                g.setColour (theme::textOn (playing ? theme::hue (0xffd02c2c) : editing ? theme::hue (0xff9a1a1a) : theme::hue (0xff5a1010)));
                 g.setFont (theme::font (10.0f, 900, 0.06f));
                 g.drawText (patternLetter (pat), r, Justification::centred, false);
             }
@@ -169,7 +169,8 @@ public:
             g.fillRoundedRectangle (nb, 4.0f);
             g.setColour (Colours::black);
             g.drawRoundedRectangle (nb, 4.0f, 1.0f);
-            g.setColour (inUse ? Colours::white.withAlpha (lit ? 1.0f : 0.5f) : theme::textMuted.withAlpha (0.55f));
+            const auto numFill = lit ? (playing ? theme::hue (0xffff3030) : theme::hue (0xff8a1818)) : theme::hue (0xff2a2629);
+            g.setColour (inUse ? theme::textOn (numFill).withAlpha (lit ? 1.0f : 0.6f) : theme::textMuted.withAlpha (0.55f));
             g.setFont (theme::font (8.5f, 700, 0.04f));
             g.drawText (String (i + 1), nb, Justification::centred, false);
 
@@ -182,7 +183,7 @@ public:
         const float lx = (float) pat.length * colW;
         if (pat.length < 16)
         {
-            g.setColour (Colours::black.withAlpha (0.45f));
+            g.setColour (theme::isXp() ? theme::windowBg.withAlpha (0.6f) : Colours::black.withAlpha (0.45f));
             g.fillRect (Rectangle<float> (lx, bars.getY(), (float) getWidth() - lx, bars.getHeight()).reduced (0.0f, 2.0f));
             g.setColour (theme::red);
             g.fillRect (lx - 1.0f, bars.getY() + 2.0f, 2.0f, bars.getHeight() - 4.0f);
@@ -567,7 +568,7 @@ void ArpPage::paint (Graphics& g)
     if (shownPlayingPattern >= 0 && shownPlayingPattern < patternTabs.size())
     {
         auto r = patternTabs[shownPlayingPattern]->getBounds().toFloat().expanded (2.0f);
-        g.setColour (Colours::white.withAlpha (0.8f));
+        g.setColour (theme::textStrong.withAlpha (0.8f));
         g.drawRoundedRectangle (r, 5.0f, 1.5f);
     }
 

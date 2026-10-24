@@ -133,7 +133,7 @@ public:
         Path p;
         if (up) p.addTriangle (c.x - 4.5f, c.y + 2.5f, c.x + 4.5f, c.y + 2.5f, c.x, c.y - 3.0f);
         else    p.addTriangle (c.x - 4.5f, c.y - 2.5f, c.x + 4.5f, c.y - 2.5f, c.x, c.y + 3.0f);
-        g.setColour (isEnabled() ? (over ? Colours::white : theme::hue (0xffdddddd)) : theme::hue (0xff666666));
+        g.setColour (isEnabled() ? (over ? theme::textStrong : theme::hue (0xffdddddd)) : theme::hue (0xff666666));
         g.fillPath (p);
     }
 private:
@@ -399,7 +399,7 @@ public:
         g.fillRect (r.getX(), head.getBottom(), r.getWidth(), 1.0f);
         const auto* m = proc.findFxModule (moduleId);
         theme::drawGlowText (g, title, titleArea, theme::font (9.5f, 700, 0.12f),
-                             m != nullptr && m->on ? Colours::white : theme::textMuted, theme::red.withAlpha (0.6f), 6);
+                             m != nullptr && m->on ? theme::textStrong : theme::textMuted, theme::red.withAlpha (0.6f), 6);
     }
 
 private:
@@ -781,7 +781,7 @@ public:
         {
             if (item.row < 0)
             {
-                g.setColour (item.header ? Colours::white : theme::listText);
+                g.setColour (item.header ? theme::textStrong : theme::listText);
                 g.setFont (item.header ? theme::font (8.5f, 700, 0.12f) : theme::font (7.5f, 500, 0.05f));
                 g.drawText (item.text, 6, y, getWidth() - 12, rowH, Justification::centredLeft, true);
             }

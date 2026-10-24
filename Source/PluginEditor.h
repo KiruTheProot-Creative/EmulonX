@@ -15,6 +15,7 @@
 #include "ui/FxPage.h"
 #include "ui/ArpPage.h"
 #include "ui/MasterBar.h"
+#include "ui/Theme.h"
 
 namespace emx
 {
@@ -49,6 +50,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;   // settings
     bool applyHue();   // true if the colours changed
     float appliedHue = 0.0f;
+    theme::Skin appliedSkin = theme::Skin::classic;
     void updateTooltips();
 
     /** Everything visible lives in here, at base size; the editor scales it. */

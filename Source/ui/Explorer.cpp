@@ -86,7 +86,7 @@ public:
         auto r = Rectangle<float> (0, 0, (float) width, (float) height);
         if (kind == Kind::category)
         {
-            g.setColour (Colours::white);
+            g.setColour (theme::textStrong);
             g.setFont (theme::font (9.0f, 700, 0.14f));
             g.drawText (label, r.reduced (2.0f, 0.0f), Justification::centredLeft, true);
             g.setColour (theme::red.withAlpha (0.45f));
@@ -273,7 +273,7 @@ void FolderAddButton::paintButton (Graphics& g, bool highlighted, bool down)
     p.lineTo (r.getRight(), r.getBottom());
     p.lineTo (r.getX(), r.getBottom());
     p.closeSubPath();
-    g.setColour (highlighted ? Colours::white : theme::hue (0xffdddddd));
+    g.setColour (highlighted ? theme::textStrong : theme::hue (0xffdddddd));
     g.strokePath (p, PathStrokeType (1.4f));
     const auto c = r.getCentre().translated (1.0f, 1.0f);
     g.setColour (theme::red);

@@ -147,7 +147,7 @@ void EmxKnob::paint (Graphics& g)
     theme::drawLed (g, ledArea, slider.getTextFromValue (slider.getValue()), 9.0f);
     if (nameLabel == nullptr)
     {
-        g.setColour (Colours::white);
+        g.setColour (theme::textStrong);
         g.setFont (theme::font (8.0f, 700, 0.12f));
         g.drawText (caption, captionArea, Justification::centredTop, false);
     }
@@ -218,7 +218,7 @@ void ValueControl::paint (Graphics& g)
 {
     const auto v = slider.getValue();
     theme::drawLed (g, ledArea, format ? format (v) : String (v, 2), 8.5f);
-    g.setColour (isEnabled() ? Colours::white : theme::textMuted);
+    g.setColour (isEnabled() ? theme::textStrong : theme::textMuted);
     g.setFont (theme::font (8.0f, 700, 0.12f));
     g.drawFittedText (caption, captionArea.toNearestInt(), Justification::centredTop, 1, 0.6f);
 }
@@ -287,7 +287,7 @@ void GearButton::paintButton (Graphics& g, bool highlighted, bool down)
         tooth.applyTransform (AffineTransform::rotation (MathConstants<float>::twoPi * (float) i / 8.0f, c.x, c.y));
         gear.addPath (tooth);
     }
-    g.setColour (highlighted ? Colours::white : theme::hue (0xffdddddd));
+    g.setColour (highlighted ? theme::textStrong : theme::hue (0xffdddddd));
     g.fillPath (gear);
     g.setColour (theme::hue (0xff2b292f));
     g.fillEllipse (c.x - 2.2f, c.y - 2.2f, 4.4f, 4.4f);

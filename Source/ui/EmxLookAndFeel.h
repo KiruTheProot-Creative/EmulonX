@@ -37,5 +37,14 @@ public:
     void drawScrollbar (juce::Graphics&, juce::ScrollBar&, int x, int y, int w, int h, bool vertical,
                         int thumbStart, int thumbSize, bool over, bool down) override;
     int getDefaultScrollbarWidth() override { return 8; }
+
+    void drawTooltip (juce::Graphics&, const juce::String& text, int width, int height) override;
+    juce::Rectangle<int> getTooltipBounds (const juce::String& text, juce::Point<int> screenPos, juce::Rectangle<int> parentArea) override;
+
+private:
+    // EMULON XP versions
+    void xpButton (juce::Graphics&, juce::Button&, bool highlighted, bool down);
+    void xpKnob (juce::Graphics&, juce::Rectangle<float>, float startAngle, float endAngle, float pos);
+    void xpFader (juce::Graphics&, juce::Rectangle<float> track, float pos);
 };
 } // namespace emx

@@ -135,7 +135,7 @@ void Settings::setUiScale (float s)
 void Settings::resetToDefaults()
 {
     for (auto k : { "uiScale", "knobSensitivity", "showHints", "maxVoices", "cpuLimit", "stealQuietest", "defaultInterp",
-                    "defaultKeepSpeed", "embedSamples", "midiChannel", "velocityCurve", "bendRange", "a4", "hueShift", "bankColumns" })
+                    "defaultKeepSpeed", "embedSamples", "midiChannel", "velocityCurve", "bendRange", "a4", "hueShift", "bankColumns", "skin" })
         props->removeValue (k);
     changed();
 }

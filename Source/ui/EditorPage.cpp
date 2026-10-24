@@ -227,7 +227,7 @@ void WaveformView::paint (Graphics& g)
         g.strokePath (line, PathStrokeType (1.5f));
         if (spp < 0.15)
         {
-            g.setColour (Colours::white);
+            g.setColour (theme::textStrong);
             for (int j = f0; j <= f1; ++j)
                 g.fillRect (X (j) - 1.5f, mid - sampleAt (j) * amp - 1.5f, 3.0f, 3.0f);
         }
@@ -493,7 +493,7 @@ void KeymapView::paint (Graphics& g)
             }
             if (laneH >= 11.0f)
             {
-                g.setColour (on ? Colours::white : theme::hue (0xffffb0b0));
+                g.setColour (theme::isXp() ? theme::textOn (on ? theme::hue (0xffff4a4a) : theme::hue (0xff7a1414)) : (on ? Colours::white : theme::hue (0xffffb0b0)));
                 g.setFont (theme::font (jmin (8.0f, laneH * 0.5f), 700, 0.06f));
                 g.drawText (zs[i].name, r.reduced (8.0f, 0.0f), Justification::centredLeft, true);
             }
@@ -510,11 +510,11 @@ void KeymapView::paint (Graphics& g)
             const auto r = Rectangle<float> (k.x, keysTop, k.w, keyH * (k.black ? 0.6f : 1.0f));
             const bool down = held[(size_t) n];
             if (k.black)
-                g.setGradientFill (ColourGradient::vertical (down ? theme::hue (0xffff3a3a) : theme::hue (0xff3a373f), r.getY(),
-                                                             down ? theme::hue (0xff7a0808) : theme::hue (0xff09080b), r.getBottom()));
+                g.setGradientFill (ColourGradient::vertical (down ? theme::hue (0xffff3a3a) : Colour (0xff3a373f), r.getY(),   // real piano colours in every skin
+                                                             down ? theme::hue (0xff7a0808) : Colour (0xff09080b), r.getBottom()));
             else
-                g.setGradientFill (ColourGradient::vertical (down ? theme::hue (0xffff6a6a) : theme::hue (0xffcfc9c9), r.getY(),
-                                                             down ? theme::hue (0xffc01818) : theme::hue (0xfff2eeee), r.getBottom()));
+                g.setGradientFill (ColourGradient::vertical (down ? theme::hue (0xffff6a6a) : Colour (0xffcfc9c9), r.getY(),
+                                                             down ? theme::hue (0xffc01818) : Colour (0xfff2eeee), r.getBottom()));
             g.fillRect (r);
             g.setColour (Colours::black);
             g.drawRect (r, 1.0f);
@@ -531,7 +531,7 @@ void KeymapView::paint (Graphics& g)
             }
             if (n % 12 == 0)
             {
-                g.setColour (theme::hue (0xff444444));
+                g.setColour (Colour (0xff444444));
                 g.setFont (theme::font (6.5f, 700, 0.0f));
                 g.drawText (noteName (n), r.withTrimmedBottom (2.0f), Justification::centredBottom, false);
             }
@@ -674,7 +674,7 @@ public:
         g.setGradientFill (ColourGradient::horizontal (theme::hue (0xff5a0808).withAlpha (alpha), fill.getX(),
                                                        theme::hue (0xffd02a2a).withAlpha (alpha), jmax (fill.getX() + 1.0f, x)));
         g.fillRoundedRectangle (fill.withRight (x), 2.5f);
-        g.setColour (Colours::white.withAlpha (alpha));
+        g.setColour (theme::textStrong.withAlpha (alpha));
         g.fillRoundedRectangle (x - 1.5f, r.getY() + 1.0f, 3.0f, r.getHeight() - 2.0f, 1.5f);
         g.setColour (theme::hue (0xffffd0d0).withAlpha (alpha));
         g.setFont (theme::font (7.5f, 500, 0.04f));

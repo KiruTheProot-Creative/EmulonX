@@ -77,7 +77,7 @@ public:
     void paint (Graphics& g) override
     {
         auto head = getLocalBounds().removeFromTop (30).toFloat();
-        g.setColour (Colours::white);
+        g.setColour (theme::textStrong);
         g.setFont (theme::font (9.5f, 700, 0.12f));
         g.drawText (title, head.removeFromTop (15.0f), Justification::centredLeft, true);
         g.setColour (theme::textMuted);
@@ -178,7 +178,7 @@ public:
         g.fillEllipse (dot);
         g.setColour (active ? Colours::white : (isMouseOver() ? Colours::white.withAlpha (0.6f) : Colours::black));
         g.drawEllipse (dot.reduced (0.5f), active ? 2.0f : 1.0f);
-        g.setColour (active ? Colours::white : theme::textMuted);
+        g.setColour (active ? theme::textStrong : theme::textMuted);
         g.setFont (theme::font (7.5f, active ? 700 : 500, 0.08f));
         g.drawText (name, r, Justification::centred, false);
     }
@@ -311,6 +311,16 @@ SettingsPanel::SettingsPanel (EmulonXProcessor& p) : proc (p)
     addChildComponent (resetButton);
 
     //== Customization ===========================================================
+    const char* skinTips[] { "The original red metal look - the colour can be shifted below",
+                             "A light homage to early-2000s desktops: beige windows, glossy blue",
+                             "The same homage in dark" };
+    for (int i = 0; i < 3; ++i)
+    {
+        skinButtons[i].setClickingTogglesState (false);
+        skinButtons[i].setTooltip (skinTips[i]);
+        skinButtons[i].onClick = [this, i] { settings->setSkin (i); };
+        addChildComponent (skinButtons[i]);
+    }
     hueBar = std::make_unique<HueBar> (s);
     addChildComponent (*hueBar);
     const std::pair<const char*, float> swatchDefs[] { { "RED", 0.0f }, { "ORANGE", 25.0f }, { "GOLD", 66.0f }, { "GREEN", 117.0f },
@@ -360,7 +370,18 @@ void SettingsPanel::refresh()
         r->box.setSelectedItemIndex (r->read(), dontSendNotification);
     for (auto* f : folderLists)
         f->refresh();
-    hueResetButton.setEnabled (std::abs (settings->getHueShift()) > 0.01f);
+    const bool classic = settings->getSkin() == 0;
+    for (int i = 0; i < 3; ++i)
+        skinButtons[i].setToggleState (settings->getSkin() == i, dontSendNotification);
+    // the colour shift only belongs to the Classic skin
+    hueBar->setEnabled (classic);
+    hueBar->setAlpha (classic ? 1.0f : 0.3f);
+    for (auto* sw : swatches)
+    {
+        sw->setEnabled (classic);
+        sw->setAlpha (classic ? 1.0f : 0.3f);
+    }
+    hueResetButton.setEnabled (classic && std::abs (settings->getHueShift()) > 0.01f);
     repaint();
 }
 
@@ -379,6 +400,8 @@ void SettingsPanel::showPage (int index)
     for (auto* sw : swatches)
         sw->setVisible (page == customization);
     hueResetButton.setVisible (page == customization);
+    for (auto& b : skinButtons)
+        b.setVisible (page == customization);
     siteLink.setVisible (page == about);
     resized();
     repaint();
@@ -427,11 +450,15 @@ void SettingsPanel::resized()
 
     // Customization
     const int cx = content.getX() + 16, cw2 = content.getWidth() - 32;
-    hueBar->setBounds (cx, content.getY() + 16 + 44, cw2, 36);
+    const int skinW = (cw2 - 16) / 3;
+    for (int i = 0; i < 3; ++i)
+        skinButtons[i].setBounds (cx + i * (skinW + 8), content.getY() + 16 + 42, skinW, 30);
+    constexpr int colourY = 100;   // the colour section below the skins
+    hueBar->setBounds (cx, content.getY() + colourY + 16 + 44, cw2, 36);
     const int swW = cw2 / swatches.size();
     for (int i = 0; i < swatches.size(); ++i)
-        swatches[i]->setBounds (cx + i * swW, content.getY() + 16 + 150, swW, 50);
-    hueResetButton.setBounds (cx, content.getY() + 16 + 230, 150, 28);
+        swatches[i]->setBounds (cx + i * swW, content.getY() + colourY + 16 + 150, swW, 50);
+    hueResetButton.setBounds (cx, content.getY() + colourY + 16 + 230, 150, 28);
 }
 
 void SettingsPanel::paint (Graphics& g)
@@ -457,7 +484,7 @@ void SettingsPanel::paint (Graphics& g)
             if (row->page != page)
                 continue;
             auto line = Rectangle<float> ((float) content.getX() + 16.0f, (float) y, (float) content.getWidth() - 290.0f, 38.0f);
-            g.setColour (Colours::white);
+            g.setColour (theme::textStrong);
             g.setFont (theme::font (9.5f, 700, 0.1f));
             g.drawText (row->title, line.removeFromTop (19.0f), Justification::bottomLeft, true);
             g.setColour (theme::textMuted);
@@ -474,17 +501,20 @@ void SettingsPanel::paint (Graphics& g)
         auto line = [&] (int y, const String& title, const String& help)
         {
             auto a = Rectangle<float> ((float) content.getX() + 16.0f, (float) (content.getY() + y), (float) content.getWidth() - 32.0f, 38.0f);
-            g.setColour (Colours::white);
+            g.setColour (theme::textStrong);
             g.setFont (theme::font (9.5f, 700, 0.1f));
             g.drawText (title, a.removeFromTop (19.0f), Justification::bottomLeft, true);
             g.setColour (theme::textMuted);
             g.setFont (theme::font (7.5f, 500, 0.05f));
             g.drawText (help, a, Justification::topLeft, true);
         };
+        line (16, "SKIN", "THE WHOLE LOOK OF EMULON X - FOR EVERY EMULON X.");
         const float h = settings->getHueShift();
-        line (16, "COLOUR" + String (std::abs (h) > 0.01f ? "  (" + String (h > 0 ? "+" : "") + String (roundToInt (h)) + " DEG)" : String()),
-              "TURNS THE WHOLE INTERFACE TO ANOTHER COLOUR - FOR EVERY EMULON X. DOUBLE-CLICK THE BAR FOR RED.");
-        line (16 + 106, "QUICK PICKS", "ONE CLICK FOR A CLASSIC COLOUR.");
+        const bool classic = settings->getSkin() == 0;
+        line (100 + 16, "COLOUR" + String (classic && std::abs (h) > 0.01f ? "  (" + String (h > 0 ? "+" : "") + String (roundToInt (h)) + " DEG)" : String()),
+              classic ? "TURNS THE WHOLE INTERFACE TO ANOTHER COLOUR. DOUBLE-CLICK THE BAR FOR RED."
+                      : "ONLY FOR THE EMULON CLASSIC SKIN - THE XP SKINS KEEP THEIR OWN COLOURS.");
+        line (100 + 16 + 106, "QUICK PICKS", "ONE CLICK FOR A CLASSIC COLOUR.");
     }
 
     if (page == about)

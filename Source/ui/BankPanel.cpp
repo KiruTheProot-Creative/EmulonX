@@ -63,7 +63,7 @@ public:
                             Justification::centredRight, false);
             }
             g.setFont (theme::font (10.0f, 500, 0.04f));
-            g.setColour (sel ? Colours::white : theme::listText);
+            g.setColour (sel ? theme::textStrong : theme::listText);
             g.drawText (bank[(size_t) i].name, t, Justification::centredLeft, true);
         }
     }

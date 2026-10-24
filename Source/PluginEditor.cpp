@@ -22,6 +22,7 @@ EmulonXEditor::Root::Root (EmulonXEditor& e)
     for (auto* b : { &tabMain, &tabEditor, &tabFx, &tabArp })
     {
         b->setClickingTogglesState (false);
+        b->getProperties().set ("emxTab", true);   // the XP skin draws these like taskbar buttons
         b->onClick = [this, index] { showPage (index); };
         addAndMakeVisible (b);
         ++index;
@@ -79,18 +80,14 @@ void EmulonXEditor::Root::resized()
 
 void EmulonXEditor::Root::paint (Graphics& g)
 {
-    g.fillAll (Colours::black);
-    g.setImageResamplingQuality (Graphics::highResamplingQuality);
-    g.drawImage (theme::image (theme::Img::background), getLocalBounds().toFloat(),
-                 RectanglePlacement (RectanglePlacement::xMid | RectanglePlacement::yMid | RectanglePlacement::fillDestination));
+    theme::drawBackground (g, getLocalBounds(), titleArea.getBottom());
 
     theme::drawLogo (g, titleArea.expanded (0.0f, 2.0f));
 }
 
 void EmulonXEditor::Root::paintOverChildren (Graphics& g)
 {
-    g.setImageResamplingQuality (Graphics::highResamplingQuality);
-    theme::drawNineSlice (g, theme::image (theme::Img::frame), getLocalBounds(), 120, 30);
+    theme::drawFrame (g, getLocalBounds());
 }
 
 //== Editor ======================================================================
@@ -131,12 +128,15 @@ void EmulonXEditor::changeListenerCallback (ChangeBroadcaster*)
 
 bool EmulonXEditor::applyHue()
 {
-    const float h = settings->getHueShift();
-    if (std::abs (h - appliedHue) < 0.01f)
+    const auto skin = (theme::Skin) settings->getSkin();
+    const float h = skin == theme::Skin::classic ? settings->getHueShift() : 0.0f;   // hue shift is Classic only
+    if (std::abs (h - appliedHue) < 0.01f && skin == appliedSkin)
         return false;
-    theme::setHueShift (h);   // shared by every open Emulon X window
+    theme::setSkin (skin);    // shared by every open Emulon X window
+    theme::setHueShift (h);
     lnf.refreshColours();
     appliedHue = h;
+    appliedSkin = skin;
     return true;
 }
 

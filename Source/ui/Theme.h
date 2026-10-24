@@ -20,10 +20,29 @@ inline juce::Colour ledBg      { 0xff070203 };
 inline juce::Colour edge       { 0xff3a363d };
 inline juce::Colour highlight  { 0xff4a444f };
 
+//== Skins =========================================================================
+// EMULON CLASSIC is the red metal design (hue shift applies); EMULON XP is a light or dark
+// homage to early-2000s desktops. Every helper below draws in the current skin.
+enum class Skin { classic, xpLight, xpDark };
+void setSkin (Skin);   // message thread only
+Skin getSkin() noexcept;
+inline bool isXp() noexcept { return getSkin() != Skin::classic; }
+
+inline juce::Colour textStrong { 0xffffffff };   // titles and labels on panels (white in Classic)
+inline juce::Colour ledText    { 0xffff2a2a };   // text in LED displays / text fields
+inline juce::Colour windowBg   { 0xff000000 };   // behind everything
+
+/** Black or white text, whichever reads better on this fill colour. */
+inline juce::Colour textOn (juce::Colour fill) { return fill.getPerceivedBrightness() > 0.62f ? juce::Colour (0xff101010) : juce::Colours::white; }
+
+/** Window background (artwork in Classic, flat with a title band in XP) and the frame on top. */
+void drawBackground (juce::Graphics&, juce::Rectangle<int> bounds, float headerBottom);
+void drawFrame (juce::Graphics&, juce::Rectangle<int> bounds);
+
 /** Rotates the colour scheme by this many degrees (0 = the original red). Message thread only. */
 void setHueShift (float degrees);
 float getHueShift() noexcept;
-/** A colour from the original red design, turned to the current hue (alpha is kept). */
+/** A colour from the original red design, translated to the current skin and hue (alpha is kept). */
 juce::Colour hue (juce::uint32 argbInRedDesign);
 /** Same rotation for any colour; lightness is kept so contrast stays the same. */
 juce::Colour rotateHue (juce::Colour, float degrees);

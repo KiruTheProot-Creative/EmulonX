@@ -57,6 +57,7 @@ private:
     std::unique_ptr<HueBar> hueBar;
     juce::OwnedArray<Swatch> swatches;
     juce::TextButton hueResetButton { "BACK TO RED" };
+    juce::TextButton skinButtons[3] { juce::TextButton ("EMULON CLASSIC"), juce::TextButton ("EMULON XP - LIGHT"), juce::TextButton ("EMULON XP - DARK") };
     int page = 0;
     juce::Rectangle<int> panel, content;
 };

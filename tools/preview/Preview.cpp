@@ -442,6 +442,24 @@ int main (int argc, char** argv)
         st->setHueShift (0.0f);
         MessageManager::getInstance()->runDispatchLoopUntil (50);
         editor.showPage (0);
+
+        // Skins: EMULON XP light and dark on every page
+        for (auto [skin, sname] : { std::pair<int, const char*> { 1, "xp-light" }, { 2, "xp-dark" } })
+        {
+            st->setSkin (skin);
+            MessageManager::getInstance()->runDispatchLoopUntil (80);
+            for (int pg = 0; pg < 4; ++pg)
+            {
+                editor.showPage (pg);
+                save (String ("preview-") + sname + "-" + pageNames[pg]);
+            }
+            editor.showPage (0);
+            editor.showSettings (true, 4);
+            save (String ("preview-") + sname + "-settings");
+            editor.showSettings (false);
+        }
+        st->setSkin (0);
+        MessageManager::getInstance()->runDispatchLoopUntil (80);
     }
     for (auto sc : { 0.75f, 1.5f })
     {
