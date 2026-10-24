@@ -45,11 +45,10 @@ private:
 
     EmulonXProcessor& proc;
     juce::SharedResourcePointer<Settings> settings;
-    static constexpr int numPages = 7;
-    enum Page { folders, performance, audioMidi, interface, customization, skinDesigner, about };
+    static constexpr int numPages = 6;
+    enum Page { folders, performance, audioMidi, interface, customization, about };
     juce::TextButton navButtons[numPages] { juce::TextButton ("FOLDERS"), juce::TextButton ("PERFORMANCE"), juce::TextButton ("AUDIO & MIDI"),
-                                            juce::TextButton ("INTERFACE"), juce::TextButton ("CUSTOMIZATION"), juce::TextButton ("SKIN DESIGNER"),
-                                            juce::TextButton ("ABOUT") };
+                                            juce::TextButton ("INTERFACE"), juce::TextButton ("CUSTOMIZATION"), juce::TextButton ("ABOUT") };
     juce::TextButton doneButton { "DONE" }, panicButton { "ALL NOTES OFF" }, resetButton { "RESET SETTINGS" };
     juce::HyperlinkButton siteLink { "github.com/KiruTheProot-Creative/EmulonX",
                                      juce::URL ("https://github.com/KiruTheProot-Creative/EmulonX") };
@@ -58,16 +57,7 @@ private:
     std::unique_ptr<HueBar> hueBar;
     juce::OwnedArray<Swatch> swatches;
     juce::TextButton hueResetButton { "BACK TO RED" };
-    juce::TextButton skinButtons[4] { juce::TextButton ("EMULON CLASSIC"), juce::TextButton ("EMULON XP - LIGHT"), juce::TextButton ("EMULON XP - DARK"),
-                                      juce::TextButton ("CUSTOM SKIN") };
-    juce::ComboBox customBox;
-    juce::TextButton importButton { "IMPORT .EMXD..." }, deleteButton { "DELETE" }, designerButton { "OPEN SKIN DESIGNER" };
-    juce::StringArray customFiles;   // file names behind customBox's items
-    std::unique_ptr<juce::Component> designer;
-    std::unique_ptr<juce::FileChooser> skinChooser;
-    void refreshCustomSkins();
-    void updateColourSection();
-    void importSkin();
+    juce::TextButton skinButtons[3] { juce::TextButton ("EMULON CLASSIC"), juce::TextButton ("EMULON XP - LIGHT"), juce::TextButton ("EMULON XP - DARK") };
     int page = 0;
     juce::Rectangle<int> panel, content;
 };

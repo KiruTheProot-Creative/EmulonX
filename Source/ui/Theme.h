@@ -5,8 +5,6 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-namespace emx { struct SkinDesign; }
-
 namespace emx::theme
 {
 //== Colours ======================================================================
@@ -25,19 +23,10 @@ inline juce::Colour highlight  { 0xff4a444f };
 //== Skins =========================================================================
 // EMULON CLASSIC is the red metal design (hue shift applies); EMULON XP is a light or dark
 // homage to early-2000s desktops. Every helper below draws in the current skin.
-enum class Skin { classic, xpLight, xpDark, custom };
+enum class Skin { classic, xpLight, xpDark };
 void setSkin (Skin);   // message thread only
 Skin getSkin() noexcept;
-inline bool isXp() noexcept { const auto s = getSkin(); return s == Skin::xpLight || s == Skin::xpDark; }
-
-/** Loads a custom design (.emxd); used while the skin is Skin::custom. Message thread only. */
-void setCustomSkin (const SkinDesign&);
-/** The colour the colour shift starts from: Classic red, or a custom skin's accent. */
-juce::Colour baseAccent() noexcept;
-/** Does the custom skin allow the colour shift? */
-bool customHueShift() noexcept;
-/** Does the custom skin turn the knob image itself (instead of drawing a pointer)? */
-bool customKnobRotates() noexcept;
+inline bool isXp() noexcept { return getSkin() != Skin::classic; }
 
 inline juce::Colour textStrong { 0xffffffff };   // titles and labels on panels (white in Classic)
 inline juce::Colour ledText    { 0xffff2a2a };   // text in LED displays / text fields
@@ -62,16 +51,7 @@ juce::Colour rotateHue (juce::Colour, float degrees);
 juce::Font font (float height, int weight = 700, float kerning = 0.0f);
 
 //== Artwork (your PNGs, embedded at 2x so they stay sharp up to 200%) ==========
-enum class Img { background, frame, knob, slider, logo, panel, inset, display, button, buttonOn };
-/** The EMULON CLASSIC picture of a part as a template for skin makers (PNG-ready, 2x size).
-    For background / frame / knob / slider / logo it is the original artwork. */
-juce::Image defaultPartImage (Img);
-/** The original artwork file (jpg / png bytes) for background / frame / knob / slider / logo, else empty. */
-juce::MemoryBlock defaultArtworkFile (Img, juce::String& extension);
-/** True if the current skin has its own picture for this (custom skins). */
-bool hasImage (Img) noexcept;
-/** Draws an image stretched to fill r with its corners kept (9-slice), at half size for sharpness. */
-void drawSliced (juce::Graphics&, const juce::Image&, juce::Rectangle<float> r, int sourceBorder);
+enum class Img { background, frame, knob, slider, logo };
 
 /** The Emulon X logo, fitted into the area (keeps its shape), with a soft glow. */
 void drawLogo (juce::Graphics&, juce::Rectangle<float> area, juce::RectanglePlacement = juce::RectanglePlacement::xLeft | juce::RectanglePlacement::yMid);

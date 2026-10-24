@@ -66,20 +66,9 @@ void EmxLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int h, 
     }
 
     g.setImageResamplingQuality (Graphics::highResamplingQuality);
-    const auto angle = startAngle + pos * (endAngle - startAngle);
-    if (theme::getSkin() == theme::Skin::custom && theme::customKnobRotates())
-    {
-        // the skin's knob picture turns itself (its marker points up at the middle position)
-        const auto img = theme::image (theme::Img::knob);
-        if (img.isValid())
-        {
-            const auto fit = RectanglePlacement (RectanglePlacement::centred).getTransformToFit (img.getBounds().toFloat(), r);
-            g.drawImageTransformed (img, fit.followedBy (AffineTransform::rotation (angle, r.getCentreX(), r.getCentreY())));
-            return;
-        }
-    }
     g.drawImage (theme::image (theme::Img::knob), r, RectanglePlacement::centred);
 
+    const auto angle = startAngle + pos * (endAngle - startAngle);
     const auto c = r.getCentre();
     // Pointer runs from near the centre (2%) to 42% of the knob size, like the prototype.
     Line<float> line (c.x, c.y - size * 0.02f, c.x, c.y - size * 0.42f);
@@ -133,26 +122,6 @@ void EmxLookAndFeel::drawButtonBackground (Graphics& g, Button& b, const Colour&
     if (theme::isXp())
     {
         xpButton (g, b, highlighted, down);
-        return;
-    }
-    if (const auto which = b.getToggleState() && theme::hasImage (theme::Img::buttonOn) ? theme::Img::buttonOn : theme::Img::button;
-        theme::hasImage (which))
-    {
-        // the skin's button pictures
-        auto r = b.getLocalBounds().toFloat().reduced (0.5f, 1.0f);
-        if (down)
-            r = r.translated (0, 1.0f);
-        theme::drawSliced (g, theme::image (which), r, 12);
-        if (b.getToggleState() && which == theme::Img::button)   // no "on" picture: tint it
-        {
-            g.setColour (theme::red.withAlpha (0.35f));
-            g.fillRoundedRectangle (r, 4.0f);
-        }
-        if (highlighted && b.isEnabled())
-        {
-            g.setColour (Colours::white.withAlpha (0.08f));
-            g.fillRoundedRectangle (r, 4.0f);
-        }
         return;
     }
     auto r = b.getLocalBounds().toFloat().reduced (0.5f, 1.0f);

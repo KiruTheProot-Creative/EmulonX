@@ -494,8 +494,8 @@ int main (int argc, char** argv)
         st->setBankColumns (3);
         std::printf ("bank entries now: %d\n", (int) proc.getBank().size());
     }
-    const char* settingsPages[] { "folders", "performance", "midi", "interface", "customization", "skin-designer", "about" };
-    for (int p = 0; p < 7; ++p)
+    const char* settingsPages[] { "folders", "performance", "midi", "interface", "customization", "about" };
+    for (int p = 0; p < 6; ++p)
     {
         editor.showSettings (true, p);
         save (String ("preview-settings-") + settingsPages[p]);
@@ -542,97 +542,6 @@ int main (int argc, char** argv)
         }
         st->setSkin (0);
         MessageManager::getInstance()->runDispatchLoopUntil (80);
-
-        // Custom skin (.emxd): build one, round-trip it through a file and a folder, use it.
-        {
-            auto png = [] (int w, int h, std::function<void (Graphics&)> paint)
-            {
-                Image img (Image::ARGB, w, h, true);
-                { Graphics g (img); paint (g); }
-                MemoryOutputStream out;
-                PNGImageFormat().writeImageToStream (img, out);
-                return emx::SkinDesign::Blob { out.getMemoryBlock(), "png" };
-            };
-            emx::SkinDesign d;
-            d.name = "Test Skin";
-            d.author = "Preview";
-            d.knobRotates = true;
-            d.colours["accent"] = Colour (0xff35d06b);
-            d.images[emx::SkinDesign::panel] = png (96, 96, [] (Graphics& g)
-            {
-                g.setGradientFill (ColourGradient::vertical (Colour (0xff17322a), 0, Colour (0xff0a1512), 96));
-                g.fillRoundedRectangle (1, 1, 94, 94, 18);
-                g.setColour (Colour (0xff3fae7c));
-                g.drawRoundedRectangle (1, 1, 94, 94, 18, 2);
-            });
-            d.images[emx::SkinDesign::button] = png (64, 36, [] (Graphics& g)
-            {
-                g.setGradientFill (ColourGradient::vertical (Colour (0xff3a4a44), 0, Colour (0xff1b2421), 36));
-                g.fillRoundedRectangle (1, 1, 62, 34, 10);
-                g.setColour (Colour (0xff5bd59a)); g.drawRoundedRectangle (1, 1, 62, 34, 10, 2);
-            });
-            d.images[emx::SkinDesign::buttonOn] = png (64, 36, [] (Graphics& g)
-            {
-                g.setGradientFill (ColourGradient::vertical (Colour (0xff4ef0a0), 0, Colour (0xff178a52), 36));
-                g.fillRoundedRectangle (1, 1, 62, 34, 10);
-            });
-            d.images[emx::SkinDesign::display] = png (48, 32, [] (Graphics& g)
-            {
-                g.setColour (Colour (0xff031008)); g.fillRoundedRectangle (1, 1, 46, 30, 8);
-                g.setColour (Colour (0xff2c7a55)); g.drawRoundedRectangle (1, 1, 46, 30, 8, 2);
-            });
-            d.images[emx::SkinDesign::knob] = png (256, 256, [] (Graphics& g)
-            {
-                g.setGradientFill (ColourGradient (Colour (0xffd8e8e0), 70, 50, Colour (0xff42564c), 200, 220, true));
-                g.fillEllipse (24, 24, 208, 208);
-                g.setColour (Colour (0xff35d06b)); g.fillRoundedRectangle (122, 34, 12, 70, 6);   // marker pointing up
-            });
-            MemoryBlock fontData;
-            File ("/usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf").loadFileAsData (fontData);
-            if (! fontData.isEmpty())
-                d.font = { fontData, "ttf" };
-
-            String err;
-            const auto skinFile = st->getSkinsFolder().getChildFile ("Test Skin.emxd");
-            emx::SkinDesign back, fromFolder;
-            const bool saved = d.save (skinFile, err), loaded = emx::SkinDesign::load (skinFile, back, err);
-            auto same = [&] (const emx::SkinDesign& x)
-            {
-                bool ok = x.name == d.name && x.author == d.author && x.knobRotates && x.colours.size() == 1
-                       && x.colours.at ("accent") == d.colours.at ("accent") && x.font.data == d.font.data;
-                for (int p = 0; p < emx::SkinDesign::numParts; ++p)
-                    ok = ok && x.images[p].data == d.images[p].data;
-                return ok;
-            };
-            const auto folder = File::getSpecialLocation (File::tempDirectory).getChildFile ("emx-skin-folder");
-            folder.deleteRecursively();
-            const bool folderOk = d.saveFolder (folder, err) && emx::SkinDesign::load (folder, fromFolder, err) && same (fromFolder);
-            folder.deleteRecursively();
-            std::printf ("custom skin: save %s, load %s, round trip %s, folder round trip %s (%d bytes)\n", saved ? "ok" : "FAIL",
-                         loaded ? "ok" : "FAIL", loaded && same (back) ? "ok" : "FAIL", folderOk ? "ok" : "FAIL", (int) skinFile.getSize());
-
-            st->useCustomSkin (skinFile.getFileName());
-            MessageManager::getInstance()->runDispatchLoopUntil (100);
-            std::printf ("custom skin in use: %s\n", emx::theme::getSkin() == emx::theme::Skin::custom ? "ok" : "FAIL");
-            for (int pg = 0; pg < 4; ++pg)
-            {
-                editor.showPage (pg);
-                save (String ("preview-custom-") + pageNames[pg]);
-            }
-            editor.showPage (0);
-            st->setHueShift (-150.0f);   // allowed by this skin
-            MessageManager::getInstance()->runDispatchLoopUntil (100);
-            save ("preview-custom-main-shifted");
-            st->setHueShift (0.0f);
-            editor.showSettings (true, 4);
-            save ("preview-custom-settings");
-            editor.showSettings (true, 5);
-            save ("preview-custom-designer");
-            editor.showSettings (false);
-            st->setSkin (0);
-            MessageManager::getInstance()->runDispatchLoopUntil (100);
-            skinFile.deleteFile();
-        }
     }
     for (auto sc : { 0.75f, 1.5f })
     {

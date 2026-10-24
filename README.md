@@ -4,7 +4,7 @@ a Vibecoded project to make a Sampler, inspired by Emulator X (by E-MU) and with
 
 all Code has been written by CLAUDE. visuals have been made by me. all Sounds in the base presets / base bank that will be shipped are also made by me.
 
-# Current Features in V.1.1.2
+# Current Features in V.1.1.1
 
 - ### Sound engine
 - **Sampler with zones:** each sample is a zone with its own key range, velocity range and root note.
@@ -54,7 +54,6 @@ all Code has been written by CLAUDE. visuals have been made by me. all Sounds in
 - **Master volume** in the top bar, with the output meter built in.
 - **Type values in:** double-click any value display and type, units included (`300ms`, `1.5 s`, `50%`, `-6 dB`, `C4`, `L20`, `2.5k`).
 - **Skins:** *EMULON CLASSIC* (red metal, with a color shift and 8 quick picks) and *EMULON XP* in light and dark.
-- **Custom skins (`.emxd`):** make your own in *Settings → Skin designer* (background, frame, knobs, faders, panels, displays, buttons, logo, font, colours, colour shift on / off), export it as one file and share it. Import skins in *Settings → Customization* or drop them onto the window. How-to: [docs/SKINS.md](docs/SKINS.md).
 - **Interface size** from 75 % to 200 %, adjustable knob sensitivity, help tips.
 - **Settings are shared** by every Emulon X in every project. Your DAW project can store the samples too, so it opens anywhere.
 

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Theme.h"
 #include "EmxAssets.h"
-#include "SkinDesign.h"
 #include <thread>
 #include <unordered_map>
-#include <map>
 
 namespace emx::theme
 {
@@ -16,37 +14,8 @@ static juce::Typeface::Ptr typefaceFor (int weight)
     return weight >= 900 ? w900 : weight >= 700 ? w700 : w500;
 }
 
-namespace
-{
-/** The loaded custom design (decoded once). */
-struct CustomSkin
-{
-    juce::Image img[10];                 // by Img
-    std::map<juce::String, juce::Colour> colours;
-    bool hue = true, knobRotates = false;
-    juce::Typeface::Ptr font;
-    float fontScale = 1.0f;
-    float accentOffset = 0.0f;           // hue turn from the classic red to the skin's accent
-    int generation = 0;
-};
-CustomSkin customSkin;
-float capHeightOf (juce::Typeface::Ptr t)
-{
-    juce::GlyphArrangement ga;
-    ga.addLineOfText (juce::Font (juce::FontOptions (t).withHeight (100.0f)), "H", 0, 0);
-    juce::Path p;
-    ga.createPath (p);
-    return p.getBounds().getHeight();
-}
-} // namespace
-
 juce::Font font (float height, int weight, float kerning)
 {
-    if (getSkin() == Skin::custom && customSkin.font != nullptr)
-    {
-        juce::Font f { juce::FontOptions (customSkin.font).withHeight (height * customSkin.fontScale) };
-        return std::abs (kerning) > 1.0e-6f ? f.withExtraKerningFactor (kerning) : f;
-    }
     if (isXp())
     {
         // Tahoma, the classic desktop font, from the system (not shipped with the plugin);
@@ -259,12 +228,9 @@ juce::Colour hue (juce::uint32 argb)
 {
     if (currentSkin == Skin::classic && std::abs (currentShift) < 0.01f)
         return juce::Colour (argb);
-    if (currentSkin == Skin::custom && std::abs (customSkin.accentOffset + currentShift) < 0.01f)
-        return juce::Colour (argb);
     if (auto it = hueCache.find (argb); it != hueCache.end())
         return juce::Colour (it->second);
     const auto c = currentSkin == Skin::classic ? rotateHue (juce::Colour (argb), currentShift)
-                 : currentSkin == Skin::custom  ? rotateHue (juce::Colour (argb), customSkin.accentOffset + currentShift)
                                                  : xpMap (juce::Colour (argb), currentSkin == Skin::xpLight);
     hueCache[argb] = c.getARGB();
     return c;
@@ -294,33 +260,6 @@ void applyPalette()
             ledText = red;
             windowBg = juce::Colours::black;
             break;
-        case Skin::custom:
-        {
-            for (auto& b : baseColours)
-                *b.target = hue (b.argb);
-            textStrong = juce::Colours::white;
-            ledText = red;
-            windowBg = juce::Colours::black;
-            auto own = [] (const char* key, juce::Colour& target)
-            {
-                if (auto it = customSkin.colours.find (key); it != customSkin.colours.end())
-                    target = rotateHue (it->second, currentShift);
-            };
-            own ("accent", red);
-            own ("text", textStrong);
-            own ("text", textCol);
-            own ("muted", textMuted);
-            own ("display-text", ledText);
-            own ("display-bg", ledBg);
-            own ("list", listText);
-            if (customSkin.colours.count ("accent") != 0)
-            {
-                redDim = red.brighter (0.15f);
-                if (customSkin.colours.count ("display-text") == 0)
-                    ledText = red;
-            }
-            break;
-        }
         case Skin::xpLight:
             red = juce::Colour (0xff2f6bd9);  redDim = juce::Colour (0xff3d7ee6);  redDark = juce::Colour (0xffa9c1ec);
             textCol = juce::Colour (0xff101010);  textMuted = juce::Colour (0xff57564f);  listText = juce::Colour (0xff0b3a9e);
@@ -349,200 +288,26 @@ void setHueShift (float degrees)
     applyPalette();
 }
 
-bool hasImage (Img which) noexcept
-{
-    return currentSkin == Skin::custom && customSkin.img[(int) which].isValid();
-}
-
 juce::Image image (Img which)
 {
-    const int idx = (int) which;
     juce::Image src;
-    bool own = false;
-    if (currentSkin == Skin::custom && customSkin.img[idx].isValid())
+    switch (which)
     {
-        src = customSkin.img[idx];
-        own = true;
+        case Img::background: src = juce::ImageCache::getFromMemory (EmxAssets::background_jpg, EmxAssets::background_jpgSize); break;
+        case Img::frame:      src = juce::ImageCache::getFromMemory (EmxAssets::frame_png, EmxAssets::frame_pngSize); break;
+        case Img::knob:       src = juce::ImageCache::getFromMemory (EmxAssets::knob_png, EmxAssets::knob_pngSize); break;
+        case Img::slider:     src = juce::ImageCache::getFromMemory (EmxAssets::slider_png, EmxAssets::slider_pngSize); break;
+        case Img::logo:       src = juce::ImageCache::getFromMemory (EmxAssets::logo_png, EmxAssets::logo_pngSize); break;
     }
-    else
-    {
-        switch (which)
-        {
-            case Img::background: src = juce::ImageCache::getFromMemory (EmxAssets::background_jpg, EmxAssets::background_jpgSize); break;
-            case Img::frame:      src = juce::ImageCache::getFromMemory (EmxAssets::frame_png, EmxAssets::frame_pngSize); break;
-            case Img::knob:       src = juce::ImageCache::getFromMemory (EmxAssets::knob_png, EmxAssets::knob_pngSize); break;
-            case Img::slider:     src = juce::ImageCache::getFromMemory (EmxAssets::slider_png, EmxAssets::slider_pngSize); break;
-            case Img::logo:       src = juce::ImageCache::getFromMemory (EmxAssets::logo_png, EmxAssets::logo_pngSize); break;
-            case Img::panel: case Img::inset: case Img::display: case Img::button: case Img::buttonOn:
-                break;   // drawn, not pictures (unless a skin brings one)
-        }
-    }
-    if (isXp() || ! src.isValid())
-        return src;
-    // Classic: the colour shift. Custom: the skin's own pictures follow the colour shift (if allowed),
-    // the Classic pictures it doesn't replace also turn to its accent colour.
-    const float deg = currentSkin == Skin::classic ? currentShift
-                    : own ? currentShift : customSkin.accentOffset + currentShift;
-    if (std::abs (deg) < 0.01f)
+    if (currentSkin != Skin::classic || std::abs (currentShift) < 0.01f || ! src.isValid())
         return src;
 
-    struct Tinted { float deg = 0.0f; bool own = false; int gen = -1; juce::Image img; };
-    static Tinted tinted[10];
-    auto& t = tinted[idx];
-    if (! t.img.isValid() || std::abs (t.deg - deg) > 0.01f || t.own != own || t.gen != customSkin.generation)
-        t = { deg, own, customSkin.generation, recolour (src, deg) };
+    struct Tinted { float shift = 0.0f; juce::Image img; };
+    static Tinted tinted[5];
+    auto& t = tinted[(int) which];
+    if (! t.img.isValid() || std::abs (t.shift - currentShift) > 0.01f)
+        t = { currentShift, recolour (src, currentShift) };
     return t.img;
-}
-
-void drawSliced (juce::Graphics& g, const juce::Image& img, juce::Rectangle<float> r, int sourceBorder)
-{
-    if (! img.isValid())
-        return;
-    const int s = juce::jlimit (1, juce::jmax (1, juce::jmin (img.getWidth(), img.getHeight()) / 2 - 1), sourceBorder);
-    const int d = juce::jmax (1, juce::jmin (s / 2, (int) juce::jmin (r.getWidth(), r.getHeight()) / 2));
-    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    drawNineSlice (g, img, r.toNearestInt(), s, d);
-}
-
-juce::MemoryBlock defaultArtworkFile (Img which, juce::String& ext)
-{
-    ext = "png";
-    switch (which)
-    {
-        case Img::background: ext = "jpg"; return { EmxAssets::background_jpg, (size_t) EmxAssets::background_jpgSize };
-        case Img::frame:      return { EmxAssets::frame_png, (size_t) EmxAssets::frame_pngSize };
-        case Img::knob:       return { EmxAssets::knob_png, (size_t) EmxAssets::knob_pngSize };
-        case Img::slider:     return { EmxAssets::slider_png, (size_t) EmxAssets::slider_pngSize };
-        case Img::logo:       return { EmxAssets::logo_png, (size_t) EmxAssets::logo_pngSize };
-        case Img::panel: case Img::inset: case Img::display: case Img::button: case Img::buttonOn:
-            break;
-    }
-    return {};
-}
-
-juce::Image defaultPartImage (Img which)
-{
-    // the Classic drawing, at 2x, in the original red (no skin, no shift)
-    auto make = [] (int w, int h, const std::function<void (juce::Graphics&, juce::Rectangle<float>)>& paint)
-    {
-        juce::Image img (juce::Image::ARGB, w, h, true);
-        juce::Graphics g (img);
-        paint (g, juce::Rectangle<float> ((float) w, (float) h).reduced (1.0f));
-        return img;
-    };
-    switch (which)
-    {
-        case Img::panel:
-            return make (96, 96, [] (juce::Graphics& g, juce::Rectangle<float> r)
-            {
-                juce::ColourGradient grad (juce::Colour (0xff26232a), 0.0f, r.getY(), juce::Colour (0xff0d0c10), 0.0f, r.getBottom(), false);
-                grad.addColour (0.4, juce::Colour (0xff141217));
-                g.setGradientFill (grad);
-                g.fillRoundedRectangle (r, 18.0f);
-                g.setColour (juce::Colour (0xff4a444f));
-                g.fillRect (r.getX() + 18.0f, r.getY() + 2.0f, r.getWidth() - 36.0f, 2.0f);
-                g.setColour (juce::Colours::black);
-                g.drawRoundedRectangle (r, 18.0f, 2.0f);
-            });
-        case Img::inset:
-            return make (80, 80, [] (juce::Graphics& g, juce::Rectangle<float> r)
-            {
-                g.setGradientFill (juce::ColourGradient::vertical (juce::Colour (0xff1c1a1f), r.getY(), juce::Colour (0xff111014), r.getBottom()));
-                g.fillRoundedRectangle (r, 16.0f);
-                g.setGradientFill (juce::ColourGradient::vertical (juce::Colours::black.withAlpha (0.6f), r.getY(), juce::Colours::transparentBlack, r.getY() + 12.0f));
-                g.fillRoundedRectangle (r, 16.0f);
-            });
-        case Img::display:
-            return make (48, 32, [] (juce::Graphics& g, juce::Rectangle<float> r)
-            {
-                g.setColour (juce::Colour (0xff070203));
-                g.fillRoundedRectangle (r, 10.0f);
-                g.setColour (juce::Colours::black.withAlpha (0.35f));
-                for (float y = r.getY() + 2.0f; y < r.getBottom() - 2.0f; y += 6.0f)
-                    g.fillRect (r.getX() + 3.0f, y, r.getWidth() - 6.0f, 2.0f);
-                g.setColour (juce::Colours::black);
-                g.drawRoundedRectangle (r, 10.0f, 2.0f);
-            });
-        case Img::button:
-        case Img::buttonOn:
-        {
-            const bool on = which == Img::buttonOn;
-            return make (64, 36, [on] (juce::Graphics& g, juce::Rectangle<float> r)
-            {
-                g.setGradientFill (juce::ColourGradient::vertical (juce::Colour (on ? 0xffc62828 : 0xff55515a), r.getY(),
-                                                                   juce::Colour (on ? 0xff5a0808 : 0xff1d1b20), r.getBottom()));
-                g.fillRoundedRectangle (r, 10.0f);
-                g.setColour (juce::Colour (on ? 0xffff7a7a : 0xff7a747f));
-                g.fillRect (r.getX() + 8.0f, r.getY() + 2.0f, r.getWidth() - 16.0f, 2.0f);
-                g.setColour (juce::Colours::black);
-                g.drawRoundedRectangle (r, 10.0f, 2.0f);
-            });
-        }
-        case Img::background: case Img::frame: case Img::knob: case Img::slider: case Img::logo:
-            break;
-    }
-    juce::String ext;
-    const auto mb = defaultArtworkFile (which, ext);
-    return juce::ImageFileFormat::loadFrom (mb.getData(), mb.getSize());
-}
-
-bool customHueShift() noexcept { return customSkin.hue; }
-
-juce::Colour baseAccent() noexcept
-{
-    if (currentSkin == Skin::custom)
-        if (auto it = customSkin.colours.find ("accent"); it != customSkin.colours.end())
-            return it->second;
-    return juce::Colour (0xffff2a2a);
-}
-bool customKnobRotates() noexcept { return customSkin.knobRotates; }
-
-void setCustomSkin (const SkinDesign& d)
-{
-    static const Img order[SkinDesign::numParts] { Img::background, Img::frame, Img::knob, Img::slider, Img::panel,
-                                                   Img::inset, Img::display, Img::button, Img::buttonOn, Img::logo };
-    CustomSkin c;
-    for (int p = 0; p < SkinDesign::numParts; ++p)
-        if (! d.images[p].isEmpty())
-            c.img[(int) order[p]] = juce::ImageFileFormat::loadFrom (d.images[p].data.getData(), d.images[p].data.getSize());
-    c.colours = d.colours;
-    c.hue = d.hueShift;
-    c.knobRotates = d.knobRotates;
-    if (! d.font.isEmpty())
-    {
-        c.font = juce::Typeface::createSystemTypefaceFor (d.font.data.getData(), d.font.data.getSize());
-        if (c.font != nullptr)
-        {
-            // same capital height as Saira at its usual sizes, so every layout still fits
-            static const float target = capHeightOf (typefaceFor (700)) * 1.3137f;
-            const float h = capHeightOf (c.font);
-            c.fontScale = h > 1.0f ? juce::jlimit (0.5f, 2.5f, target / h) : 1.0f;
-        }
-    }
-    if (auto it = d.colours.find ("accent"); it != d.colours.end() && it->second.getSaturation() > 0.08f)
-    {
-        auto labHue = [] (juce::Colour col)
-        {
-            const auto l = linearToLab (toLinear (col.getFloatRed()), toLinear (col.getFloatGreen()), toLinear (col.getFloatBlue()));
-            return juce::radiansToDegrees (std::atan2 (l.b, l.a));
-        };
-        float off = labHue (it->second) - labHue (juce::Colour (0xffff2a2a));
-        while (off > 180.0f) off -= 360.0f;
-        while (off < -180.0f) off += 360.0f;
-        c.accentOffset = off;
-    }
-    c.generation = customSkin.generation + 1;
-    customSkin = std::move (c);
-
-    // Let go of the skin's font and pictures when JUCE shuts down (before the font system does).
-    struct Releaser final : juce::DeletedAtShutdown
-    {
-        ~Releaser() override { customSkin = CustomSkin(); }
-    };
-    static auto* releaser = new Releaser();
-    juce::ignoreUnused (releaser);
-    hueCache.clear();
-    applyPalette();
 }
 
 void drawLogo (juce::Graphics& g, juce::Rectangle<float> area, juce::RectanglePlacement placement)
@@ -557,9 +322,9 @@ void drawLogo (juce::Graphics& g, juce::Rectangle<float> area, juce::RectanglePl
     const float pad = dest.getHeight() * 0.35f;
     const int w = juce::jmax (1, juce::roundToInt ((dest.getWidth() + 2.0f * pad) * px));
     const int h = juce::jmax (1, juce::roundToInt ((dest.getHeight() + 2.0f * pad) * px));
-    struct Cache { int w = 0, h = 0; float shift = 1000.0f; Skin skin = Skin::classic; int gen = -1; juce::Image img; };
+    struct Cache { int w = 0, h = 0; float shift = 1000.0f; Skin skin = Skin::classic; juce::Image img; };
     static Cache cache;
-    if (cache.w != w || cache.h != h || std::abs (cache.shift - currentShift) > 0.01f || cache.skin != currentSkin || cache.gen != customSkin.generation)
+    if (cache.w != w || cache.h != h || std::abs (cache.shift - currentShift) > 0.01f || cache.skin != currentSkin)
     {
         juce::Image out (juce::Image::ARGB, w, h, true);
         {
@@ -572,14 +337,14 @@ void drawLogo (juce::Graphics& g, juce::Rectangle<float> area, juce::RectanglePl
                 sg.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
                 sg.drawImage (img, inner);
             }
-            if (! isXp())
+            if (currentSkin == Skin::classic)
                 juce::DropShadow (red.withAlpha (0.45f), juce::roundToInt (dest.getHeight() * 0.3f * px), {}).drawForImage (cg, shape);
             else   // a crisp drop shadow, like desktop icon labels
                 juce::DropShadow (juce::Colours::black.withAlpha (0.55f), juce::roundToInt (2.0f * px), { 1, 1 }).drawForImage (cg, shape);
             cg.setOpacity (1.0f);   // the shadow leaves its own colour (45 %) set
             cg.drawImageAt (shape, 0, 0);
         }
-        cache = { w, h, currentShift, currentSkin, customSkin.generation, out };
+        cache = { w, h, currentShift, currentSkin, out };
     }
     juce::Graphics::ScopedSaveState state (g);
     g.setOpacity (1.0f);
@@ -597,11 +362,6 @@ void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, float radius)
         g.fillRoundedRectangle (r, 4.0f);
         g.setColour (light ? juce::Colour (0xffc9c6b4) : juce::Colour (0xff474747));
         g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
-        return;
-    }
-    if (hasImage (Img::panel))
-    {
-        drawSliced (g, image (Img::panel), r, 24);
         return;
     }
     juce::Path p;
@@ -630,11 +390,6 @@ void drawInset (juce::Graphics& g, juce::Rectangle<float> r, float radius)
         g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 1.0f);
         return;
     }
-    if (hasImage (Img::inset))
-    {
-        drawSliced (g, image (Img::inset), r, 20);
-        return;
-    }
     g.setGradientFill (juce::ColourGradient::vertical (hue (0xff1c1a1f), r.getY(), hue (0xff111014), r.getBottom()));
     g.fillRoundedRectangle (r, radius);
     g.setGradientFill (juce::ColourGradient::vertical (juce::Colours::black.withAlpha (0.6f), r.getY(), juce::Colours::transparentBlack, r.getY() + 6.0f));
@@ -659,14 +414,6 @@ void drawLed (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& t
         }
         return;
     }
-    if (hasImage (Img::display))
-    {
-        drawSliced (g, image (Img::display), r, 12);
-        if (text.isNotEmpty())
-            drawGlowText (g, text, r.reduced (6.0f, 0.0f), font (textHeight, 500, 0.06f), textColour == red ? ledText : textColour,
-                          (textColour == red ? ledText : textColour).withAlpha (0.55f), 6, just);
-        return;
-    }
     g.setColour (edge);
     g.fillRoundedRectangle (r.translated (0, 1), 6.0f);
     g.setColour (ledBg);
@@ -687,10 +434,8 @@ void drawLed (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& t
     g.drawRoundedRectangle (r, 6.0f, 1.0f);
 
     if (text.isNotEmpty())
-    {
-        const auto tc = textColour == red ? ledText : textColour;
-        drawGlowText (g, text, r.reduced (6.0f, 0.0f), font (textHeight, 500, 0.06f), tc, tc.withAlpha (0.55f), 6, just);
-    }
+        drawGlowText (g, text, r.reduced (6.0f, 0.0f), font (textHeight, 500, 0.06f), textColour,
+                      textColour.withAlpha (0.55f), 6, just);
 }
 
 void drawGlowText (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> r, const juce::Font& f,
@@ -792,9 +537,7 @@ void drawFrame (juce::Graphics& g, juce::Rectangle<int> bounds)
     if (! isXp())
     {
         g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-        const auto frameImg = image (Img::frame);
-        if (frameImg.isValid())   // the frame art is 1920 wide; its corner size scales with it
-            drawNineSlice (g, frameImg, bounds, juce::jmax (8, juce::roundToInt (120.0f * (float) frameImg.getWidth() / 1920.0f)), 30);
+        drawNineSlice (g, image (Img::frame), bounds, 120, 30);
         return;
     }
     // a window border: blue (light) or deep navy (dark), lighter on the inside edge
