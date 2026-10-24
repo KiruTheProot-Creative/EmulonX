@@ -44,7 +44,7 @@ void drawModRings (Graphics& g, Rectangle<float> knob, const ModRings& m)
             a1 = a0 + 0.02f;
         Path arc;
         arc.addCentredArc (c.x, c.y, rad, rad, 0.0f, jmin (a0, a1), jmax (a0, a1), true);
-        g.setColour ((r.envelope ? Colour (0xffffd6d6) : Colour (0xffffb030)).withAlpha (0.9f));
+        g.setColour ((r.envelope ? theme::hue (0xffffd6d6) : theme::hue (0xffffb030)).withAlpha (0.9f));
         g.strokePath (arc, PathStrokeType (2.5f, PathStrokeType::curved, PathStrokeType::rounded));
     }
     if (m.current >= 0.0f)
@@ -237,7 +237,7 @@ void LedLabel::paint (Graphics& g)
         return;
     const auto t = getText();
     theme::drawLed (g, getLocalBounds().toFloat(), t.isEmpty() ? placeholder : t, textHeight,
-                    Justification::centredLeft, t.isEmpty() ? theme::redDark : theme::red);
+                    Justification::centredLeft, t.isEmpty() ? theme::textMuted : theme::red);
 }
 
 TextEditor* LedLabel::createEditorComponent()
@@ -287,9 +287,9 @@ void GearButton::paintButton (Graphics& g, bool highlighted, bool down)
         tooth.applyTransform (AffineTransform::rotation (MathConstants<float>::twoPi * (float) i / 8.0f, c.x, c.y));
         gear.addPath (tooth);
     }
-    g.setColour (highlighted ? Colours::white : Colour (0xffdddddd));
+    g.setColour (highlighted ? Colours::white : theme::hue (0xffdddddd));
     g.fillPath (gear);
-    g.setColour (Colour (0xff2b292f));
+    g.setColour (theme::hue (0xff2b292f));
     g.fillEllipse (c.x - 2.2f, c.y - 2.2f, 4.4f, 4.4f);
 }
 
@@ -314,7 +314,7 @@ void LevelMeter::paint (Graphics& g)
         const auto db = Decibels::gainToDecibels (level[ch], -60.0f);
         const auto h = jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f) * r.getHeight();
         auto bar = Rectangle<float> (r.getX() + (float) ch * (barW + 3.0f), r.getBottom() - h, barW, h);
-        ColourGradient grad (Colour (0xffffd0d0), 0.0f, r.getY(), Colour (0xff7a0000), 0.0f, r.getBottom(), false);
+        ColourGradient grad (theme::hue (0xffffd0d0), 0.0f, r.getY(), theme::hue (0xff7a0000), 0.0f, r.getBottom(), false);
         grad.addColour (0.3, theme::red);
         g.setGradientFill (grad);
         g.fillRoundedRectangle (bar, 2.0f);

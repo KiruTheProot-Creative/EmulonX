@@ -55,7 +55,7 @@ public:
             g.fillRoundedRectangle (Rectangle<float> (0, 0, (float) w, (float) h).reduced (2.0f, 1.0f), 3.0f);
         }
         const File f (paths[row]);
-        g.setColour (f.isDirectory() ? Colour (0xffdd3333) : Colour (0xffffb030));
+        g.setColour (f.isDirectory() ? theme::listText : theme::hue (0xffffb030));
         g.setFont (theme::font (8.5f, 500, 0.02f));
         g.drawText (paths[row] + (f.isDirectory() ? "" : "  (NOT FOUND)"), 7, 0, w - 10, h, Justification::centredLeft, true);
     }
@@ -86,7 +86,7 @@ public:
         theme::drawLed (g, listArea, {});
         if (paths.isEmpty())
         {
-            g.setColour (theme::redDark);
+            g.setColour (theme::textMuted);
             g.setFont (theme::font (8.0f, 500, 0.05f));
             g.drawText ("NO FOLDERS", listArea.reduced (8.0f, 5.0f), Justification::topLeft, true);
         }
@@ -101,6 +101,99 @@ private:
     TextButton addButton { "ADD..." }, removeButton { "REMOVE" };
     std::unique_ptr<FileChooser> chooser;
     Rectangle<float> listArea;
+};
+
+//== Customization: hue bar + colour swatches ====================================
+class SettingsPanel::HueBar final : public Component
+{
+public:
+    explicit HueBar (Settings& s) : settings (s) { setMouseCursor (MouseCursor::LeftRightResizeCursor); }
+
+    void paint (Graphics& g) override
+    {
+        auto r = track();
+        // the bar shows the accent colour each position gives (red in the middle)
+        const int steps = jmax (2, (int) r.getWidth() / 3);
+        for (int i = 0; i < steps; ++i)
+        {
+            const float x0 = r.getX() + r.getWidth() * (float) i / (float) steps;
+            const float x1 = r.getX() + r.getWidth() * (float) (i + 1) / (float) steps;
+            g.setColour (theme::rotateHue (Colour (0xffff2a2a), -180.0f + 360.0f * ((float) i + 0.5f) / (float) steps));
+            g.fillRect (x0, r.getY(), x1 - x0 + 0.5f, r.getHeight());
+        }
+        g.setColour (Colours::black);
+        g.drawRect (r.expanded (1.0f), 1.0f);
+
+        // centre mark (original red)
+        g.setColour (Colours::white.withAlpha (0.5f));
+        g.fillRect (r.getCentreX() - 0.5f, r.getBottom() + 2.0f, 1.0f, 4.0f);
+
+        // thumb
+        const float x = xFor (settings.getHueShift());
+        auto thumb = Rectangle<float> (x - 5.0f, r.getY() - 4.0f, 10.0f, r.getHeight() + 8.0f);
+        g.setColour (Colours::black.withAlpha (0.6f));
+        g.fillRoundedRectangle (thumb.translated (0.0f, 1.0f), 3.0f);
+        g.setColour (Colours::white);
+        g.fillRoundedRectangle (thumb, 3.0f);
+        g.setColour (theme::red);
+        g.fillRoundedRectangle (thumb.reduced (2.5f, 3.0f), 1.5f);
+    }
+
+    void mouseDown (const MouseEvent& e) override { set (e.position.x); }
+    void mouseDrag (const MouseEvent& e) override { set (e.position.x); }
+    void mouseDoubleClick (const MouseEvent&) override { settings.setHueShift (0.0f); }
+
+private:
+    Rectangle<float> track() const { return getLocalBounds().toFloat().reduced (6.0f, 8.0f); }
+    float xFor (float deg) const { auto r = track(); return r.getX() + r.getWidth() * (deg + 180.0f) / 360.0f; }
+    void set (float x)
+    {
+        auto r = track();
+        float deg = jlimit (-180.0f, 180.0f, (x - r.getX()) / r.getWidth() * 360.0f - 180.0f);
+        if (std::abs (deg) < 4.0f)
+            deg = 0.0f;   // snaps to the original red
+        settings.setHueShift ((float) roundToInt (deg));
+    }
+    Settings& settings;
+};
+
+class SettingsPanel::Swatch final : public Component, public SettableTooltipClient
+{
+public:
+    Swatch (Settings& s, String n, float deg) : settings (s), name (std::move (n)), degrees (deg)
+    {
+        setMouseCursor (MouseCursor::PointingHandCursor);
+        setTooltip ("Turn the interface " + name.toLowerCase());
+    }
+
+    void paint (Graphics& g) override
+    {
+        auto r = getLocalBounds().toFloat();
+        auto dot = r.removeFromTop (r.getHeight() - 16.0f).withSizeKeepingCentre (30.0f, 30.0f);
+        const auto c = theme::rotateHue (Colour (0xffff2a2a), degrees);
+        const bool active = std::abs (settings.getHueShift() - degrees) < 0.5f;
+        if (active)
+            DropShadow (c.withAlpha (0.8f), 10, {}).drawForRectangle (g, dot.toNearestInt());
+        g.setGradientFill (ColourGradient::vertical (c.brighter (0.3f), dot.getY(), c.darker (0.15f), dot.getBottom()));
+        g.fillEllipse (dot);
+        g.setColour (active ? Colours::white : (isMouseOver() ? Colours::white.withAlpha (0.6f) : Colours::black));
+        g.drawEllipse (dot.reduced (0.5f), active ? 2.0f : 1.0f);
+        g.setColour (active ? Colours::white : theme::textMuted);
+        g.setFont (theme::font (7.5f, active ? 700 : 500, 0.08f));
+        g.drawText (name, r, Justification::centred, false);
+    }
+    void mouseEnter (const MouseEvent&) override { repaint(); }
+    void mouseExit (const MouseEvent&) override { repaint(); }
+    void mouseUp (const MouseEvent& e) override
+    {
+        if (e.mouseWasClicked())
+            settings.setHueShift (degrees);
+    }
+
+private:
+    Settings& settings;
+    String name;
+    float degrees;
 };
 
 //== Settings panel ==============================================================
@@ -121,7 +214,7 @@ SettingsPanel::SettingsPanel (EmulonXProcessor& p) : proc (p)
     setWantsKeyboardFocus (true);
     auto& s = *settings;
 
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < numPages; ++i)
     {
         navButtons[i].onClick = [this, i] { showPage (i); };
         addAndMakeVisible (navButtons[i]);
@@ -212,9 +305,19 @@ SettingsPanel::SettingsPanel (EmulonXProcessor& p) : proc (p)
     resetButton.onClick = [this] { settings->resetToDefaults(); };
     addChildComponent (resetButton);
 
+    //== Customization ===========================================================
+    hueBar = std::make_unique<HueBar> (s);
+    addChildComponent (*hueBar);
+    const std::pair<const char*, float> swatchDefs[] { { "RED", 0.0f }, { "ORANGE", 25.0f }, { "GOLD", 66.0f }, { "GREEN", 117.0f },
+                                                       { "CYAN", 177.0f }, { "BLUE", -122.0f }, { "PURPLE", -89.0f }, { "PINK", -36.0f } };
+    for (auto& [n, d] : swatchDefs)
+        addChildComponent (swatches.add (new Swatch (s, n, d)));
+    hueResetButton.setTooltip ("Puts the colours back to the original red");
+    hueResetButton.onClick = [this] { settings->setHueShift (0.0f); };
+    addChildComponent (hueResetButton);
+
     //== About ===================================================================
     siteLink.setFont (theme::font (10.0f, 700, 0.04f), false, Justification::centredLeft);
-    siteLink.setColour (HyperlinkButton::textColourId, theme::red);
     addChildComponent (siteLink);
 
     settings->addChangeListener (this);
@@ -252,20 +355,26 @@ void SettingsPanel::refresh()
         r->box.setSelectedItemIndex (r->read(), dontSendNotification);
     for (auto* f : folderLists)
         f->refresh();
+    hueResetButton.setEnabled (std::abs (settings->getHueShift()) > 0.01f);
+    repaint();
 }
 
 void SettingsPanel::showPage (int index)
 {
     page = index;
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < numPages; ++i)
         navButtons[i].setToggleState (i == page, dontSendNotification);
     for (auto* f : folderLists)
-        f->setVisible (page == 0);
+        f->setVisible (page == folders);
     for (auto* r : rows)
         r->box.setVisible (r->page == page);
-    panicButton.setVisible (page == 2);
-    resetButton.setVisible (page == 3);
-    siteLink.setVisible (page == 4);
+    panicButton.setVisible (page == audioMidi);
+    resetButton.setVisible (page == interface);
+    hueBar->setVisible (page == customization);
+    for (auto* sw : swatches)
+        sw->setVisible (page == customization);
+    hueResetButton.setVisible (page == customization);
+    siteLink.setVisible (page == about);
     resized();
     repaint();
 }
@@ -309,6 +418,14 @@ void SettingsPanel::resized()
     panicButton.setBounds (content.getX() + 16, content.getY() + 16 + 4 * 54 + 12, 150, 28);
     resetButton.setBounds (content.getX() + 16, content.getY() + 16 + 3 * 54 + 12, 150, 28);
     siteLink.setBounds (content.getX() + 16, content.getY() + 128, 400, 22);
+
+    // Customization
+    const int cx = content.getX() + 16, cw2 = content.getWidth() - 32;
+    hueBar->setBounds (cx, content.getY() + 16 + 44, cw2, 36);
+    const int swW = cw2 / swatches.size();
+    for (int i = 0; i < swatches.size(); ++i)
+        swatches[i]->setBounds (cx + i * swW, content.getY() + 16 + 150, swW, 50);
+    hueResetButton.setBounds (cx, content.getY() + 16 + 230, 150, 28);
 }
 
 void SettingsPanel::paint (Graphics& g)
@@ -326,7 +443,7 @@ void SettingsPanel::paint (Graphics& g)
 
     theme::drawInset (g, content.toFloat());
 
-    if (page >= 1 && page <= 3)
+    if (page >= performance && page <= interface)
     {
         int y = content.getY() + 16;
         for (auto* row : rows)
@@ -346,7 +463,25 @@ void SettingsPanel::paint (Graphics& g)
         }
     }
 
-    if (page == 4)
+    if (page == customization)
+    {
+        auto line = [&] (int y, const String& title, const String& help)
+        {
+            auto a = Rectangle<float> ((float) content.getX() + 16.0f, (float) (content.getY() + y), (float) content.getWidth() - 32.0f, 38.0f);
+            g.setColour (Colours::white);
+            g.setFont (theme::font (9.5f, 700, 0.1f));
+            g.drawText (title, a.removeFromTop (19.0f), Justification::bottomLeft, true);
+            g.setColour (theme::textMuted);
+            g.setFont (theme::font (7.5f, 500, 0.05f));
+            g.drawText (help, a, Justification::topLeft, true);
+        };
+        const float h = settings->getHueShift();
+        line (16, "COLOUR" + String (std::abs (h) > 0.01f ? "  (" + String (h > 0 ? "+" : "") + String (roundToInt (h)) + " DEG)" : String()),
+              "TURNS THE WHOLE INTERFACE TO ANOTHER COLOUR - FOR EVERY EMULON X. DOUBLE-CLICK THE BAR FOR RED.");
+        line (16 + 106, "QUICK PICKS", "ONE CLICK FOR A CLASSIC COLOUR.");
+    }
+
+    if (page == about)
     {
         auto a = content.reduced (16).toFloat();
         theme::drawGlowText (g, "EMULON X", a.removeFromTop (34.0f), theme::font (24.0f, 900, 0.16f), Colours::white, theme::red.withAlpha (0.8f), 10);

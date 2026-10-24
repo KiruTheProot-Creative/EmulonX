@@ -38,6 +38,11 @@ public:
     bool  getShowHints() const       { return get ("showHints", 1) != 0; }
     void  setShowHints (bool v)      { set ("showHints", v ? 1 : 0); }
 
+    //== Customization =========================================================
+    /** Colour scheme rotation in degrees, -180..180 (0 = the original red). */
+    float getHueShift() const         { return (float) juce::jlimit (-180.0, 180.0, props->getDoubleValue ("hueShift", 0.0)); }
+    void  setHueShift (float deg)     { props->setValue ("hueShift", (double) juce::jlimit (-180.0f, 180.0f, deg)); sendChangeMessage(); }   // saved by the file's own timer (cheap while dragging)
+
     //== Performance ===========================================================
     int  getMaxVoices() const         { return get ("maxVoices", 64); }
     void setMaxVoices (int v)         { set ("maxVoices", v); }

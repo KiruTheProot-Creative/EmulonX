@@ -10,6 +10,8 @@ class EmxLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
     EmxLookAndFeel();
+    /** Re-reads the theme colours (after the hue setting changed). */
+    void refreshColours();
 
     void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos,
                            float startAngle, float endAngle, juce::Slider&) override;
@@ -27,6 +29,7 @@ public:
 
     void drawComboBox (juce::Graphics&, int w, int h, bool down, int bx, int by, int bw, int bh, juce::ComboBox&) override;
     juce::Font getComboBoxFont (juce::ComboBox&) override;
+    void drawComboBoxTextWhenNothingSelected (juce::Graphics&, juce::ComboBox&, juce::Label&) override;
     void positionComboBoxText (juce::ComboBox&, juce::Label&) override;
     juce::PopupMenu::Options getOptionsForComboBoxPopupMenu (juce::ComboBox&, juce::Label&) override;
 

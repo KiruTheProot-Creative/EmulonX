@@ -151,7 +151,7 @@ void PresetPanel::paintListBoxItem (int row, Graphics& g, int width, int height,
 
     auto r = Rectangle<int> (0, 0, width, height).reduced (8, 0);
     g.setFont (theme::font (10.0f, 500, 0.04f));
-    g.setColour (selected ? Colour (0xffff6060) : Colour (0xffdd3333));
+    g.setColour (selected ? theme::hue (0xffff6060) : theme::listText);
     g.drawText (z.name, r.removeFromLeft (jmin (200, r.getWidth() / 2)), Justification::centredLeft, true);
 
     String info;
@@ -165,7 +165,7 @@ void PresetPanel::paintListBoxItem (int row, Graphics& g, int width, int height,
         if (p.loopMode == LoopMode::untilRelease) info << "  LOOP TIL REL";
         if (p.keepSpeed) info << "  KEEP SPEED";
     }
-    g.setColour (z.problem.isNotEmpty() ? Colour (0xffffb030) : Colour (0xff8a2a2a));
+    g.setColour (z.problem.isNotEmpty() ? theme::hue (0xffffb030) : theme::textMuted);
     g.setFont (theme::font (9.0f, 500, 0.04f));
     g.drawText (info, r, Justification::centredLeft, true);
 }
@@ -233,7 +233,7 @@ void PresetPanel::paint (Graphics& g)
 
     if (proc.getZones().empty())
     {
-        g.setColour (theme::redDark);
+        g.setColour (theme::textMuted);
         g.setFont (theme::font (9.0f, 500, 0.06f));
         g.drawFittedText ("NO ZONES YET.\nDRAG AUDIO FILES, AN .EMXP PRESET OR AN .EMXB BANK ONTO THE WINDOW,\n"
                           "DOUBLE-CLICK SOMETHING IN THE EXPLORER, OR PRESS LOAD.",

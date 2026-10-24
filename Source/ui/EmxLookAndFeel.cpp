@@ -6,13 +6,15 @@ namespace emx
 {
 using namespace juce;
 
-EmxLookAndFeel::EmxLookAndFeel()
+EmxLookAndFeel::EmxLookAndFeel() { refreshColours(); }
+
+void EmxLookAndFeel::refreshColours()
 {
-    setColour (TextButton::textColourOffId, Colour (0xffdddddd));
+    setColour (TextButton::textColourOffId, theme::hue (0xffdddddd));
     setColour (TextButton::textColourOnId, Colours::white);
-    setColour (PopupMenu::backgroundColourId, Colour (0xff141217));
-    setColour (PopupMenu::textColourId, Colour (0xffff5050));
-    setColour (PopupMenu::highlightedBackgroundColourId, Colour (0xffa01010));
+    setColour (PopupMenu::backgroundColourId, theme::hue (0xff141217));
+    setColour (PopupMenu::textColourId, theme::hue (0xffff5050));
+    setColour (PopupMenu::highlightedBackgroundColourId, theme::hue (0xffa01010));
     setColour (PopupMenu::highlightedTextColourId, Colours::white);
     setColour (Label::textColourId, theme::red);
     setColour (Label::textWhenEditingColourId, theme::red);
@@ -26,6 +28,8 @@ EmxLookAndFeel::EmxLookAndFeel()
     setColour (ComboBox::arrowColourId, theme::red);
     setColour (ListBox::textColourId, theme::red);
     setColour (TreeView::backgroundColourId, Colours::transparentBlack);
+    setColour (TreeView::linesColourId, theme::redDark.withAlpha (0.5f));
+    setColour (HyperlinkButton::textColourId, theme::red);
 }
 
 //== Knob: your knob artwork + a glowing pointer ================================
@@ -70,7 +74,7 @@ void EmxLookAndFeel::drawLinearSlider (Graphics& g, int x, int y, int w, int h, 
 
     const auto capH = 16.0f;
     auto cap = Rectangle<float> (track.getCentreX() - w * 0.5f - 4.0f, pos - capH * 0.5f, w + 8.0f, capH);
-    g.setGradientFill (ColourGradient::vertical (Colour (0xff8a8590), cap.getY(), Colour (0xff202025), cap.getBottom()));
+    g.setGradientFill (ColourGradient::vertical (theme::hue (0xff8a8590), cap.getY(), theme::hue (0xff202025), cap.getBottom()));
     g.fillRoundedRectangle (cap, 4.0f);
     g.setColour (Colours::black);
     g.drawRoundedRectangle (cap, 4.0f, 1.0f);
@@ -88,15 +92,15 @@ void EmxLookAndFeel::drawButtonBackground (Graphics& g, Button& b, const Colour&
     if (b.getToggleState())
     {
         DropShadow (theme::red.withAlpha (0.45f), 10, {}).drawForRectangle (g, r.toNearestInt());
-        g.setGradientFill (ColourGradient::vertical (Colour (0xffc62828), r.getY(), Colour (0xff5a0808), r.getBottom()));
+        g.setGradientFill (ColourGradient::vertical (theme::hue (0xffc62828), r.getY(), theme::hue (0xff5a0808), r.getBottom()));
     }
     else
     {
-        g.setGradientFill (ColourGradient::vertical (Colour (0xff55515a), r.getY(), Colour (0xff1d1b20), r.getBottom()));
+        g.setGradientFill (ColourGradient::vertical (theme::hue (0xff55515a), r.getY(), theme::hue (0xff1d1b20), r.getBottom()));
     }
     g.fillRoundedRectangle (r, 5.0f);
 
-    g.setColour ((b.getToggleState() ? Colour (0xffff7a7a) : Colour (0xff7a747f)).withAlpha (highlighted ? 1.0f : 0.8f));
+    g.setColour ((b.getToggleState() ? theme::hue (0xffff7a7a) : theme::hue (0xff7a747f)).withAlpha (highlighted ? 1.0f : 0.8f));
     g.fillRect (r.getX() + 4.0f, r.getY() + 1.0f, r.getWidth() - 8.0f, 1.0f);
     g.setColour (Colours::black);
     g.drawRoundedRectangle (r, 5.0f, 1.0f);
@@ -110,7 +114,7 @@ Font EmxLookAndFeel::getTextButtonFont (TextButton&, int buttonHeight)
 //== Menus =======================================================================
 void EmxLookAndFeel::drawPopupMenuBackground (Graphics& g, int w, int h)
 {
-    g.setGradientFill (ColourGradient::vertical (Colour (0xff26232a), 0.0f, Colour (0xff111014), (float) h));
+    g.setGradientFill (ColourGradient::vertical (theme::hue (0xff26232a), 0.0f, theme::hue (0xff111014), (float) h));
     g.fillAll();
     g.setColour (Colours::black);
     g.drawRect (0, 0, w, h);
@@ -149,6 +153,16 @@ void EmxLookAndFeel::drawComboBox (Graphics& g, int w, int h, bool, int, int, in
 
 Font EmxLookAndFeel::getComboBoxFont (ComboBox&) { return theme::font (9.5f, 500, 0.05f); }
 
+void EmxLookAndFeel::drawComboBoxTextWhenNothingSelected (Graphics& g, ComboBox& box, Label& label)
+{
+    // JUCE draws this at half strength, which is hard to read on black
+    g.setColour (box.isEnabled() ? theme::textMuted : theme::textMuted.withAlpha (0.5f));
+    g.setFont (label.getLookAndFeel().getLabelFont (label));
+    g.drawFittedText (box.getTextWhenNothingSelected(), getLabelBorderSize (label).subtractedFrom (label.getLocalBounds()),
+                      label.getJustificationType(), jmax (1, (int) ((float) label.getHeight() / label.getFont().getHeight())),
+                      label.getMinimumHorizontalScale());
+}
+
 void EmxLookAndFeel::positionComboBoxText (ComboBox& box, Label& label)
 {
     label.setBounds (4, 1, box.getWidth() - box.getHeight() - 4, box.getHeight() - 2);
@@ -169,7 +183,7 @@ void EmxLookAndFeel::drawTreeviewPlusMinusBox (Graphics& g, const Rectangle<floa
         p.addTriangle (c.x - 3.5f, c.y - 2.0f, c.x + 3.5f, c.y - 2.0f, c.x, c.y + 2.5f);
     else
         p.addTriangle (c.x - 2.0f, c.y - 3.5f, c.x - 2.0f, c.y + 3.5f, c.x + 2.5f, c.y);
-    g.setColour (over ? Colour (0xffff6060) : theme::redDim);
+    g.setColour (over ? theme::hue (0xffff6060) : theme::redDim);
     g.fillPath (p);
 }
 

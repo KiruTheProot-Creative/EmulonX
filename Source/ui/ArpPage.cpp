@@ -40,8 +40,8 @@ public:
                 const bool editing = pat == page.getEditPattern();
                 if (playing)
                     DropShadow (theme::red.withAlpha (0.8f), 8, {}).drawForRectangle (g, r.toNearestInt());
-                g.setGradientFill (ColourGradient::vertical (playing ? Colour (0xffff4a4a) : editing ? Colour (0xff9a1a1a) : Colour (0xff5a1010), r.getY(),
-                                                             playing ? Colour (0xffa50f0f) : Colour (0xff2a0606), r.getBottom()));
+                g.setGradientFill (ColourGradient::vertical (playing ? theme::hue (0xffff4a4a) : editing ? theme::hue (0xff9a1a1a) : theme::hue (0xff5a1010), r.getY(),
+                                                             playing ? theme::hue (0xffa50f0f) : theme::hue (0xff2a0606), r.getBottom()));
                 g.fillRoundedRectangle (r, 4.0f);
                 g.setColour (Colours::black);
                 g.drawRoundedRectangle (r, 4.0f, 1.0f);
@@ -51,7 +51,7 @@ public:
             }
             else
             {
-                theme::drawLed (g, r, i == a.arrangementLength ? "+" : "", 10.0f, Justification::centred, theme::redDark);
+                theme::drawLed (g, r, i == a.arrangementLength ? "+" : "", 10.0f, Justification::centred, theme::textMuted);
             }
         }
     }
@@ -153,8 +153,8 @@ public:
             const float alpha = ! inUse ? 0.18f : st.on ? 1.0f : 0.3f;
             if (h > 0.5f)
             {
-                g.setGradientFill (ColourGradient::vertical (Colour (0xffff5050).withAlpha (alpha), bar.getY(),
-                                                             Colour (0xff7a0a0a).withAlpha (alpha), bar.getBottom()));
+                g.setGradientFill (ColourGradient::vertical (theme::hue (0xffff5050).withAlpha (alpha), bar.getY(),
+                                                             theme::hue (0xff7a0a0a).withAlpha (alpha), bar.getBottom()));
                 g.fillRoundedRectangle (bar, 2.5f);
                 if (st.on && inUse)
                 {
@@ -165,18 +165,18 @@ public:
 
             auto nb = Rectangle<float> ((float) i * colW, nums.getY(), colW, nums.getHeight()).reduced (3.0f, 1.0f);
             const bool lit = st.on && inUse;
-            g.setColour (lit ? (playing ? Colour (0xffff3030) : Colour (0xff8a1818)) : Colour (0xff2a2629));
+            g.setColour (lit ? (playing ? theme::hue (0xffff3030) : theme::hue (0xff8a1818)) : theme::hue (0xff2a2629));
             g.fillRoundedRectangle (nb, 4.0f);
             g.setColour (Colours::black);
             g.drawRoundedRectangle (nb, 4.0f, 1.0f);
-            g.setColour (inUse ? Colours::white.withAlpha (lit ? 1.0f : 0.5f) : theme::textMuted.withAlpha (0.4f));
+            g.setColour (inUse ? Colours::white.withAlpha (lit ? 1.0f : 0.5f) : theme::textMuted.withAlpha (0.55f));
             g.setFont (theme::font (8.5f, 700, 0.04f));
             g.drawText (String (i + 1), nb, Justification::centred, false);
 
             auto tb = Rectangle<float> ((float) i * colW, notes.getY(), colW, notes.getHeight()).reduced (3.0f, 1.0f);
             const int t = st.transpose;
             theme::drawLed (g, tb, t == 0 ? String ("0") : (t > 0 ? "+" : "") + String (t), 8.0f, Justification::centred,
-                            inUse ? (t == 0 ? theme::redDark : theme::red) : theme::redDark.withAlpha (0.4f));
+                            inUse ? (t == 0 ? theme::textMuted : theme::red) : theme::textMuted.withAlpha (0.45f));
         }
 
         const float lx = (float) pat.length * colW;

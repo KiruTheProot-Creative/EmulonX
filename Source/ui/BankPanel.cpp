@@ -103,12 +103,12 @@ void BankPanel::paintListBoxItem (int row, Graphics& g, int width, int height, b
     }
     auto r = Rectangle<int> (0, 0, width, height).reduced (8, 0);
     g.setFont (theme::font (9.0f, 500, 0.04f));
-    g.setColour (Colour (0xff8a2a2a));
+    g.setColour (theme::textMuted);
     g.drawText (String (row + 1).paddedLeft ('0', 2), r.removeFromLeft (26), Justification::centredLeft, false);
     g.setFont (theme::font (10.0f, 500, 0.04f));
-    g.setColour (selected ? Colour (0xffff6060) : Colour (0xffdd3333));
+    g.setColour (selected ? theme::hue (0xffff6060) : theme::listText);
     g.drawText (bank[(size_t) row].name, r, Justification::centredLeft, true);
-    g.setColour (Colour (0xff8a2a2a));
+    g.setColour (theme::textMuted);
     g.setFont (theme::font (8.0f, 500, 0.04f));
     g.drawText (String (bank[(size_t) row].data.getSize() / (1024.0 * 1024.0), 1) + " MB", r, Justification::centredRight, false);
 }
@@ -159,7 +159,7 @@ void BankPanel::paint (Graphics& g)
     theme::drawLed (g, listArea, {});
     if (proc.getBank().empty())
     {
-        g.setColour (theme::redDark);
+        g.setColour (theme::textMuted);
         g.setFont (theme::font (9.0f, 500, 0.06f));
         g.drawFittedText ("EMPTY. PRESS ADD CURRENT TO COLLECT PRESETS, OR OPEN AN .EMXB BANK.",
                           listArea.reduced (10.0f, 8.0f).toNearestInt(), Justification::topLeft, 2, 1.0f);

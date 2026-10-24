@@ -100,14 +100,14 @@ public:
         }
         if (kind == Kind::placeholder)
         {
-            g.setColour (theme::redDark);
+            g.setColour (theme::textMuted);
             g.setFont (theme::font (8.0f, 500, 0.06f));
             g.drawText (label, r.reduced (2.0f, 0.0f), Justification::centredLeft, true);
             return;
         }
         drawIcon (g, kind, r.removeFromLeft (16.0f), isOpen());
         r.removeFromLeft (4.0f);
-        g.setColour (isSelected() ? Colour (0xffff7070) : (kind == Kind::folder || kind == Kind::bank ? Colour (0xffe0d8d8) : Colour (0xffdd3333)));
+        g.setColour (isSelected() ? theme::hue (0xffff7070) : (kind == Kind::folder || kind == Kind::bank ? theme::hue (0xffe0d8d8) : theme::listText));
         g.setFont (theme::font (9.0f, 500, 0.03f));
         g.drawText (label, r, Justification::centredLeft, true);
     }
@@ -273,7 +273,7 @@ void FolderAddButton::paintButton (Graphics& g, bool highlighted, bool down)
     p.lineTo (r.getRight(), r.getBottom());
     p.lineTo (r.getX(), r.getBottom());
     p.closeSubPath();
-    g.setColour (highlighted ? Colours::white : Colour (0xffdddddd));
+    g.setColour (highlighted ? Colours::white : theme::hue (0xffdddddd));
     g.strokePath (p, PathStrokeType (1.4f));
     const auto c = r.getCentre().translated (1.0f, 1.0f);
     g.setColour (theme::red);
@@ -295,7 +295,6 @@ Explorer::Explorer (EmulonXProcessor& p) : proc (p)
     addAndMakeVisible (tabBanks);
 
     tree.setColour (TreeView::backgroundColourId, Colours::transparentBlack);
-    tree.setColour (TreeView::linesColourId, theme::redDark.withAlpha (0.5f));
     tree.setColour (TreeView::selectedItemBackgroundColourId, Colours::transparentBlack);
     tree.setRootItemVisible (false);
     tree.setIndentSize (14);
@@ -447,7 +446,7 @@ void Explorer::paint (Graphics& g)
     theme::drawHeading (g, r.reduced (10.0f, 9.0f), "Explorer");
     theme::drawLed (g, treeArea, {});
     theme::drawLed (g, hintArea, {});
-    g.setColour (theme::redDim);
+    g.setColour (theme::listText);
     g.setFont (theme::font (8.0f, 500, 0.05f));
     g.drawFittedText (hint, hintArea.reduced (7.0f, 2.0f).toNearestInt(), Justification::centredLeft, 2, 1.0f);
 }

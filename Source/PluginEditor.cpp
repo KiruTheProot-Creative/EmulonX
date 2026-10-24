@@ -100,6 +100,7 @@ void EmulonXEditor::Root::paintOverChildren (Graphics& g)
 EmulonXEditor::EmulonXEditor (EmulonXProcessor& p)
     : AudioProcessorEditor (p), proc (p)
 {
+    applyHue();
     setLookAndFeel (&lnf);
     root = std::make_unique<Root> (*this);
     addAndMakeVisible (*root);
@@ -124,6 +125,22 @@ void EmulonXEditor::changeListenerCallback (ChangeBroadcaster*)
     if (std::abs (settings->getUiScale() - uiScale) > 0.001f)
         setUiScale (settings->getUiScale());
     updateTooltips();
+    if (applyHue())
+    {
+        sendLookAndFeelChange();   // components that cache colours pick up the new ones
+        repaint();
+    }
+}
+
+bool EmulonXEditor::applyHue()
+{
+    const float h = settings->getHueShift();
+    if (std::abs (h - appliedHue) < 0.01f)
+        return false;
+    theme::setHueShift (h);   // shared by every open Emulon X window
+    lnf.refreshColours();
+    appliedHue = h;
+    return true;
 }
 
 void EmulonXEditor::updateTooltips()

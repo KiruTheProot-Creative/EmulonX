@@ -142,7 +142,7 @@ void WaveformView::paint (Graphics& g)
     g.setFont (theme::font (9.0f, 500, 0.06f));
     if (z == nullptr || z->sample == nullptr)
     {
-        g.setColour (theme::redDark);
+        g.setColour (theme::textMuted);
         g.drawText (z == nullptr ? "NO ZONE - ADD SAMPLES ON THE MAIN TAB OR DROP THEM HERE"
                                  : (z->problem.isNotEmpty() ? z->problem : String ("LOADING...")),
                     bounds.reduced (12.0f, 8.0f), Justification::topLeft, true);
@@ -164,11 +164,11 @@ void WaveformView::paint (Graphics& g)
     // Loop region and crossfade zones
     if (p.loopMode != LoopMode::off)
     {
-        g.setColour (Colour (0x24ff3232));
+        g.setColour (theme::hue (0x24ff3232));
         g.fillRect (Rectangle<float>::leftTopRightBottom (X (p.loopStart), 0.0f, X (p.loopEnd), H));
         if (const int xe = effectiveCrossfade (p); xe > 0)
         {
-            g.setColour (Colour (0x21ffd2d2));
+            g.setColour (theme::hue (0x21ffd2d2));
             g.fillRect (Rectangle<float>::leftTopRightBottom (X (p.loopEnd - xe), 0.0f, X (p.loopEnd), H));
             g.fillRect (Rectangle<float>::leftTopRightBottom (X (p.loopStart - xe), 0.0f, X (p.loopStart), H));
         }
@@ -209,7 +209,7 @@ void WaveformView::paint (Graphics& g)
         g.setColour (theme::red.withAlpha (0.25f));
         for (auto& r : cols)
             g.fillRect (r.expanded (1.0f, 1.5f));
-        g.setColour (Colour (0xffff3b3b));
+        g.setColour (theme::hue (0xffff3b3b));
         g.fillRectList (cols);
     }
     else
@@ -223,7 +223,7 @@ void WaveformView::paint (Graphics& g)
         }
         g.setColour (theme::red.withAlpha (0.3f));
         g.strokePath (line, PathStrokeType (4.0f));
-        g.setColour (Colour (0xffff3b3b));
+        g.setColour (theme::hue (0xffff3b3b));
         g.strokePath (line, PathStrokeType (1.5f));
         if (spp < 0.15)
         {
@@ -287,18 +287,18 @@ void WaveformView::paint (Graphics& g)
             g.fillRect (px - 1.0f, 0.0f, 2.0f, H);
             const auto flag = Rectangle<float> (which == 0 ? px : px - 15.0f, 0.0f, 15.0f, 15.0f);
             g.fillRect (flag);
-            g.setColour (Colour (0xff990000));
+            g.setColour (theme::hue (0xff990000));
             g.drawText (which == 0 ? "S" : "E", flag, Justification::centred, false);
         }
     }
 
     // Playheads
-    g.setColour (Colour (0xffffd0d0));
+    g.setColour (theme::hue (0xffffd0d0));
     for (auto ph : playheads)
         if (const float px = X (ph); px >= 0.0f && px <= W)
             g.fillRect (px, 0.0f, 1.5f, H);
 
-    g.setColour (Colour (0xff9a6a6a));
+    g.setColour (theme::textMuted);
     g.setFont (theme::font (8.0f, 500, 0.04f));
     g.drawText (String (roundToInt (v.getStart())), bounds.reduced (5.0f, 3.0f), Justification::bottomLeft, false);
     g.drawText (String (roundToInt (v.getEnd())), bounds.reduced (5.0f, 3.0f), Justification::bottomRight, false);
@@ -454,7 +454,7 @@ void KeymapView::paint (Graphics& g)
     // Zone bars
     if (zs.empty())
     {
-        g.setColour (theme::redDark);
+        g.setColour (theme::textMuted);
         g.setFont (theme::font (9.0f, 500, 0.06f));
         g.drawText ("NO ZONES YET", Rectangle<float> (8.0f, 0.0f, (float) getWidth() - 16.0f, keysTop), Justification::centredLeft, false);
     }
@@ -468,12 +468,12 @@ void KeymapView::paint (Graphics& g)
             if (on)
             {
                 DropShadow (theme::red.withAlpha (0.7f), 8, {}).drawForRectangle (g, r.toNearestInt());
-                g.setGradientFill (ColourGradient::vertical (Colour (0xffff4a4a), r.getY(), Colour (0xffa50f0f), r.getBottom()));
+                g.setGradientFill (ColourGradient::vertical (theme::hue (0xffff4a4a), r.getY(), theme::hue (0xffa50f0f), r.getBottom()));
             }
             else
-                g.setGradientFill (ColourGradient::vertical (Colour (0xff7a1414), r.getY(), Colour (0xff3a0606), r.getBottom()));
+                g.setGradientFill (ColourGradient::vertical (theme::hue (0xff7a1414), r.getY(), theme::hue (0xff3a0606), r.getBottom()));
             g.fillRoundedRectangle (r, 3.5f);
-            g.setColour ((on ? Colour (0xffffb0b0) : Colour (0x59ff7878)));
+            g.setColour ((on ? theme::hue (0xffffb0b0) : theme::hue (0x59ff7878)));
             g.fillRect (r.getX() + 3.0f, r.getY() + 1.0f, r.getWidth() - 6.0f, 1.0f);
             g.setColour (Colours::black);
             g.drawRoundedRectangle (r, 3.5f, 1.0f);
@@ -493,7 +493,7 @@ void KeymapView::paint (Graphics& g)
             }
             if (laneH >= 11.0f)
             {
-                g.setColour (on ? Colours::white : Colour (0xffffb0b0));
+                g.setColour (on ? Colours::white : theme::hue (0xffffb0b0));
                 g.setFont (theme::font (jmin (8.0f, laneH * 0.5f), 700, 0.06f));
                 g.drawText (zs[i].name, r.reduced (8.0f, 0.0f), Justification::centredLeft, true);
             }
@@ -510,11 +510,11 @@ void KeymapView::paint (Graphics& g)
             const auto r = Rectangle<float> (k.x, keysTop, k.w, keyH * (k.black ? 0.6f : 1.0f));
             const bool down = held[(size_t) n];
             if (k.black)
-                g.setGradientFill (ColourGradient::vertical (down ? Colour (0xffff3a3a) : Colour (0xff3a373f), r.getY(),
-                                                             down ? Colour (0xff7a0808) : Colour (0xff09080b), r.getBottom()));
+                g.setGradientFill (ColourGradient::vertical (down ? theme::hue (0xffff3a3a) : theme::hue (0xff3a373f), r.getY(),
+                                                             down ? theme::hue (0xff7a0808) : theme::hue (0xff09080b), r.getBottom()));
             else
-                g.setGradientFill (ColourGradient::vertical (down ? Colour (0xffff6a6a) : Colour (0xffcfc9c9), r.getY(),
-                                                             down ? Colour (0xffc01818) : Colour (0xfff2eeee), r.getBottom()));
+                g.setGradientFill (ColourGradient::vertical (down ? theme::hue (0xffff6a6a) : theme::hue (0xffcfc9c9), r.getY(),
+                                                             down ? theme::hue (0xffc01818) : theme::hue (0xfff2eeee), r.getBottom()));
             g.fillRect (r);
             g.setColour (Colours::black);
             g.drawRect (r, 1.0f);
@@ -531,7 +531,7 @@ void KeymapView::paint (Graphics& g)
             }
             if (n % 12 == 0)
             {
-                g.setColour (Colour (0xff444444));
+                g.setColour (theme::hue (0xff444444));
                 g.setFont (theme::font (6.5f, 700, 0.0f));
                 g.drawText (noteName (n), r.withTrimmedBottom (2.0f), Justification::centredBottom, false);
             }
@@ -671,12 +671,12 @@ public:
         auto fill = r.reduced (2.0f, 3.0f);
         const float x = fill.getX() + fill.getWidth() * pos;
         const float alpha = isEnabled() ? 1.0f : 0.35f;
-        g.setGradientFill (ColourGradient::horizontal (Colour (0xff5a0808).withAlpha (alpha), fill.getX(),
-                                                       Colour (0xffd02a2a).withAlpha (alpha), jmax (fill.getX() + 1.0f, x)));
+        g.setGradientFill (ColourGradient::horizontal (theme::hue (0xff5a0808).withAlpha (alpha), fill.getX(),
+                                                       theme::hue (0xffd02a2a).withAlpha (alpha), jmax (fill.getX() + 1.0f, x)));
         g.fillRoundedRectangle (fill.withRight (x), 2.5f);
         g.setColour (Colours::white.withAlpha (alpha));
         g.fillRoundedRectangle (x - 1.5f, r.getY() + 1.0f, 3.0f, r.getHeight() - 2.0f, 1.5f);
-        g.setColour (Colour (0xffffd0d0).withAlpha (alpha));
+        g.setColour (theme::hue (0xffffd0d0).withAlpha (alpha));
         g.setFont (theme::font (7.5f, 500, 0.04f));
         g.drawText (String (value), r.reduced (6.0f, 0.0f), Justification::centredRight, false);
     }

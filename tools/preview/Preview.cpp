@@ -397,13 +397,37 @@ int main (int argc, char** argv)
         openAll (tv->getRootItem());
     }
     save ("preview-main-banks-open");
-    const char* settingsPages[] { "folders", "performance", "midi", "interface", "about" };
-    for (int p = 0; p < 5; ++p)
+    const char* settingsPages[] { "folders", "performance", "midi", "interface", "customization", "about" };
+    for (int p = 0; p < 6; ++p)
     {
         editor.showSettings (true, p);
         save (String ("preview-settings-") + settingsPages[p]);
     }
-    editor.showSettings (false);
+    {
+        // Hue: the whole interface in other colours (and how long recolouring takes)
+        SharedResourcePointer<emx::Settings> st;
+        editor.showSettings (true, 4);
+        st->setHueShift (-122.0f);
+        save ("preview-settings-customization-blue");
+        editor.showSettings (false);
+        const char* pageNames[] { "main", "editor", "fx", "arp" };
+        for (auto [deg, name] : { std::pair<float, const char*> { -122.0f, "blue" }, { 117.0f, "green" }, { -89.0f, "purple" } })
+        {
+            st->setHueShift (deg);
+            MessageManager::getInstance()->runDispatchLoopUntil (50);
+            const auto t0 = Time::getMillisecondCounterHiRes();
+            (void) editor.createComponentSnapshot (editor.getLocalBounds(), true, 1.0f);
+            std::printf ("hue %s: first repaint incl. recolouring %.0f ms\n", name, Time::getMillisecondCounterHiRes() - t0);
+            for (int pg = 0; pg < 4; ++pg)
+            {
+                editor.showPage (pg);
+                save (String ("preview-hue-") + name + "-" + pageNames[pg]);
+            }
+        }
+        st->setHueShift (0.0f);
+        MessageManager::getInstance()->runDispatchLoopUntil (50);
+        editor.showPage (0);
+    }
     for (auto sc : { 0.75f, 1.5f })
     {
         editor.setUiScale (sc);

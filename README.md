@@ -125,7 +125,7 @@ Without the installer: copy the folder **`Emulon X.vst3`** from the
 
 | Milestone | What you get |
 |---|---|
-| 1 | Plugin window, your artwork, interface sizes 75–200 %, master volume, 16 macros |
+| 1 | Plugin window, your artwork, interface sizes 75–200 %, colour themes (hue), master volume, 16 macros |
 | 2 | Sampler engine: zones, sinc interpolation, crossfaded loops, keep-speed pitching, ADSR |
 | 3 | Explorer, `.emxp` / `.emxb` files, settings window with bank folders |
 | 4 | Editor tab: waveform, loop points, keymap |

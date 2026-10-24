@@ -35,6 +35,8 @@ private:
     };
 
     class FolderList;
+    class HueBar;
+    class Swatch;
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     Row& addRow (int page, const juce::String& title, const juce::String& help, const juce::StringArray& items,
@@ -43,13 +45,18 @@ private:
 
     EmulonXProcessor& proc;
     juce::SharedResourcePointer<Settings> settings;
-    juce::TextButton navButtons[5] { juce::TextButton ("FOLDERS"), juce::TextButton ("PERFORMANCE"), juce::TextButton ("AUDIO & MIDI"),
-                                     juce::TextButton ("INTERFACE"), juce::TextButton ("ABOUT") };
+    static constexpr int numPages = 6;
+    enum Page { folders, performance, audioMidi, interface, customization, about };
+    juce::TextButton navButtons[numPages] { juce::TextButton ("FOLDERS"), juce::TextButton ("PERFORMANCE"), juce::TextButton ("AUDIO & MIDI"),
+                                            juce::TextButton ("INTERFACE"), juce::TextButton ("CUSTOMIZATION"), juce::TextButton ("ABOUT") };
     juce::TextButton doneButton { "DONE" }, panicButton { "ALL NOTES OFF" }, resetButton { "RESET SETTINGS" };
     juce::HyperlinkButton siteLink { "github.com/KiruTheProot-Creative/EmulonX",
                                      juce::URL ("https://github.com/KiruTheProot-Creative/EmulonX") };
     juce::OwnedArray<Row> rows;
     juce::OwnedArray<FolderList> folderLists;
+    std::unique_ptr<HueBar> hueBar;
+    juce::OwnedArray<Swatch> swatches;
+    juce::TextButton hueResetButton { "BACK TO RED" };
     int page = 0;
     juce::Rectangle<int> panel, content;
 };

@@ -133,7 +133,7 @@ public:
         Path p;
         if (up) p.addTriangle (c.x - 4.5f, c.y + 2.5f, c.x + 4.5f, c.y + 2.5f, c.x, c.y - 3.0f);
         else    p.addTriangle (c.x - 4.5f, c.y - 2.5f, c.x + 4.5f, c.y - 2.5f, c.x, c.y + 3.0f);
-        g.setColour (isEnabled() ? (over ? Colours::white : Colour (0xffdddddd)) : Colour (0xff666666));
+        g.setColour (isEnabled() ? (over ? Colours::white : theme::hue (0xffdddddd)) : theme::hue (0xff666666));
         g.fillPath (p);
     }
 private:
@@ -383,7 +383,7 @@ public:
     void paint (Graphics& g) override
     {
         auto r = getLocalBounds().toFloat().reduced (0.5f);
-        g.setGradientFill (ColourGradient::vertical (Colour (0xff1c1a1f), r.getY(), Colour (0xff111014), r.getBottom()));
+        g.setGradientFill (ColourGradient::vertical (theme::hue (0xff1c1a1f), r.getY(), theme::hue (0xff111014), r.getBottom()));
         g.fillRoundedRectangle (r, 7.0f);
         auto head = r.withHeight (26.0f);
         {
@@ -391,7 +391,7 @@ public:
             Path clip;
             clip.addRoundedRectangle (head.getX(), head.getY(), head.getWidth(), head.getHeight(), 7.0f, 7.0f, true, true, false, false);
             g.reduceClipRegion (clip);
-            g.setGradientFill (ColourGradient::vertical (Colour (0xff3a3640), head.getY(), Colour (0xff1e1c22), head.getBottom()));
+            g.setGradientFill (ColourGradient::vertical (theme::hue (0xff3a3640), head.getY(), theme::hue (0xff1e1c22), head.getBottom()));
             g.fillRect (head);
         }
         g.setColour (Colours::black);
@@ -499,11 +499,11 @@ public:
         }
         fill.lineTo (pts.back().x, geo.Y (0));
         fill.closeSubPath();
-        g.setGradientFill (ColourGradient::vertical (Colour (0x59ff2828), geo.p, Colour (0x00ff2828), geo.H));
+        g.setGradientFill (ColourGradient::vertical (theme::hue (0x59ff2828), geo.p, theme::hue (0x00ff2828), geo.H));
         g.fillPath (fill);
         g.setColour (theme::red.withAlpha (0.35f));
         g.strokePath (line, PathStrokeType (5.0f));
-        g.setColour (Colour (0xffff4040));
+        g.setColour (theme::hue (0xffff4040));
         g.strokePath (line, PathStrokeType (2.0f));
 
         g.setFont (theme::font (8.0f, 700, 0.06f));
@@ -514,18 +514,18 @@ public:
             {
                 g.setColour (Colours::white);
                 g.fillEllipse (h.x - 5, h.y - 5, 10, 10);
-                g.setColour (Colour (0xffcc0000));
+                g.setColour (theme::hue (0xffcc0000));
                 g.drawEllipse (h.x - 5, h.y - 5, 10, 10, 1.5f);
                 if (h.kind != 'p')
                 {
-                    g.setColour (Colour (0xffffd0d0));
+                    g.setColour (theme::hue (0xffffd0d0));
                     g.drawText (h.kind == 'D' ? "D/S" : String::charToString ((juce_wchar) h.kind),
                                 Rectangle<float> (h.x + 6, h.y - 16, 30, 12), Justification::centredLeft, false);
                 }
             }
             else
             {
-                g.setColour (Colour (0xffffb0b0));
+                g.setColour (theme::hue (0xffffb0b0));
                 g.drawEllipse (h.x - 3.5f, h.y - 3.5f, 7, 7, 1.5f);
             }
         }
@@ -542,7 +542,7 @@ public:
         }
         if (px >= 0.0f)
         {
-            g.setColour (Colour (0x80ffdcdc));
+            g.setColour (theme::hue (0x80ffdcdc));
             g.fillRect (px, geo.p, 1.0f, geo.H - 2 * geo.p);
             g.setColour (Colours::white);
             g.fillEllipse (px - 4.5f, geo.Y (lastV) - 4.5f, 9, 9);
@@ -781,7 +781,7 @@ public:
         {
             if (item.row < 0)
             {
-                g.setColour (item.header ? Colours::white : theme::redDark);
+                g.setColour (item.header ? Colours::white : theme::listText);
                 g.setFont (item.header ? theme::font (8.5f, 700, 0.12f) : theme::font (7.5f, 500, 0.05f));
                 g.drawText (item.text, 6, y, getWidth() - 12, rowH, Justification::centredLeft, true);
             }
@@ -841,7 +841,7 @@ private:
 
         void paint (Graphics& g) override
         {
-            g.setColour (Colour (0xffdd3333));
+            g.setColour (theme::listText);
             g.setFont (theme::font (8.0f, 500, 0.03f));
             g.drawText (label, labelArea.reduced (2.0f, 0.0f), Justification::centredLeft, true);
             const int v = roundToInt (amount.getValue() * 100.0);
@@ -1306,7 +1306,7 @@ void FxPage::paint (Graphics& g)
     theme::drawLed (g, chainListArea, {});
     if (cards.isEmpty())
     {
-        g.setColour (theme::redDark);
+        g.setColour (theme::textMuted);
         g.setFont (theme::font (9.0f, 500, 0.06f));
         g.drawFittedText ("NO EFFECTS ON THIS CHANNEL YET - USE \"+ ADD EFFECT\".\nTHEY RUN FROM TOP TO BOTTOM.",
                           chainListArea.reduced (12.0f, 10.0f).toNearestInt(), Justification::topLeft, 3, 1.0f);

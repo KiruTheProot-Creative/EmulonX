@@ -7,15 +7,26 @@
 
 namespace emx::theme
 {
-//== Colours (match the browser prototype) ======================================
-inline const juce::Colour red        { 0xffff2a2a };
-inline const juce::Colour redDim     { 0xffcc3333 };
-inline const juce::Colour redDark    { 0xff7a2828 };
-inline const juce::Colour textCol    { 0xffe8e4e4 };
-inline const juce::Colour textMuted  { 0xff9a7a7a };
-inline const juce::Colour ledBg      { 0xff070203 };
-inline const juce::Colour edge       { 0xff3a363d };
-inline const juce::Colour highlight  { 0xff4a444f };
+//== Colours ======================================================================
+// These follow the hue setting (Settings > Customization), so they are variables:
+// read them when painting, don't copy them into members.
+inline juce::Colour red        { 0xffff2a2a };
+inline juce::Colour redDim     { 0xffe83c3c };
+inline juce::Colour redDark    { 0xff7a2828 };   // fills and lines only - too dark for text
+inline juce::Colour textCol    { 0xffe8e4e4 };
+inline juce::Colour textMuted  { 0xffb8a6a6 };   // secondary text: details, hints, empty-list notes
+inline juce::Colour listText   { 0xffff4a4a };   // names in lists (presets, files, banks)
+inline juce::Colour ledBg      { 0xff070203 };
+inline juce::Colour edge       { 0xff3a363d };
+inline juce::Colour highlight  { 0xff4a444f };
+
+/** Rotates the colour scheme by this many degrees (0 = the original red). Message thread only. */
+void setHueShift (float degrees);
+float getHueShift() noexcept;
+/** A colour from the original red design, turned to the current hue (alpha is kept). */
+juce::Colour hue (juce::uint32 argbInRedDesign);
+/** Same rotation for any colour; lightness is kept so contrast stays the same. */
+juce::Colour rotateHue (juce::Colour, float degrees);
 
 //== Fonts: Orbitron (SIL Open Font License), weights 500 / 700 / 900 ===========
 juce::Font font (float height, int weight = 700, float kerning = 0.0f);

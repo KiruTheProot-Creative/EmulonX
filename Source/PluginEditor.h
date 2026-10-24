@@ -46,6 +46,8 @@ public:
 private:
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;   // settings
+    bool applyHue();   // true if the colours changed
+    float appliedHue = 0.0f;
     void updateTooltips();
 
     /** Everything visible lives in here, at base size; the editor scales it. */
