@@ -3,6 +3,17 @@
 
 namespace emx
 {
+/** A folder the Windows installer chose (it stores them in the registry); empty elsewhere. */
+static juce::String installerFolder (const char* name)
+{
+   #if JUCE_WINDOWS
+    return juce::WindowsRegistry::getValue (juce::String ("HKEY_LOCAL_MACHINE\\Software\\Emulon X\\") + name).trim();
+   #else
+    juce::ignoreUnused (name);
+    return {};
+   #endif
+}
+
 Settings::Settings()
 {
     juce::PropertiesFile::Options o;
@@ -14,13 +25,16 @@ Settings::Settings()
     o.millisecondsBeforeSaving = 500;
     props = std::make_unique<juce::PropertiesFile> (o);
 
-    // First run: the standard Emulon X folders in Documents (the installer creates them).
+    // First run: the folders picked in the installer, or the standard ones in Documents.
     const auto docs = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Emulon X");
     const auto baseBanks = docs.getChildFile ("Base Banks");
+    const auto instBase = installerFolder ("BaseBanksFolder"), instUser = installerFolder ("PresetsFolder");
     if (! props->containsKey ("folders.user"))
     {
-        props->setValue ("folders.user", docs.getChildFile ("Presets").getFullPathName());
-        props->setValue ("folders.base", baseBanks.getFullPathName());
+        props->setValue ("folders.user", instUser.isNotEmpty() ? instUser : docs.getChildFile ("Presets").getFullPathName());
+        props->setValue ("folders.base", instBase.isNotEmpty() ? instBase : baseBanks.getFullPathName());
+        props->setValue ("installer.base", instBase);
+        props->setValue ("installer.presets", instUser);
     }
     else if (baseBanks.isDirectory())
     {
@@ -33,6 +47,24 @@ Settings::Settings()
         base.addIfNotAlreadyThere (baseBanks.getFullPathName());
         if (base != before)
             props->setValue ("folders.base", base.joinIntoString ("\n"));
+    }
+
+    // Installed again with different folders: add them (presets first, so Save goes there).
+    // Folders you added or removed yourself in Settings stay as they are otherwise.
+    if (instBase.isNotEmpty() && instBase != props->getValue ("installer.base"))
+    {
+        auto base = getFolders (Folder::base);
+        base.addIfNotAlreadyThere (instBase);
+        props->setValue ("folders.base", base.joinIntoString ("\n"));
+        props->setValue ("installer.base", instBase);
+    }
+    if (instUser.isNotEmpty() && instUser != props->getValue ("installer.presets"))
+    {
+        auto user = getFolders (Folder::user);
+        user.removeString (instUser);
+        user.insert (0, instUser);
+        props->setValue ("folders.user", user.joinIntoString ("\n"));
+        props->setValue ("installer.presets", instUser);
     }
 }
 
