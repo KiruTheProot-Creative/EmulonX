@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SettingsPanel.h"
 #include "Theme.h"
+#include "SkinFile.h"
 #include "../PluginProcessor.h"
 
 namespace emx
@@ -82,7 +83,7 @@ public:
         g.drawText (title, head.removeFromTop (15.0f), Justification::centredLeft, true);
         g.setColour (theme::textMuted);
         g.setFont (theme::font (7.5f, 500, 0.06f));
-        g.drawText (help, head, Justification::topLeft, true);
+        g.drawFittedText (help, head.toNearestInt(), Justification::topLeft, 1, 0.8f);
         theme::drawLed (g, listArea, {});
         if (paths.isEmpty())
         {
@@ -226,9 +227,10 @@ SettingsPanel::SettingsPanel (EmulonXProcessor& p) : proc (p)
 
     //== Folders =================================================================
     folderLists.add (new FolderList (s, Settings::Folder::base, "BASE BANKS", "WHERE THE BANKS THAT COME WITH EMULON X LIVE"));
-    folderLists.add (new FolderList (s, Settings::Folder::other, "OTHER BANKS", ".EMXB BANKS FROM OTHER PEOPLE - SHOWN AS FOLDERS OF PRESETS"));
-    folderLists.add (new FolderList (s, Settings::Folder::user, "USER PRESETS", "YOUR .EMXP PRESETS - THE FIRST FOLDER IS WHERE SAVE GOES"));
-    folderLists.add (new FolderList (s, Settings::Folder::samples, "SAMPLE FOLDERS", "AUDIO FILES SHOWN IN THE EXPLORER'S SAMPLES TAB"));
+    folderLists.add (new FolderList (s, Settings::Folder::other, "OTHER BANKS", ".EMXB BANKS FROM OTHER PEOPLE"));
+    folderLists.add (new FolderList (s, Settings::Folder::user, "USER PRESETS", "YOUR .EMXP PRESETS - SAVE USES THE FIRST"));
+    folderLists.add (new FolderList (s, Settings::Folder::samples, "SAMPLE FOLDERS", "AUDIO FILES FOR THE SAMPLES TAB"));
+    folderLists.add (new FolderList (s, Settings::Folder::skins, "SKINS", ".EMXD SKIN FILES (SEE CUSTOMIZATION)"));
     for (auto* f : folderLists)
         addChildComponent (f);
 
@@ -317,21 +319,49 @@ SettingsPanel::SettingsPanel (EmulonXProcessor& p) : proc (p)
     addChildComponent (resetButton);
 
     //== Customization ===========================================================
-    skinBox.addItem ("EMULON CLASSIC  -  RED METAL", 1);
-    skinBox.addItem ("EMULON XP - LIGHT  -  EARLY-2000S DESKTOP", 2);
-    skinBox.addItem ("EMULON XP - DARK  -  EARLY-2000S DESKTOP", 3);
-    skinBox.addItem ("EMURUM  -  FLAT, DEEP BLUE, CYAN LIGHTS", 4);
-    skinBox.addItem ("EMUTAL  -  FLAT, SLATE GREY, PURPLE", 5);
-    skinBox.addItem ("EMUBLOX  -  CHUNKY TOY BRICKS, BRIGHT", 6);
-    skinBox.addItem ("EMUL8R  -  BRUSHED METAL, TEAL SCREENS", 7);
-    skinBox.setTooltip ("The whole look of Emulon X - the colour can be shifted below (not for the XP skins)");
+    skinBox.setTooltip ("The whole look of Emulon X: a built-in skin or one of your skin files");
     skinBox.onChange = [this]
     {
-        const int i = skinBox.getSelectedItemIndex();
-        if (i >= 0 && i != settings->getSkin())
-            settings->setSkin (i);
+        const int id = skinBox.getSelectedId();
+        if (id >= 1 && id <= Settings::customSkinIndex && id - 1 != settings->getSkin())
+            settings->setSkin (id - 1);
+        else if (id > 100 && id - 101 < skinFiles.size())
+        {
+            const auto f = skinFiles[id - 101];
+            if (settings->getSkin() != Settings::customSkinIndex || File (settings->getCustomSkin()) != f)
+                settings->useCustomSkin (f);
+        }
     };
     addChildComponent (skinBox);
+    addSkinButton.setTooltip ("Adds a skin file (.emxd) to your skins folder and uses it - you can also drop it onto the window");
+    addSkinButton.onClick = [this]
+    {
+        skinChooser = std::make_unique<FileChooser> ("Add a skin", File::getSpecialLocation (File::userDocumentsDirectory), "*.emxd");
+        skinChooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this] (const FileChooser& fc)
+        {
+            const auto file = fc.getResult();
+            if (! file.existsAsFile())
+                return;
+            skin::Design d;
+            String error;
+            if (! skin::load (file, d, error))
+            {
+                theme::setCustomSkinMessage (file.getFileName() + ": " + error);
+                repaint();
+                return;
+            }
+            const auto dest = settings->getSkinsFolder().getChildFile (file.getFileName());
+            if (file == dest || file.copyFileTo (dest))
+            {
+                rescanSkins (true);
+                settings->useCustomSkin (dest);
+            }
+        });
+    };
+    addChildComponent (addSkinButton);
+    openSkinsButton.setTooltip ("Opens the folder your skins are in");
+    openSkinsButton.onClick = [this] { settings->getSkinsFolder().startAsProcess(); };
+    addChildComponent (openSkinsButton);
     hueBar = std::make_unique<HueBar> (s);
     addChildComponent (*hueBar);
     const std::pair<const char*, float> swatchDefs[] { { "RED", 0.0f }, { "ORANGE", 25.0f }, { "GOLD", 66.0f }, { "GREEN", 117.0f },
@@ -381,8 +411,8 @@ void SettingsPanel::refresh()
         r->box.setSelectedItemIndex (r->read(), dontSendNotification);
     for (auto* f : folderLists)
         f->refresh();
+    rescanSkins (false);
     const bool classic = theme::skinAllowsColourShift ((theme::Skin) settings->getSkin());
-    skinBox.setSelectedItemIndex (settings->getSkin(), dontSendNotification);
     // the colour shift works on Classic, EMURUM and EMUTAL
     hueBar->setEnabled (classic);
     hueBar->setAlpha (classic ? 1.0f : 0.3f);
@@ -396,8 +426,48 @@ void SettingsPanel::refresh()
     repaint();
 }
 
+void SettingsPanel::rescanSkins (bool force)
+{
+    const auto skinFolders = settings->getFolders (Settings::Folder::skins);
+    const auto key = skinFolders.joinIntoString ("\n");
+    if (force || key != skinScanKey)
+    {
+        skinScanKey = key;
+        skinFiles = skin::findSkins (skinFolders);
+        skinBox.clear (dontSendNotification);
+        const char* builtIn[] { "EMULON CLASSIC  -  RED METAL", "EMULON XP - LIGHT  -  EARLY-2000S DESKTOP", "EMULON XP - DARK  -  EARLY-2000S DESKTOP",
+                                "EMURUM  -  FLAT, DEEP BLUE, CYAN LIGHTS", "EMUTAL  -  FLAT, SLATE GREY, PURPLE", "EMUBLOX  -  CHUNKY TOY BRICKS, BRIGHT",
+                                "EMUL8R  -  BRUSHED METAL, TEAL SCREENS" };
+        for (int i = 0; i < (int) std::size (builtIn); ++i)
+            skinBox.addItem (builtIn[i], i + 1);
+        skinBox.addSectionHeading ("YOUR SKINS");
+        if (skinFiles.isEmpty())
+            skinBox.addItem ("NO SKIN FILES YET - ADD ONE BELOW", 99);
+        skinBox.setItemEnabled (99, false);
+        for (int i = 0; i < skinFiles.size(); ++i)
+        {
+            String name, author;
+            if (! skin::readInfo (skinFiles[i], name, author))
+                name = skinFiles[i].getFileNameWithoutExtension() + " (CAN'T BE READ)";
+            skinBox.addItem (name.toUpperCase() + (author.isNotEmpty() ? "  -  BY " + author.toUpperCase() : String()), 101 + i);
+        }
+    }
+    int id = settings->getSkin() + 1;
+    if (settings->getSkin() == Settings::customSkinIndex)
+    {
+        const int i = skinFiles.indexOf (File (settings->getCustomSkin()));
+        id = i >= 0 ? 101 + i : 0;
+    }
+    if (id > 0)
+        skinBox.setSelectedId (id, dontSendNotification);
+    else
+        skinBox.setText (File (settings->getCustomSkin()).getFileNameWithoutExtension().toUpperCase() + " (NOT IN YOUR SKINS FOLDERS)", dontSendNotification);
+}
+
 void SettingsPanel::showPage (int index)
 {
+    if (index == customization)
+        rescanSkins (true);
     page = index;
     for (int i = 0; i < numPages; ++i)
         navButtons[i].setToggleState (i == page, dontSendNotification);
@@ -412,6 +482,8 @@ void SettingsPanel::showPage (int index)
         sw->setVisible (page == customization);
     hueResetButton.setVisible (page == customization);
     skinBox.setVisible (page == customization);
+    addSkinButton.setVisible (page == customization);
+    openSkinsButton.setVisible (page == customization);
     siteLink.setVisible (page == about);
     resized();
     repaint();
@@ -434,11 +506,11 @@ void SettingsPanel::resized()
     r.removeFromLeft (18);
     content = r;
 
-    // Folders: a 2 x 2 grid
+    // Folders: three side by side, two rows
     auto grid = content.reduced (12, 12);
-    const int cw = (grid.getWidth() - 16) / 2, ch = (grid.getHeight() - 16) / 2;
+    const int cw = (grid.getWidth() - 2 * 14) / 3, ch = (grid.getHeight() - 16) / 2;
     for (int i = 0; i < folderLists.size(); ++i)
-        folderLists[i]->setBounds (grid.getX() + (i % 2) * (cw + 16), grid.getY() + (i / 2) * (ch + 16), cw, ch);
+        folderLists[i]->setBounds (grid.getX() + (i % 3) * (cw + 14), grid.getY() + (i / 3) * (ch + 16), cw, ch);
 
     // Choice rows
     int y = content.getY() + 16;
@@ -460,8 +532,10 @@ void SettingsPanel::resized()
 
     // Customization
     const int cx = content.getX() + 16, cw2 = content.getWidth() - 32;
-    skinBox.setBounds (cx, content.getY() + 16 + 42, jmin (cw2, 420), 28);
-    constexpr int colourY = 100;   // the colour section below the skins
+    skinBox.setBounds (cx, content.getY() + 16 + 42, jmin (cw2, 460), 28);
+    addSkinButton.setBounds (cx, content.getY() + 16 + 78, 140, 26);
+    openSkinsButton.setBounds (cx + 148, content.getY() + 16 + 78, 160, 26);
+    constexpr int colourY = 136;   // the colour section below the skins
     hueBar->setBounds (cx, content.getY() + colourY + 16 + 44, cw2, 36);
     const int swW = cw2 / swatches.size();
     for (int i = 0; i < swatches.size(); ++i)
@@ -516,13 +590,21 @@ void SettingsPanel::paint (Graphics& g)
             g.setFont (theme::font (7.5f, 500, 0.05f));
             g.drawText (help, a, Justification::topLeft, true);
         };
-        line (16, "SKIN", "THE WHOLE LOOK OF EMULON X - FOR EVERY EMULON X.");
+        line (16, "SKIN", "THE WHOLE LOOK OF EMULON X - FOR EVERY EMULON X. MAKE YOUR OWN SKINS IN EMULON X SD.");
+        const auto note = theme::customSkinMessage();
+        if (note.isNotEmpty() && (settings->getSkin() == Settings::customSkinIndex || theme::getSkin() != theme::Skin::custom))
+        {
+            g.setColour (theme::hue (0xffffb030));
+            g.setFont (theme::font (7.5f, 500, 0.04f));
+            g.drawFittedText (note.toUpperCase(), Rectangle<int> (content.getX() + 16 + 320, content.getY() + 16 + 76, content.getWidth() - 352, 30),
+                              Justification::centredLeft, 2, 0.9f);
+        }
         const float h = settings->getHueShift();
         const bool classic = theme::skinAllowsColourShift ((theme::Skin) settings->getSkin());
-        line (100 + 16, "COLOUR" + String (classic && std::abs (h) > 0.01f ? "  (" + String (h > 0 ? "+" : "") + String (roundToInt (h)) + " DEG)" : String()),
+        line (136 + 16, "COLOUR" + String (classic && std::abs (h) > 0.01f ? "  (" + String (h > 0 ? "+" : "") + String (roundToInt (h)) + " DEG)" : String()),
               classic ? "TURNS THE WHOLE INTERFACE TO ANOTHER COLOUR. DOUBLE-CLICK THE BAR FOR RED."
-                      : "NOT FOR THE XP SKINS AND EMUL8R - THEY KEEP THEIR OWN COLOURS.");
-        line (100 + 16 + 106, "QUICK PICKS", "ONE CLICK FOR A CLASSIC COLOUR.");
+                      : "THIS SKIN KEEPS ITS OWN COLOURS.");
+        line (136 + 16 + 106, "QUICK PICKS", "ONE CLICK FOR A CLASSIC COLOUR.");
     }
 
     if (page == about)

@@ -49,6 +49,14 @@ Settings::Settings()
             props->setValue ("folders.base", base.joinIntoString ("\n"));
     }
 
+    // Skins made in Emulon X SD (also for settings from before skin files existed)
+    if (! props->containsKey ("folders.skins"))
+    {
+        const auto skins = docs.getChildFile ("Skins");
+        skins.createDirectory();
+        props->setValue ("folders.skins", skins.getFullPathName());
+    }
+
     // Installed again with different folders: add them (presets first, so Save goes there).
     // Folders you added or removed yourself in Settings stay as they are otherwise.
     if (instBase.isNotEmpty() && instBase != props->getValue ("installer.base"))
@@ -76,6 +84,7 @@ juce::String Settings::key (Folder f)
         case Folder::other:   return "folders.other";
         case Folder::user:    return "folders.user";
         case Folder::samples: return "folders.samples";
+        case Folder::skins:   return "folders.skins";
     }
     return {};
 }
@@ -112,6 +121,16 @@ juce::File Settings::getUserPresetFolder() const
     const auto list = getFolders (Folder::user);
     juce::File dir = list.isEmpty() ? juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
                                           .getChildFile ("Emulon X").getChildFile ("Presets")
+                                    : juce::File (list[0]);
+    dir.createDirectory();
+    return dir;
+}
+
+juce::File Settings::getSkinsFolder() const
+{
+    const auto list = getFolders (Folder::skins);
+    juce::File dir = list.isEmpty() ? juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                          .getChildFile ("Emulon X").getChildFile ("Skins")
                                     : juce::File (list[0]);
     dir.createDirectory();
     return dir;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginEditor.h"
 #include "ui/Theme.h"
+#include "ui/SkinFile.h"
 
 namespace emx
 {
@@ -131,17 +132,60 @@ void EmulonXEditor::changeListenerCallback (ChangeBroadcaster*)
     }
 }
 
+/** Brings the theme (shared by every open Emulon X window) in line with the settings. Returns a
+    number that changes whenever the look changed, so each window knows to refresh. */
+static int syncThemeWithSettings (Settings& s)
+{
+    static int generation = 0;
+    static String loadedKey;
+    static float lastHue = 1000.0f;
+    static theme::Skin lastSkin = theme::Skin::classic;
+
+    auto skin = (theme::Skin) s.getSkin();
+    if (skin == theme::Skin::custom)
+    {
+        const File file (s.getCustomSkin());
+        const auto key = file.getFullPathName() + "|" + String (file.getLastModificationTime().toMilliseconds()) + "|" + String (file.getSize());
+        if (key != loadedKey)
+        {
+            auto design = std::make_shared<skin::Design>();
+            String error;
+            StringArray warnings;
+            if (s.getCustomSkin().isNotEmpty() && skin::load (file, *design, error, &warnings))
+            {
+                theme::setCustomSkin (design);
+                theme::setCustomSkinMessage (warnings.isEmpty() ? String() : warnings[0] + (warnings.size() > 1 ? " (+" + String (warnings.size() - 1) + " more)" : String()));
+                loadedKey = key;
+                lastSkin = theme::Skin::classic;   // apply below
+                ++generation;
+            }
+            else
+            {
+                theme::setCustomSkinMessage (error.isNotEmpty() ? error : String ("No skin file chosen"));
+                loadedKey = {};
+                skin = theme::Skin::classic;   // missing or broken: Classic instead
+            }
+        }
+    }
+    const float h = theme::skinAllowsColourShift (skin) ? s.getHueShift() : 0.0f;
+    if (skin != lastSkin || std::abs (h - lastHue) > 0.01f)
+    {
+        theme::setSkin (skin);
+        theme::setHueShift (h);
+        lastSkin = skin;
+        lastHue = h;
+        ++generation;
+    }
+    return generation;
+}
+
 bool EmulonXEditor::applyHue()
 {
-    const auto skin = (theme::Skin) settings->getSkin();
-    const float h = theme::skinAllowsColourShift (skin) ? settings->getHueShift() : 0.0f;   // not for the XP skins
-    if (std::abs (h - appliedHue) < 0.01f && skin == appliedSkin)
+    const int gen = syncThemeWithSettings (*settings);
+    if (gen == appliedGeneration)
         return false;
-    theme::setSkin (skin);    // shared by every open Emulon X window
-    theme::setHueShift (h);
     lnf.refreshColours();
-    appliedHue = h;
-    appliedSkin = skin;
+    appliedGeneration = gen;
     return true;
 }
 
@@ -194,7 +238,7 @@ void EmulonXEditor::resized()
 bool EmulonXEditor::isInterestedInFileDrag (const StringArray& files)
 {
     for (auto& f : files)
-        if (loader::isSupported (File (f)))
+        if (loader::isSupported (File (f)) || File (f).hasFileExtension ("emxd"))
             return true;
     return false;
 }
@@ -205,9 +249,30 @@ void EmulonXEditor::filesDropped (const StringArray& files, int, int)
     repaint();
     Array<File> list;
     for (auto& f : files)
-        list.add (File (f));
-    proc.loadFiles (list);
-    root->showPage (0);
+    {
+        const File file (f);
+        if (file.hasFileExtension ("emxd"))   // a skin: add it to the skins and use it
+        {
+            skin::Design d;
+            String error;
+            if (! skin::load (file, d, error))
+            {
+                theme::setCustomSkinMessage (file.getFileName() + ": " + error);
+                showSettings (true, 4);
+                continue;
+            }
+            const auto dest = settings->getSkinsFolder().getChildFile (file.getFileName());
+            if (file == dest || file.copyFileTo (dest))
+                settings->useCustomSkin (dest);
+            continue;
+        }
+        list.add (file);
+    }
+    if (! list.isEmpty())
+    {
+        proc.loadFiles (list);
+        root->showPage (0);
+    }
 }
 
 void EmulonXEditor::paintOverChildren (Graphics& g)
@@ -219,7 +284,7 @@ void EmulonXEditor::paintOverChildren (Graphics& g)
     g.fillRoundedRectangle (r, 12.0f * uiScale);
     g.setColour (theme::red);
     g.drawRoundedRectangle (r, 12.0f * uiScale, 3.0f * uiScale);
-    theme::drawGlowText (g, "DROP SAMPLES, PRESETS OR BANKS", r, theme::font (28.0f * uiScale, 900, 0.14f), Colours::white,
+    theme::drawGlowText (g, "DROP SAMPLES, PRESETS, BANKS OR SKINS", r, theme::font (28.0f * uiScale, 900, 0.14f), Colours::white,
                          theme::red, roundToInt (14.0f * uiScale), Justification::centred);
 }
 

@@ -2,7 +2,7 @@
 # Licensed under the GNU AGPLv3 (see LICENSE).
 
 cmake_minimum_required(VERSION 3.22)
-project(EmulonX VERSION 1.1.1 LANGUAGES C CXX)
+project(EmulonX VERSION 1.2.0 LANGUAGES C CXX)
 # Release tag after the number: ea = early access, af = alpha, bv = beta, bf = bug fix, ff = final (empty for none).
 set(EMX_VERSION_TAG "ea")
 set(EMX_FULL_VERSION "${PROJECT_VERSION}${EMX_VERSION_TAG}")
@@ -92,7 +92,9 @@ set(EMX_SOURCES
     Source/ui/EmxLookAndFeel.cpp
     Source/ui/Widgets.cpp
     Source/ui/MasterBar.cpp
-    Source/ui/MainPage.cpp)
+    Source/ui/MainPage.cpp
+    Source/ui/SkinFile.cpp
+    Source/ui/SkinDraw.cpp)
 
 set(EMX_DEFINITIONS
     JUCE_WEB_BROWSER=0
@@ -141,9 +143,11 @@ if(EMX_BUILD_TESTS)
         Source/fx/FxDefs.cpp
         Source/fx/FxDsp.cpp
         Source/fx/FxModel.cpp
-        Source/fx/FxEngine.cpp)
+        Source/fx/FxEngine.cpp
+        Source/ui/SkinFile.cpp
+        Source/ui/SkinDraw.cpp)
     target_include_directories(EmulonXTests PRIVATE Source)
     target_compile_definitions(EmulonXTests PRIVATE EMX_VERSION_STRING="${EMX_FULL_VERSION}" JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_STANDALONE_APPLICATION=1)
     target_link_libraries(EmulonXTests PRIVATE
-        juce::juce_audio_formats juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+        juce::juce_audio_formats juce::juce_graphics juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 endif()

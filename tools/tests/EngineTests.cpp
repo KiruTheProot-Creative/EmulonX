@@ -8,6 +8,8 @@
 #include "fx/FxEngine.h"
 #include "engine/Arpeggiator.h"
 #include "NaturalSort.h"
+#include "ui/SkinFile.h"
+#include "ui/SkinDraw.h"
 
 using namespace emx;
 using namespace juce;
@@ -201,6 +203,111 @@ static int reverbDemo (const File& file)
     if (auto w = WavAudioFormat().createWriterFor (os, AudioFormatWriterOptions{}.withSampleRate (SR).withNumChannels (2).withBitsPerSample (16)))
         w->writeFromAudioSampleBuffer (outBuf, 0, outBuf.getNumSamples());
     return 0;
+}
+
+
+//== Skin files (.emxd) ==============================================================
+static MemoryBlock pngOf (Colour c, int w = 4, int h = 4)
+{
+    Image im (Image::ARGB, w, h, true);
+    im.clear (im.getBounds(), c);
+    MemoryOutputStream out;
+    PNGImageFormat().writeImageToStream (im, out);
+    return out.getMemoryBlock();
+}
+
+static void skinFileTests()
+{
+    using namespace emx::skin;
+    const auto noFiles = [] (const String&) { return MemoryBlock(); };
+    Colour c;
+    check (parseColour ("#ff2a2a", c) && c == Colour (0xffff2a2a), "skin: #rrggbb colours");
+    check (parseColour ("abc", c) && c == Colour (0xffaabbcc), "skin: short #rgb colours");
+    check (! parseColour ("red", c) && ! parseColour ("#12345", c), "skin: rejects things that aren't colours");
+
+    {
+        Design d;
+        String err;
+        StringArray warn;
+        const bool ok = fromJson (JSON::parse (R"({"format":"emxd","version":2,"name":"Links","tokens":{"accent":"#00ff00","display":"#102030"},
+            "display":{"textColor":"@accent","fill":{"type":"solid","a":"@display"}},"knob":{"pointer":"@nope"},"panel":{"radius":500,"shape":7}})"),
+                                  noFiles, d, err, &warn);
+        check (ok && d.displayText == Colour (0xff00ff00) && d.display.fill.a == Colour (0xff102030),
+               "skin: colours linked to the palette follow it");
+        check (ok && d.pointer == d.accent, "skin: a link to an unknown palette colour falls back");
+        check (ok && d.panel.radius <= 64.0f && d.panel.shape <= 1.0f, "skin: out-of-range numbers are kept in range");
+    }
+    {
+        Design d;
+        String err;
+        check (! fromJson (JSON::parse ("{\"name\":\"x\"}"), noFiles, d, err) && err.isNotEmpty(), "skin: rejects a file that isn't a skin", err);
+        check (! fromJson (JSON::parse ("{\"format\":\"emxd\",\"version\":1}"), noFiles, d, err), "skin: rejects the old 1.1.2 skin format", err);
+    }
+    {
+        // a picture inside the description (data: URL), as Skin Studio exports it
+        const auto png = pngOf (Colours::orange, 6, 3);
+        const auto json = "{\"format\":\"emxd\",\"version\":2,\"button\":{\"fill\":{\"type\":\"image\",\"a\":\"#000000\",\"img\":\"data:image/png;base64,"
+                          + Base64::toBase64 (png.getData(), png.getSize()) + "\",\"fit\":\"cover\"}}}";
+        Design d;
+        String err;
+        const bool ok = fromJson (JSON::parse (json), noFiles, d, err);
+        check (ok && d.button.fill.type == Fill::Type::image && d.button.fill.picture.image.getWidth() == 6 && d.button.fill.fit == Fill::Fit::cover,
+               "skin: pictures inside the description (data: URLs)");
+    }
+    {
+        // save -> load: pictures and textures travel inside the .emxd file
+        const auto dir = File::getSpecialLocation (File::tempDirectory).getChildFile ("emx-skin-tests");
+        dir.deleteRecursively();
+        dir.createDirectory();
+        Image grey (Image::RGB, 8, 8, false);
+        for (int y = 0; y < 8; ++y)
+            for (int x = 0; x < 8; ++x)
+                grey.setPixelAt (x, y, x < 4 ? Colour (0xff404040) : Colour (0xffc0c0c0));
+        MemoryOutputStream tex;
+        PNGImageFormat().writeImageToStream (grey, tex);
+        const auto json = JSON::parse (R"({"format":"emxd","version":2,"name":"Round Trip","author":"Tester",
+            "panel":{"fill":{"type":"image","a":"#111111","img":"images/panel.png"},"overlay":{"tex":"metal-x","strength":0.7}},
+            "button":{"overlay":{"tex":"metal-missing","strength":0.5}},
+            "knob":{"style":"picture","picture":"images/knob.png"}})");
+        String err;
+        const auto file = dir.getChildFile ("b 10.emxd");
+        const bool saved = save (file, json, { { "images/panel.png", pngOf (Colours::blue) }, { "images/knob.png", pngOf (Colours::white, 16, 16) },
+                                               { "textures/metal-x.png", tex.getMemoryBlock() } }, err);
+        Design d;
+        StringArray warn;
+        const bool loaded = saved && load (file, d, err, &warn);
+        check (loaded && d.name == "Round Trip" && d.panel.fill.picture.isValid() && d.knobStyle == Design::KnobStyle::picture,
+               "skin: save and load an .emxd file with pictures", err);
+        check (loaded && d.panel.overlay.isActive() && std::abs (d.panel.overlay.strength - 0.7f) < 0.001f, "skin: textures inside the file work as overlays");
+        check (loaded && ! d.button.overlay.isActive() && warn.joinIntoString (" ").contains ("metal-missing"),
+               "skin: a missing texture is reported but doesn't stop the skin", warn.joinIntoString ("; "));
+        String name, author;
+        check (readInfo (file, name, author) && name == "Round Trip" && author == "Tester", "skin: quick look at name and author");
+        file.copyFileTo (dir.getChildFile ("b 2.emxd"));
+        dir.getChildFile ("notes.txt").replaceWithText ("x");
+        const auto found = findSkins ({ dir.getFullPathName() });
+        check (found.size() == 2 && found[0].getFileName() == "b 2.emxd", "skin: finds skin files, sorted like Explorer");
+        const auto broken = dir.getChildFile ("broken.emxd");
+        broken.replaceWithText ("garbage");
+        check (! load (broken, d, err) && err.isNotEmpty(), "skin: a broken file is refused with a reason", err);
+        // the light / dark halves of a texture: mid-grey changes nothing
+        Image mid (Image::RGB, 4, 4, false);
+        mid.clear (mid.getBounds(), Colour (0xff808080));
+        Image lighter, darker;
+        makeBlendImages (mid, lighter, darker);
+        check (lighter.getPixelAt (1, 1).getAlpha() < 4 && darker.getPixelAt (1, 1).getAlpha() < 4, "skin: mid-grey in a texture leaves the surface as it is");
+        dir.deleteRecursively();
+    }
+    {
+        // corner shapes: cut, round and squircle corners leave the very corner out; no rounding keeps it
+        const Rectangle<float> r (0, 0, 100, 60);
+        const Point<float> corner (2.0f, 2.0f), nearRound (5.0f, 5.0f);
+        const auto cut = shapePath (r, 20, 0.0f), round = shapePath (r, 20, 0.5f), squircle = shapePath (r, 20, 1.0f), square = shapePath (r, 0, 0.5f);
+        check (! cut.contains (corner) && ! round.contains (corner) && ! squircle.contains (corner) && square.contains (corner),
+               "skin: corner shapes cut the corner");
+        check (! cut.contains (nearRound) && squircle.contains (nearRound) && cut.getBounds() == r && squircle.getBounds() == r,
+               "skin: cut corners take more away than squircles, and stay inside the box");
+    }
 }
 
 int main (int argc, char** argv)
@@ -1111,6 +1218,8 @@ int main (int argc, char** argv)
         check (load < 0.35 && e.getActiveVoiceCount() == 32, "32 keep-speed sinc voices run in real time",
                String (load * 100.0, 1) + "% of one CPU core");
     }
+
+    skinFileTests();
 
     std::printf ("\n%d passed, %d failed\n", passes, failures);
     return failures == 0 ? 0 : 1;

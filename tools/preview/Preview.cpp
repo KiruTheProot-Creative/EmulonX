@@ -6,8 +6,57 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "ui/SkinFile.h"
 
 using namespace juce;
+
+/** A grayscale "brushed metal" texture for the test skin (made here, so no picture file is needed). */
+static MemoryBlock brushedTexturePng()
+{
+    Image im (Image::RGB, 256, 256, false);
+    Random rnd (0x5eed);
+    for (int y = 0; y < im.getHeight(); ++y)
+    {
+        const float row = rnd.nextFloat() * 2.0f - 1.0f;
+        float streak = 0.0f;
+        for (int x = 0; x < im.getWidth(); ++x)
+        {
+            streak = streak * 0.97f + (rnd.nextFloat() * 2.0f - 1.0f) * 0.03f;
+            const float band = 0.12f * std::sin ((float) y / 256.0f * MathConstants<float>::twoPi * 1.5f);
+            const auto v = (uint8) jlimit (0, 255, roundToInt (128.0f + 255.0f * (row * 0.08f + streak * 0.9f + band)));
+            im.setPixelAt (x, y, Colour (v, v, v));
+        }
+    }
+    MemoryOutputStream out;
+    PNGImageFormat().writeImageToStream (im, out);
+    return out.getMemoryBlock();
+}
+
+/** The test skin: Classic-like colours, brushed panels, squircle buttons, ring knobs, a light display. */
+static const char* testSkinJson = R"JSON({
+  "format": "emxd", "version": 2, "name": "Preview Test", "author": "Emulon X", "hueShift": true,
+  "tokens": { "accent": "#ff7a1a", "text": "#f0ece6", "muted": "#b6aa9c", "surface": "#24201c", "background": "#140c06", "display": "#0a0603" },
+  "font": "Saira", "upper": true,
+  "window": { "fill": { "type": "gradient", "a": "#3a1d06", "b": "#050304", "angle": 160 }, "texture": "grid", "textureColor": "@accent", "textureOpacity": 0.1 },
+  "frame": { "width": 3, "color": "#000000" },
+  "topbar": { "fill": { "type": "gradient", "a": "#2a2018", "b": "#0d0906" }, "line": 2, "lineColor": "@accent", "logoColor": "#ffe2c4", "logoGlow": 0.7,
+              "overlay": { "tex": "metal-test", "strength": 0.5, "blend": "overlay" } },
+  "panel": { "fill": { "type": "gradient", "a": "#4a443e", "b": "#1d1915" }, "radius": 12, "shape": 1, "outline": 1, "outlineColor": "#000000",
+             "shadowY": 3, "shadowBlur": 10, "shadowOpacity": 0.7, "overlay": { "tex": "metal-test", "strength": 0.8, "blend": "overlay" } },
+  "heading": { "color": "@text" },
+  "inset": { "fill": { "type": "solid", "a": "#15110d" }, "radius": 10, "shape": 1, "outline": 0, "outlineColor": "#000000", "innerShadow": 0.7 },
+  "display": { "fill": { "type": "solid", "a": "@display" }, "radius": 4, "shape": 0, "outline": 1, "outlineColor": "#000000", "textColor": "@accent", "glow": 0.6, "scanlines": true },
+  "list": { "color": "#ffa25a" },
+  "button": { "fill": { "type": "gradient", "a": "#6a625a", "b": "#24201c" }, "radius": 9, "shape": 1, "outline": 1, "outlineColor": "#000000",
+              "textColor": "#eeeeee", "shadowY": 0, "shadowBlur": 0, "shadowOpacity": 0, "bevel": 0.5 },
+  "buttonOn": { "fill": { "type": "gradient", "a": "#ff8a2a", "b": "#7a2e04" }, "radius": 9, "shape": 1, "outline": 1, "outlineColor": "#000000", "textColor": "#ffffff", "glow": 0.5 },
+  "tab": { "same": false, "fill": { "type": "solid", "a": "#2c2621" }, "onFill": { "type": "gradient", "a": "#ff8a2a", "b": "#7a2e04" },
+           "textColor": "#f5efe8", "radius": 4, "shape": 0, "outline": 1, "outlineColor": "#000000" },
+  "knob": { "style": "ring", "capA": "#8a8278", "capB": "#1a1612", "ring": 3, "ringTrack": "#3a332c", "ringColor": "@accent", "pointer": "#ffffff", "pointerGlow": 0.4,
+            "overlay": { "tex": "metal-test", "strength": 0.6, "blend": "overlay" } },
+  "fader": { "track": "#3a332c", "fill": "@accent", "thumbA": "#d8d0c8", "thumbB": "#6a625a" },
+  "label": { "color": "@text" }
+})JSON";
 
 /** Writes a looped 24-bit test WAV whose name carries its root note. */
 static File writeDemoSample (const File& dir, const String& name, double freq)
@@ -547,6 +596,61 @@ int main (int argc, char** argv)
         MessageManager::getInstance()->runDispatchLoopUntil (80);
         save ("preview-emutal-shifted");
         st->setHueShift (0.0f);
+        st->setSkin (0);
+        MessageManager::getInstance()->runDispatchLoopUntil (80);
+    }
+    {
+        // Custom skins (.emxd): the test skin, plus any skin files in $EMX_PREVIEW_SKINS
+        SharedResourcePointer<emx::Settings> st;
+        const auto skinDir = demoDir.getChildFile ("skins");
+        skinDir.createDirectory();
+        const auto testSkin = skinDir.getChildFile ("Preview Test.emxd");
+        String err;
+        const bool saved = emx::skin::save (testSkin, JSON::parse (testSkinJson), { { "textures/metal-test.png", brushedTexturePng() } }, err);
+        const auto skinFoldersBefore = st->getFolders (emx::Settings::Folder::skins);
+        st->addFolder (emx::Settings::Folder::skins, skinDir);   // so the skin shows in the list
+        Array<File> skinFiles { testSkin };
+        if (const auto extra = SystemStats::getEnvironmentVariable ("EMX_PREVIEW_SKINS", {}); extra.isNotEmpty())
+            skinFiles.addArray (emx::skin::findSkins (StringArray (extra)));
+        const char* pageNames[] { "main", "editor", "fx", "arp" };
+        for (auto& f : skinFiles)
+        {
+            st->useCustomSkin (f);
+            MessageManager::getInstance()->runDispatchLoopUntil (80);
+            const bool ok = emx::theme::getSkin() == emx::theme::Skin::custom && emx::theme::customSkin() != nullptr;
+            std::printf ("skin file %s: %s%s%s\n", f.getFileName().toRawUTF8(), ok && (saved || f != testSkin) ? "ok" : "FAIL",
+                         emx::theme::customSkinMessage().isNotEmpty() ? " - " : "", emx::theme::customSkinMessage().toRawUTF8());
+            const auto tag = File::createLegalFileName (f.getFileNameWithoutExtension().toLowerCase().replaceCharacter (' ', '-'));
+            for (int pg = 0; pg < 4; ++pg)
+            {
+                editor.showPage (pg);
+                save ("preview-skinfile-" + tag + "-" + pageNames[pg]);
+            }
+            editor.showPage (0);
+            editor.showSettings (true, 4);
+            save ("preview-skinfile-" + tag + "-settings");
+            editor.showSettings (false);
+        }
+        // the colour shift turns a skin file that allows it
+        st->useCustomSkin (testSkin);
+        st->setHueShift (-150.0f);
+        MessageManager::getInstance()->runDispatchLoopUntil (80);
+        save ("preview-skinfile-shifted");
+        st->setHueShift (0.0f);
+        // a broken file falls back to Classic with a note
+        const auto broken = skinDir.getChildFile ("Broken.emxd");
+        broken.replaceWithText ("not a skin");
+        st->useCustomSkin (broken);
+        MessageManager::getInstance()->runDispatchLoopUntil (80);
+        std::printf ("broken skin file: %s (%s)\n", emx::theme::getSkin() == emx::theme::Skin::classic ? "falls back to Classic ok" : "FAIL",
+                     emx::theme::customSkinMessage().toRawUTF8());
+        editor.showSettings (true, 4);
+        save ("preview-skinfile-broken-settings");
+        editor.showSettings (false);
+        editor.showSettings (true, 0);
+        save ("preview-settings-folders");
+        editor.showSettings (false);
+        st->setFolders (emx::Settings::Folder::skins, skinFoldersBefore);
         st->setSkin (0);
         MessageManager::getInstance()->runDispatchLoopUntil (80);
     }

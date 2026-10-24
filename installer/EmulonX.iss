@@ -1,15 +1,15 @@
 ; Emulon X — Windows installer (Inno Setup 6).
 ; GitHub builds this automatically: see .github/workflows/build.yml.
 ; To build it yourself: install Inno Setup 6, build the plugin, put the files in ..\dist, then
-;   ISCC.exe /DAppVersion=1.1.1ea /DNumericVersion=1.1.1 installer\EmulonX.iss
+;   ISCC.exe /DAppVersion=1.2.0ea /DNumericVersion=1.2.0 installer\EmulonX.iss
 ; SPDX-License-Identifier: AGPL-3.0-or-later
 
 #ifndef AppVersion
-  #define AppVersion "1.1.1ea"
+  #define AppVersion "1.2.0ea"
 #endif
 ; Windows needs plain numbers for the file version (the tag like "ea" is only in the name).
 #ifndef NumericVersion
-  #define NumericVersion "1.1.1"
+  #define NumericVersion "1.2.0"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist"

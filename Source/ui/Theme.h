@@ -5,6 +5,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+namespace emx::skin { struct Design; }
+
 namespace emx::theme
 {
 //== Colours ======================================================================
@@ -22,18 +24,35 @@ inline juce::Colour highlight  { 0xff4a444f };
 
 //== Skins =========================================================================
 // EMULON CLASSIC is the red metal design; EMULON XP is a light or dark homage to early-2000s
-// desktops; EMURUM and EMUTAL are flat, modern synth styles. Every helper below draws in the
-// current skin. The colour shift works on Classic, EMURUM and EMUTAL.
-enum class Skin { classic, xpLight, xpDark, emurum, emutal, emublox, emulator };
+// desktops; EMURUM and EMUTAL are flat, modern synth styles; custom is a skin file (.emxd) made
+// in Emulon X SD. Every helper below draws in the current skin.
+enum class Skin { classic, xpLight, xpDark, emurum, emutal, emublox, emulator, custom };
 void setSkin (Skin);   // message thread only
 Skin getSkin() noexcept;
+/** The skin file used by Skin::custom (call before setSkin (Skin::custom)). Message thread only. */
+void setCustomSkin (std::shared_ptr<const skin::Design>);
+/** The custom skin as it is drawn (turned by the colour shift), or nullptr. */
+const skin::Design* customSkin() noexcept;
+/** Changes every time a different custom skin is set. */
+int customSkinGeneration() noexcept;
+bool customSkinAllowsColourShift() noexcept;
+bool customSkinIsLight() noexcept;
+/** A short note about the last skin file that was loaded (why it couldn't be used, or what's missing). */
+void setCustomSkinMessage (const juce::String&);
+juce::String customSkinMessage();
+
+inline bool isCustom() noexcept { return getSkin() == Skin::custom; }
 inline bool isXp() noexcept   { const auto s = getSkin(); return s == Skin::xpLight || s == Skin::xpDark; }
-inline bool isFlat() noexcept { const auto s = getSkin(); return s == Skin::emurum || s == Skin::emutal || s == Skin::emublox || s == Skin::emulator; }
+/** Flat skins share one way of translating the red design's colours (custom skins too). */
+inline bool isFlat() noexcept { const auto s = getSkin(); return s == Skin::emurum || s == Skin::emutal || s == Skin::emublox || s == Skin::emulator || s == Skin::custom; }
 /** EMUL8R: brushed metal, teal LCD screens (an homage to the early-2000s hardware-style samplers). */
 inline bool isMetal() noexcept { return getSkin() == Skin::emulator; }
-inline bool skinAllowsColourShift (Skin s) noexcept { return s == Skin::classic || s == Skin::emurum || s == Skin::emutal || s == Skin::emublox; }
-/** Light backgrounds with dark text (XP light, EMUBLOX). */
-inline bool isLightSkin() noexcept { const auto s = getSkin(); return s == Skin::xpLight || s == Skin::emublox || s == Skin::emulator; }
+inline bool skinAllowsColourShift (Skin s) noexcept
+{
+    return s == Skin::classic || s == Skin::emurum || s == Skin::emutal || s == Skin::emublox || (s == Skin::custom && customSkinAllowsColourShift());
+}
+/** Light backgrounds with dark text (XP light, EMUBLOX, EMUL8R, light custom skins). */
+inline bool isLightSkin() noexcept { const auto s = getSkin(); return s == Skin::xpLight || s == Skin::emublox || s == Skin::emulator || (s == Skin::custom && customSkinIsLight()); }
 
 /** The flat skins' surfaces (valid while isFlat()). */
 struct FlatStyle

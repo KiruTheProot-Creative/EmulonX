@@ -57,7 +57,12 @@ private:
     std::unique_ptr<HueBar> hueBar;
     juce::OwnedArray<Swatch> swatches;
     juce::TextButton hueResetButton { "BACK TO RED" };
-    juce::ComboBox skinBox;   // EMULON CLASSIC, EMULON XP light / dark, EMURUM, EMUTAL
+    juce::ComboBox skinBox;   // the built-in skins, then your skin files
+    juce::TextButton addSkinButton { "ADD SKIN FILE..." }, openSkinsButton { "OPEN SKINS FOLDER" };
+    juce::Array<juce::File> skinFiles;
+    juce::String skinScanKey;
+    std::unique_ptr<juce::FileChooser> skinChooser;
+    void rescanSkins (bool force);
     int page = 0;
     juce::Rectangle<int> panel, content;
 };

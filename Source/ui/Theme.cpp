@@ -1,11 +1,44 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Theme.h"
+#include "SkinFile.h"
+#include "SkinDraw.h"
 #include "EmxAssets.h"
 #include <thread>
 #include <unordered_map>
 
 namespace emx::theme
 {
+namespace
+{
+/** A custom skin (.emxd) and what's prepared from it. Freed with JUCE's other singletons,
+    so the font goes before JUCE shuts down. */
+struct CustomState final : juce::DeletedAtShutdown
+{
+    enum class FontKind { saira, fredoka, tahoma, typeface, system };
+    std::shared_ptr<const skin::Design> base;
+    skin::Design drawn;          // as drawn: turned by the colour shift
+    FlatStyle style {};
+    juce::Image logo;
+    FontKind fontKind = FontKind::saira;
+    juce::Typeface::Ptr typeface;
+    juce::String systemFont;
+    float fontScale = 1.0f;
+    int generation = 0;
+    juce::String message;
+
+    ~CustomState() override { instance() = nullptr; }
+    static CustomState*& instance() { static CustomState* p = nullptr; return p; }
+    static CustomState& get()
+    {
+        auto& p = instance();
+        if (p == nullptr)
+            p = new CustomState();
+        return *p;
+    }
+};
+
+bool customFont (CustomState::FontKind k) { return getSkin() == Skin::custom && CustomState::get().fontKind == k; }
+} // namespace
 static juce::Typeface::Ptr typefaceFor (int weight)
 {
     static auto w500 = juce::Typeface::createSystemTypefaceFor (EmxAssets::Saira500_ttf, (size_t) EmxAssets::Saira500_ttfSize);
@@ -16,7 +49,14 @@ static juce::Typeface::Ptr typefaceFor (int weight)
 
 juce::Font font (float height, int weight, float kerning)
 {
-    if (getSkin() == Skin::emublox)
+    if (customFont (CustomState::FontKind::typeface) || customFont (CustomState::FontKind::system))
+    {
+        const auto& cs = CustomState::get();
+        juce::Font f = cs.typeface != nullptr ? juce::Font (juce::FontOptions (cs.typeface).withHeight (height * cs.fontScale))
+                                              : juce::Font (juce::FontOptions (cs.systemFont, height * cs.fontScale, weight >= 700 ? juce::Font::bold : juce::Font::plain));
+        return std::abs (kerning) > 1.0e-6f ? f.withExtraKerningFactor (kerning * 0.5f) : f;
+    }
+    if (getSkin() == Skin::emublox || customFont (CustomState::FontKind::fredoka))
     {
         // Fredoka (SIL OFL): round and chunky, sized to the same capital height as Saira
         static auto f500 = juce::Typeface::createSystemTypefaceFor (EmxAssets::Fredoka500_ttf, (size_t) EmxAssets::Fredoka500_ttfSize);
@@ -37,7 +77,7 @@ juce::Font font (float height, int weight, float kerning)
         juce::Font f { juce::FontOptions (weight >= 700 ? f600 : f500).withHeight (height * scale) };
         return std::abs (kerning) > 1.0e-6f ? f.withExtraKerningFactor (kerning * 0.4f) : f;
     }
-    if (isXp())
+    if (isXp() || customFont (CustomState::FontKind::tahoma))
     {
         // Tahoma, the classic desktop font, from the system (not shipped with the plugin);
         // the system's standard sans-serif steps in where it is missing.
@@ -183,6 +223,8 @@ const FlatStyle emulatorStyle {
 
 const FlatStyle& styleFor (Skin s)
 {
+    if (s == Skin::custom)
+        return CustomState::get().style;
     return s == Skin::emurum ? emurumStyle : s == Skin::emublox ? emubloxStyle : s == Skin::emulator ? emulatorStyle : emutalStyle;
 }
 
@@ -220,7 +262,8 @@ float labHueOf (juce::Colour c)
 /** How far the flat skin's accent (plus the colour shift) is from the classic red. */
 float flatOffset()
 {
-    return labHueOf (styleFor (currentSkin).accent) - labHueOf (juce::Colour (0xffff2a2a)) + currentShift;
+    // a custom skin's colours are already turned by the shift
+    return labHueOf (styleFor (currentSkin).accent) - labHueOf (juce::Colour (0xffff2a2a)) + (currentSkin == Skin::custom ? 0.0f : currentShift);
 }
 
 /** Translates a colour of the red design into a flat skin: reds become the accent colour,
@@ -352,6 +395,160 @@ juce::Colour rotateHue (juce::Colour c, float degrees)
     return juce::Colour::fromFloatRGBA (r, g, b, c.getFloatAlpha());
 }
 
+namespace
+{
+/** The Emulon X logo in a custom skin's colours: white letters take the letter colour, the red X the accent. */
+juce::Image tintedLogo (const juce::Image& src, juce::Colour letters, juce::Colour accent)
+{
+    if (! src.isValid())
+        return {};
+    auto out = src.convertedToFormat (juce::Image::ARGB);
+    out.duplicateIfShared();
+    const float turn = labHueOf (accent) - labHueOf (juce::Colour (0xffff2a2a));
+    juce::Image::BitmapData d (out, juce::Image::BitmapData::readWrite);
+    std::unordered_map<juce::uint32, juce::uint32> done;
+    for (int y = 0; y < d.height; ++y)
+        for (int x = 0; x < d.width; ++x)
+        {
+            const auto c = d.getPixelColour (x, y);
+            if (c.getAlpha() == 0)
+                continue;
+            const auto key = c.withAlpha ((juce::uint8) 255).getARGB();
+            auto it = done.find (key);
+            if (it == done.end())
+            {
+                const auto opaque = juce::Colour (key);
+                const auto t = opaque.getSaturation() < 0.25f ? juce::Colours::black.interpolatedWith (letters, opaque.getBrightness())
+                                                              : rotateHue (opaque, turn);
+                it = done.emplace (key, t.getARGB()).first;
+            }
+            d.setPixelColour (x, y, juce::Colour (it->second).withAlpha (c.getAlpha()));
+        }
+    return out;
+}
+
+/** Prepares the custom skin as drawn (after a colour shift or a new skin). */
+void rebuildCustom()
+{
+    auto& cs = CustomState::get();
+    if (cs.base == nullptr)
+        return;
+    cs.drawn = *cs.base;
+    if (cs.base->hueShift && std::abs (currentShift) > 0.01f)
+        skin::forEachColour (cs.drawn, [] (juce::Colour& c) { c = rotateHue (c, currentShift); });
+    const auto& d = cs.drawn;
+    auto& st = cs.style;
+    st = FlatStyle {};
+    st.bg = d.window.average();
+    st.topBar = d.topBar.average();
+    st.panel = d.panel.fill.average();
+    st.panelEdge = d.panel.outline > 0.01f ? d.panel.outlineColour : st.panel.contrasting (0.12f);
+    st.inset = d.inset.fill.average();
+    st.display = d.display.fill.average();
+    st.displayEdge = d.display.outline > 0.01f ? d.display.outlineColour : st.display.contrasting (0.15f);
+    st.text = d.text;
+    st.muted = d.muted;
+    st.accent = d.accent;
+    st.list = d.list;
+    st.button = d.button.fill.average();
+    st.buttonHover = st.button.brighter (0.1f);
+    st.buttonEdge = d.button.outlineColour;
+    st.knobBody = d.capLight;
+    st.knobTrack = d.ringTrack;
+    st.radius = d.panel.radius;
+    st.light = d.isLight();
+    const auto lab = linearToLab (toLinear (d.surface.getFloatRed()), toLinear (d.surface.getFloatGreen()), toLinear (d.surface.getFloatBlue()));
+    st.neutralHue = juce::radiansToDegrees (std::atan2 (lab.b, lab.a));
+    st.neutralChroma = juce::jmin (0.03f, std::hypot (lab.a, lab.b));
+    st.neutralLift = st.light ? 0.0f : juce::jlimit (0.0f, 0.35f, lab.L - 0.18f);
+    cs.logo = d.logo.isValid() ? d.logo.image
+                               : tintedLogo (juce::ImageCache::getFromMemory (EmxAssets::logo_png, EmxAssets::logo_pngSize), d.logoColour, d.accent);
+}
+} // namespace
+
+void setCustomSkin (std::shared_ptr<const skin::Design> design)
+{
+    auto& cs = CustomState::get();
+    cs.base = std::move (design);
+    ++cs.generation;
+    cs.typeface = nullptr;
+    cs.systemFont = {};
+    cs.fontScale = 1.0f;
+    cs.fontKind = CustomState::FontKind::saira;
+    if (cs.base != nullptr)
+    {
+        const auto& d = *cs.base;
+        const auto name = d.fontName.trim();
+        if (d.fontData.getSize() > 0)
+        {
+            cs.typeface = juce::Typeface::createSystemTypefaceFor (d.fontData.getData(), d.fontData.getSize());
+            if (cs.typeface != nullptr)
+                cs.fontKind = CustomState::FontKind::typeface;
+        }
+        if (cs.typeface == nullptr)
+        {
+            if (name.equalsIgnoreCase ("Fredoka"))
+                cs.fontKind = CustomState::FontKind::fredoka;
+            else if (name.equalsIgnoreCase ("Tahoma"))
+                cs.fontKind = CustomState::FontKind::tahoma;
+            else if (name.isNotEmpty() && ! name.equalsIgnoreCase ("Saira") && juce::Font::findAllTypefaceNames().contains (name, true))
+            {
+                cs.fontKind = CustomState::FontKind::system;
+                cs.systemFont = name;
+            }
+        }
+        if (cs.fontKind == CustomState::FontKind::typeface || cs.fontKind == CustomState::FontKind::system)
+        {
+            // size it to the same capital height as Saira, so every label still fits
+            auto cap = [] (const juce::Font& f)
+            {
+                juce::GlyphArrangement ga;
+                ga.addLineOfText (f, "H", 0, 0);
+                juce::Path p;
+                ga.createPath (p);
+                return p.getBounds().getHeight();
+            };
+            const float saira = cap (juce::Font (juce::FontOptions (typefaceFor (700)).withHeight (100.0f * 1.3137f)));
+            const float mine = cap (cs.typeface != nullptr ? juce::Font (juce::FontOptions (cs.typeface).withHeight (100.0f))
+                                                           : juce::Font (juce::FontOptions (cs.systemFont, 100.0f, juce::Font::bold)));
+            cs.fontScale = mine > 1.0f ? juce::jlimit (0.5f, 2.5f, saira / mine) : 1.0f;
+        }
+    }
+    rebuildCustom();
+    if (currentSkin == Skin::custom)
+    {
+        hueCache.clear();
+        applyPalette();
+    }
+}
+
+const skin::Design* customSkin() noexcept
+{
+    auto* cs = CustomState::instance();
+    return cs != nullptr && cs->base != nullptr ? &cs->drawn : nullptr;
+}
+
+int customSkinGeneration() noexcept
+{
+    auto* cs = CustomState::instance();
+    return cs != nullptr ? cs->generation : 0;
+}
+
+bool customSkinAllowsColourShift() noexcept
+{
+    auto* cs = CustomState::instance();
+    return cs != nullptr && cs->base != nullptr && cs->base->hueShift;
+}
+
+void setCustomSkinMessage (const juce::String& m) { CustomState::get().message = m; }
+juce::String customSkinMessage() { auto* cs = CustomState::instance(); return cs != nullptr ? cs->message : juce::String(); }
+
+bool customSkinIsLight() noexcept
+{
+    auto* cs = CustomState::instance();
+    return cs != nullptr && cs->base != nullptr && cs->drawn.isLight();
+}
+
 juce::Colour hue (juce::uint32 argb)
 {
     if (currentSkin == Skin::classic && std::abs (currentShift) < 0.01f)
@@ -405,6 +602,20 @@ void applyPalette()
             textStrong = st.text;  ledText = st.text;  windowBg = st.light ? st.panel : st.bg;
             break;
         }
+        case Skin::custom:
+        {
+            const auto& st = flat();
+            const auto* d = customSkin();
+            red = st.accent;
+            redDim = red.brighter (0.12f);
+            redDark = red.interpolatedWith (st.panel, 0.65f);
+            textCol = st.text;  textMuted = st.muted;  listText = st.list;
+            ledBg = st.display;  edge = st.displayEdge;  highlight = st.panelEdge;
+            textStrong = d != nullptr ? d->heading : st.text;
+            ledText = d != nullptr ? d->displayText : st.text;
+            windowBg = st.bg;
+            break;
+        }
         case Skin::xpLight:
             red = juce::Colour (0xff2f6bd9);  redDim = juce::Colour (0xff3d7ee6);  redDark = juce::Colour (0xffa9c1ec);
             textCol = juce::Colour (0xff101010);  textMuted = juce::Colour (0xff57564f);  listText = juce::Colour (0xff0b3a9e);
@@ -430,11 +641,15 @@ void setHueShift (float degrees)
         return;
     currentShift = degrees;
     hueCache.clear();
+    if (currentSkin == Skin::custom)
+        rebuildCustom();
     applyPalette();
 }
 
 juce::Image image (Img which)
 {
+    if (currentSkin == Skin::custom && which == Img::logo)
+        return CustomState::get().logo;
     juce::Image src;
     switch (which)
     {
@@ -447,7 +662,7 @@ juce::Image image (Img which)
                                                : juce::ImageCache::getFromMemory (EmxAssets::logo_png, EmxAssets::logo_pngSize);
             break;
     }
-    if (isXp() || ! src.isValid())
+    if (isXp() || currentSkin == Skin::custom || ! src.isValid())
         return src;
     const float deg = isFlat() && currentSkin != Skin::emublox ? flatOffset() : currentShift;   // EMUBLOX's logo is already red
     if (std::abs (deg) < 0.01f)
@@ -473,9 +688,10 @@ void drawLogo (juce::Graphics& g, juce::Rectangle<float> area, juce::RectanglePl
     const float pad = dest.getHeight() * 0.35f;
     const int w = juce::jmax (1, juce::roundToInt ((dest.getWidth() + 2.0f * pad) * px));
     const int h = juce::jmax (1, juce::roundToInt ((dest.getHeight() + 2.0f * pad) * px));
-    struct Cache { int w = 0, h = 0; float shift = 1000.0f; Skin skin = Skin::classic; juce::Image img; };
+    struct Cache { int w = 0, h = 0; float shift = 1000.0f; Skin skin = Skin::classic; int generation = -1; juce::Image img; };
     static Cache cache;
-    if (cache.w != w || cache.h != h || std::abs (cache.shift - currentShift) > 0.01f || cache.skin != currentSkin)
+    const int gen = customSkinGeneration();
+    if (cache.w != w || cache.h != h || std::abs (cache.shift - currentShift) > 0.01f || cache.skin != currentSkin || cache.generation != gen)
     {
         juce::Image out (juce::Image::ARGB, w, h, true);
         {
@@ -488,14 +704,17 @@ void drawLogo (juce::Graphics& g, juce::Rectangle<float> area, juce::RectanglePl
                 sg.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
                 sg.drawImage (img, inner);
             }
+            const auto* custom = customSkin();
             if (currentSkin == Skin::classic)
                 juce::DropShadow (red.withAlpha (0.45f), juce::roundToInt (dest.getHeight() * 0.3f * px), {}).drawForImage (cg, shape);
+            else if (currentSkin == Skin::custom && custom != nullptr && custom->logoGlow > 0.001f)
+                juce::DropShadow (custom->accent.withAlpha (0.55f * custom->logoGlow), juce::jmax (1, juce::roundToInt (dest.getHeight() * 0.3f * px * custom->logoGlow)), {}).drawForImage (cg, shape);
             else   // a crisp drop shadow, like desktop icon labels
                 juce::DropShadow (juce::Colours::black.withAlpha (0.55f), juce::roundToInt (2.0f * px), { 1, 1 }).drawForImage (cg, shape);
             cg.setOpacity (1.0f);   // the shadow leaves its own colour (45 %) set
             cg.drawImageAt (shape, 0, 0);
         }
-        cache = { w, h, currentShift, currentSkin, out };
+        cache = { w, h, currentShift, currentSkin, gen, out };
     }
     juce::Graphics::ScopedSaveState state (g);
     g.setOpacity (1.0f);
@@ -505,6 +724,11 @@ void drawLogo (juce::Graphics& g, juce::Rectangle<float> area, juce::RectanglePl
 
 void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 {
+    if (const auto* d = isCustom() ? customSkin() : nullptr)
+    {
+        skin::drawPanel (g, *d, r);
+        return;
+    }
     if (isMetal())
     {
         // brushed aluminium with a light top edge and a dark outline
@@ -574,6 +798,11 @@ void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 
 void drawInset (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 {
+    if (const auto* d = isCustom() ? customSkin() : nullptr)
+    {
+        skin::drawInset (g, *d, r);
+        return;
+    }
     if (isMetal())
     {
         // a slightly darker recess in the metal
@@ -614,6 +843,11 @@ void drawInset (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 void drawLed (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& text, float textHeight,
               juce::Justification just, juce::Colour textColour)
 {
+    if (const auto* d = isCustom() ? customSkin() : nullptr)
+    {
+        skin::drawDisplay (g, *d, r, text, font (textHeight, 500, 0.04f), just, textColour == red ? d->displayText : textColour);
+        return;
+    }
     if (isMetal())
     {
         // a light value field with a thin dark border, black text
@@ -721,6 +955,25 @@ juce::Rectangle<float> drawHeading (juce::Graphics& g, juce::Rectangle<float> in
                                     const juce::String& title, const juce::String& subtitle)
 {
     auto row = inner.removeFromTop (16.0f);
+    if (const auto* d = isCustom() ? customSkin() : nullptr)
+    {
+        const auto f = font (10.0f, 700, 0.14f);
+        const auto t = d->upperCase ? title.toUpperCase() : title;
+        g.setColour (d->heading);
+        g.setFont (f);
+        g.drawText (t, row, juce::Justification::centredLeft, false);
+        if (subtitle.isNotEmpty())
+        {
+            juce::GlyphArrangement ga;
+            ga.addLineOfText (f, t, 0, 0);
+            const auto w = ga.getBoundingBox (0, -1, true).getWidth();
+            g.setColour (d->muted);
+            g.setFont (font (8.0f, 500, 0.1f));
+            g.drawText (d->upperCase ? subtitle.toUpperCase() : subtitle, row.withTrimmedLeft (w + 8.0f), juce::Justification::centredLeft, true);
+        }
+        inner.removeFromTop (6.0f);
+        return inner;
+    }
     if (isFlat())
     {
         // small caps title; EMURUM marks it with a little accent light, EMUBLOX makes it big and bold
@@ -834,6 +1087,11 @@ juce::Rectangle<float> drawHeading (juce::Graphics& g, juce::Rectangle<float> in
 
 void drawBackground (juce::Graphics& g, juce::Rectangle<int> bounds, float headerBottom)
 {
+    if (const auto* d = isCustom() ? customSkin() : nullptr)
+    {
+        skin::drawBackground (g, *d, bounds, headerBottom);
+        return;
+    }
     if (isMetal())
     {
         g.setGradientFill (juce::ColourGradient::vertical (juce::Colour (0xff56616a), (float) bounds.getY(), juce::Colour (0xff3d464e), (float) bounds.getBottom()));
@@ -898,6 +1156,11 @@ void drawBackground (juce::Graphics& g, juce::Rectangle<int> bounds, float heade
 
 void drawFrame (juce::Graphics& g, juce::Rectangle<int> bounds)
 {
+    if (const auto* d = isCustom() ? customSkin() : nullptr)
+    {
+        skin::drawFrame (g, *d, bounds);
+        return;
+    }
     if (isMetal())
     {
         g.setColour (juce::Colour (0xff20262b));
@@ -952,6 +1215,8 @@ void drawScreen (juce::Graphics& g, juce::Rectangle<float> r)
 
 juce::Colour headerText() noexcept
 {
+    if (const auto* d = isCustom() ? customSkin() : nullptr)
+        return textOn (d->topBar.average()).withAlpha (0.8f);
     return isXp() || isMetal() ? juce::Colours::white.withAlpha (0.9f) : textMuted;
 }
 

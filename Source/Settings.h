@@ -17,7 +17,7 @@ class Settings final : public juce::ChangeBroadcaster
 public:
     Settings();
 
-    enum class Folder { base, other, user, samples };
+    enum class Folder { base, other, user, samples, skins };
     static constexpr float uiScales[] { 0.75f, 1.0f, 1.25f, 1.5f, 2.0f };
     static constexpr int voiceChoices[] { 16, 32, 48, 64, 96, 128, 192, 256 };
     static constexpr int cpuChoices[] { 0, 50, 60, 70, 80, 85, 90, 95 };   // 0 = off
@@ -42,9 +42,17 @@ public:
     void  setBankColumns (int v)     { set ("bankColumns", juce::jlimit (1, maxBankColumns, v)); }
 
     //== Customization =========================================================
-    /** 0 EMULON CLASSIC, 1 EMULON XP (light), 2 EMULON XP (dark), 3 EMURUM, 4 EMUTAL, 5 EMUBLOX, 6 EMUL8R. */
-    int   getSkin() const             { return juce::jlimit (0, 6, get ("skin", 0)); }
-    void  setSkin (int v)             { set ("skin", juce::jlimit (0, 6, v)); }
+    /** 0 EMULON CLASSIC, 1 EMULON XP (light), 2 EMULON XP (dark), 3 EMURUM, 4 EMUTAL, 5 EMUBLOX, 6 EMUL8R,
+        7 a skin file (see getCustomSkin). */
+    static constexpr int customSkinIndex = 7;
+    int   getSkin() const             { return juce::jlimit (0, customSkinIndex, get ("skin", 0)); }
+    void  setSkin (int v)             { set ("skin", juce::jlimit (0, customSkinIndex, v)); }
+    /** The skin file (.emxd) used when the skin is 7: a full path. */
+    juce::String getCustomSkin() const { return props->getValue ("customSkin"); }
+    /** Switches to this skin file. */
+    void  useCustomSkin (const juce::File& f) { props->setValue ("customSkin", f.getFullPathName()); set ("skin", customSkinIndex); }
+    /** First skins folder (created if needed): where added skins are copied to. */
+    juce::File getSkinsFolder() const;
     /** Colour scheme rotation in degrees, -180..180 (0 = the original red). */
     float getHueShift() const         { return (float) juce::jlimit (-180.0, 180.0, props->getDoubleValue ("hueShift", 0.0)); }
     void  setHueShift (float deg)     { props->setValue ("hueShift", (double) juce::jlimit (-180.0f, 180.0f, deg)); sendChangeMessage(); }   // saved by the file's own timer (cheap while dragging)

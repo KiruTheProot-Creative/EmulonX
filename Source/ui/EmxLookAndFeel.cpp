@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "EmxLookAndFeel.h"
 #include "Theme.h"
+#include "SkinDraw.h"
 
 namespace emx
 {
@@ -78,6 +79,17 @@ void EmxLookAndFeel::refreshColours()
         setColour (PopupMenu::highlightedTextColourId, Colours::white);
         setColour (HyperlinkButton::textColourId, Colour (0xff0b5f58));
     }
+    if (const auto* d = theme::isCustom() ? theme::customSkin() : nullptr)
+    {
+        setColour (TextButton::textColourOffId, d->buttonText);
+        setColour (TextButton::textColourOnId, d->buttonOnText);
+        setColour (PopupMenu::highlightedBackgroundColourId, d->isLight() ? d->accent : d->accent.withAlpha (0.4f));
+        setColour (PopupMenu::highlightedTextColourId, d->isLight() ? theme::textOn (d->accent) : Colours::white);
+        for (auto id : { (int) Label::textColourId, (int) Label::textWhenEditingColourId, (int) TextEditor::textColourId,
+                         (int) CaretComponent::caretColourId, (int) ComboBox::textColourId, (int) ListBox::textColourId })
+            setColour (id, d->displayText);
+        setColour (HyperlinkButton::textColourId, d->accent);
+    }
 }
 
 //== Knob: your knob artwork + a glowing pointer ================================
@@ -86,6 +98,11 @@ void EmxLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int h, 
 {
     const auto size = (float) jmin (w, h);
     const auto r = Rectangle<float> (size, size).withCentre (Rectangle<int> (x, y, w, h).toFloat().getCentre());
+    if (const auto* d = theme::isCustom() ? theme::customSkin() : nullptr)
+    {
+        skin::drawKnob (g, *d, r, startAngle, endAngle, pos);
+        return;
+    }
     if (theme::isXp())
     {
         xpKnob (g, r, startAngle, endAngle, pos);
@@ -134,6 +151,11 @@ void EmxLookAndFeel::drawLinearSlider (Graphics& g, int x, int y, int w, int h, 
     }
 
     const auto track = Rectangle<float> ((float) x, (float) y, (float) w, (float) h);
+    if (const auto* d = theme::isCustom() ? theme::customSkin() : nullptr)
+    {
+        skin::drawFader (g, *d, track, pos);
+        return;
+    }
     if (theme::isXp())
     {
         xpFader (g, track, pos);
@@ -166,6 +188,14 @@ void EmxLookAndFeel::drawLinearSlider (Graphics& g, int x, int y, int w, int h, 
 //== Buttons: brushed metal, glowing red when switched on =======================
 void EmxLookAndFeel::drawButtonBackground (Graphics& g, Button& b, const Colour&, bool highlighted, bool down)
 {
+    if (const auto* d = theme::isCustom() ? theme::customSkin() : nullptr)
+    {
+        const bool tab = b.getProperties().contains ("emxTab"), on = b.getToggleState(), enabled = b.isEnabled();
+        skin::drawButton (g, *d, b.getLocalBounds().toFloat().reduced (0.5f, 1.0f), on, tab, highlighted, down, enabled);
+        b.setColour (TextButton::textColourOffId, skin::buttonTextColour (*d, false, tab, enabled));
+        b.setColour (TextButton::textColourOnId, skin::buttonTextColour (*d, true, tab, enabled));
+        return;
+    }
     if (theme::isXp())
     {
         xpButton (g, b, highlighted, down);
