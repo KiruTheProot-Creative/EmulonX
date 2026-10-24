@@ -132,7 +132,7 @@ public:
         const auto& pat = a.patterns[(size_t) page.getEditPattern()];
         const float colW = (float) getWidth() / 16.0f;
         const auto bars = barsArea(), nums = numbersArea(), notes = transposeArea();
-        theme::drawLed (g, bars, {});
+        theme::drawScreen (g, bars);
         g.setColour (theme::red.withAlpha (0.08f));
         for (int i = 1; i < 4; ++i)
             g.fillRect (bars.getX(), bars.getY() + bars.getHeight() * (float) i / 4.0f, bars.getWidth(), 1.0f);

@@ -24,14 +24,16 @@ inline juce::Colour highlight  { 0xff4a444f };
 // EMULON CLASSIC is the red metal design; EMULON XP is a light or dark homage to early-2000s
 // desktops; EMURUM and EMUTAL are flat, modern synth styles. Every helper below draws in the
 // current skin. The colour shift works on Classic, EMURUM and EMUTAL.
-enum class Skin { classic, xpLight, xpDark, emurum, emutal, emublox };
+enum class Skin { classic, xpLight, xpDark, emurum, emutal, emublox, emulator };
 void setSkin (Skin);   // message thread only
 Skin getSkin() noexcept;
 inline bool isXp() noexcept   { const auto s = getSkin(); return s == Skin::xpLight || s == Skin::xpDark; }
-inline bool isFlat() noexcept { const auto s = getSkin(); return s == Skin::emurum || s == Skin::emutal || s == Skin::emublox; }
+inline bool isFlat() noexcept { const auto s = getSkin(); return s == Skin::emurum || s == Skin::emutal || s == Skin::emublox || s == Skin::emulator; }
+/** EMUL8R: brushed metal, teal LCD screens (an homage to the early-2000s hardware-style samplers). */
+inline bool isMetal() noexcept { return getSkin() == Skin::emulator; }
 inline bool skinAllowsColourShift (Skin s) noexcept { return s == Skin::classic || s == Skin::emurum || s == Skin::emutal || s == Skin::emublox; }
 /** Light backgrounds with dark text (XP light, EMUBLOX). */
-inline bool isLightSkin() noexcept { const auto s = getSkin(); return s == Skin::xpLight || s == Skin::emublox; }
+inline bool isLightSkin() noexcept { const auto s = getSkin(); return s == Skin::xpLight || s == Skin::emublox || s == Skin::emulator; }
 
 /** The flat skins' surfaces (valid while isFlat()). */
 struct FlatStyle
@@ -45,7 +47,13 @@ struct FlatStyle
     float outline = 0.0f;               // thick outlines around panels and controls
     float shadow = 0.0f;                // offset cartoon shadow below panels
     juce::Colour outlineColour {}, onFill {}, lip {};
+    float accentLift = 0.0f;            // brighter accents (for EMUL8R's teal screens)
 };
+
+/** A graph area (waveform, envelope, step bars): an LCD screen in EMUL8R, a display elsewhere. */
+void drawScreen (juce::Graphics&, juce::Rectangle<float>);
+/** Readable text colour on the top bar. */
+juce::Colour headerText() noexcept;
 const FlatStyle& flat() noexcept;
 /** The colour the colour shift starts from: Classic red, or a flat skin's accent. */
 inline juce::Colour baseAccent() noexcept { return isFlat() ? flat().accent : juce::Colour (0xffff2a2a); }

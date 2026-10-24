@@ -319,6 +319,7 @@ SettingsPanel::SettingsPanel (EmulonXProcessor& p) : proc (p)
     skinBox.addItem ("EMURUM  -  FLAT, DEEP BLUE, CYAN LIGHTS", 4);
     skinBox.addItem ("EMUTAL  -  FLAT, SLATE GREY, PURPLE", 5);
     skinBox.addItem ("EMUBLOX  -  CHUNKY TOY BRICKS, BRIGHT", 6);
+    skinBox.addItem ("EMUL8R  -  BRUSHED METAL, TEAL SCREENS", 7);
     skinBox.setTooltip ("The whole look of Emulon X - the colour can be shifted below (not for the XP skins)");
     skinBox.onChange = [this]
     {
@@ -516,7 +517,7 @@ void SettingsPanel::paint (Graphics& g)
         const bool classic = theme::skinAllowsColourShift ((theme::Skin) settings->getSkin());
         line (100 + 16, "COLOUR" + String (classic && std::abs (h) > 0.01f ? "  (" + String (h > 0 ? "+" : "") + String (roundToInt (h)) + " DEG)" : String()),
               classic ? "TURNS THE WHOLE INTERFACE TO ANOTHER COLOUR. DOUBLE-CLICK THE BAR FOR RED."
-                      : "NOT FOR THE XP SKINS - THEY KEEP THEIR OWN COLOURS.");
+                      : "NOT FOR THE XP SKINS AND EMUL8R - THEY KEEP THEIR OWN COLOURS.");
         line (100 + 16 + 106, "QUICK PICKS", "ONE CLICK FOR A CLASSIC COLOUR.");
     }
 

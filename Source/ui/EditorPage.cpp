@@ -129,7 +129,7 @@ void WaveformView::tick()
 void WaveformView::paint (Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
-    theme::drawLed (g, bounds, {});
+    theme::drawScreen (g, bounds);
     {
         Graphics::ScopedSaveState s (g);
         g.reduceClipRegion (getLocalBounds().reduced (2));
@@ -513,8 +513,8 @@ void KeymapView::paint (Graphics& g)
                 g.setGradientFill (ColourGradient::vertical (down ? theme::hue (0xffff3a3a) : Colour (0xff3a373f), r.getY(),   // real piano colours in every skin
                                                              down ? theme::hue (0xff7a0808) : Colour (0xff09080b), r.getBottom()));
             else
-                g.setGradientFill (ColourGradient::vertical (down ? theme::hue (0xffff6a6a) : Colour (0xffcfc9c9), r.getY(),
-                                                             down ? theme::hue (0xffc01818) : Colour (0xfff2eeee), r.getBottom()));
+                g.setGradientFill (ColourGradient::vertical (down ? theme::hue (0xffff6a6a) : Colour (theme::isMetal() ? 0xffc6d6e6 : 0xffcfc9c9), r.getY(),   // EMUL8R: bluish keys
+                                                             down ? theme::hue (0xffc01818) : Colour (theme::isMetal() ? 0xfff1f6fb : 0xfff2eeee), r.getBottom()));
             g.fillRect (r);
             g.setColour (Colours::black);
             g.drawRect (r, 1.0f);

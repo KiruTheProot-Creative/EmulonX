@@ -447,7 +447,7 @@ public:
 
     void paint (Graphics& g) override
     {
-        theme::drawLed (g, getLocalBounds().toFloat(), {});
+        theme::drawScreen (g, getLocalBounds().toFloat());
         const auto* E = env();
         if (E == nullptr)
             return;

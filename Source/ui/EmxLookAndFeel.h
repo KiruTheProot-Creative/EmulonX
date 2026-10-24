@@ -50,5 +50,9 @@ private:
     void flatButton (juce::Graphics&, juce::Button&, bool highlighted, bool down);
     void flatKnob (juce::Graphics&, juce::Rectangle<float>, float startAngle, float endAngle, float pos);
     void flatFader (juce::Graphics&, juce::Rectangle<float> track, float pos);
+    // EMUL8R versions
+    void metalButton (juce::Graphics&, juce::Button&, bool highlighted, bool down);
+    void metalKnob (juce::Graphics&, juce::Rectangle<float>, float startAngle, float endAngle, float pos);
+    void metalFader (juce::Graphics&, juce::Rectangle<float> track, float pos);
 };
 } // namespace emx

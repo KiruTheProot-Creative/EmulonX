@@ -56,7 +56,7 @@ void MasterBar::resized()
 
 void MasterBar::paint (Graphics& g)
 {
-    g.setColour (theme::isXp() ? Colours::white : theme::textMuted);   // XP: on the blue title band
+    g.setColour (theme::headerText());   // readable on the top bar of every skin
     g.setFont (theme::font (8.0f, 700, 0.12f));
     g.drawText ("VOL", labelArea, Justification::centredLeft, false);
 

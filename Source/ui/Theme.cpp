@@ -173,7 +173,43 @@ const FlatStyle emubloxStyle {
     9.0f, 240.0f, 0.01f, 0.0f,
     true, 2.5f, 4.0f, juce::Colour (0xff232527), juce::Colour (0xff00b06f), juce::Colour (0xff7d8994) };
 
-const FlatStyle& styleFor (Skin s) { return s == Skin::emurum ? emurumStyle : s == Skin::emublox ? emubloxStyle : emutalStyle; }
+const FlatStyle emulatorStyle {
+    juce::Colour (0xff4a545d), juce::Colour (0xff353e46), juce::Colour (0xffb4bcc3), juce::Colour (0xff59636c),
+    juce::Colour (0xffa3abb3), juce::Colour (0xfff2f4f5), juce::Colour (0xff6d7780), juce::Colour (0xff15191c),
+    juce::Colour (0xff3e474f), juce::Colour (0xff3fbcae), juce::Colour (0xff0b5f58), juce::Colour (0xffd3d9de),
+    juce::Colour (0xffe2e7ea), juce::Colour (0xff4f5961), juce::Colour (0xff2aa598), juce::Colour (0xff6d7780),
+    7.0f, 215.0f, 0.02f, 0.28f,
+    true, 0.0f, 0.0f, {}, {}, {}, 0.1f };   // light translation: white lists with dark text, like the original
+
+const FlatStyle& styleFor (Skin s)
+{
+    return s == Skin::emurum ? emurumStyle : s == Skin::emublox ? emubloxStyle : s == Skin::emulator ? emulatorStyle : emutalStyle;
+}
+
+/** Fine horizontal streaks, like brushed aluminium (made once, tiled over panels). */
+const juce::Image& brushedMetal()
+{
+    static const juce::Image img = []
+    {
+        juce::Image im (juce::Image::ARGB, 512, 256, true);
+        juce::Random rnd (0x5eed);
+        juce::Image::BitmapData d (im, juce::Image::BitmapData::writeOnly);
+        for (int y = 0; y < im.getHeight(); ++y)
+        {
+            const float rowBase = rnd.nextFloat() * 2.0f - 1.0f;
+            float streak = 0.0f;
+            for (int x = 0; x < im.getWidth(); ++x)
+            {
+                streak = streak * 0.97f + (rnd.nextFloat() * 2.0f - 1.0f) * 0.03f;   // long, soft streaks
+                const float v = juce::jlimit (-1.0f, 1.0f, rowBase * 0.6f + streak * 6.0f);
+                const auto a = (juce::uint8) juce::jlimit (0, 255, (int) (std::abs (v) * 70.0f));
+                d.setPixelColour (x, y, (v > 0 ? juce::Colours::white : juce::Colours::black).withAlpha (a));
+            }
+        }
+        return im;
+    }();
+    return img;
+}
 
 float labHueOf (juce::Colour c)
 {
@@ -209,6 +245,8 @@ juce::Colour flatMap (juce::Colour c)
         const bool keep = h > 45.0f && h < 150.0f;
         h += keep ? currentShift : flatOffset();
         C = juce::jmin (0.22f, C);
+        if (st.accentLift > 0.0f && L >= 0.45f)
+            L = juce::jmin (0.9f, L + st.accentLift);
         if (st.light && L < 0.45f)   // dark red fills become light tints
             L = 0.94f - L * 0.5f;
         else if (st.light && L > 0.75f)   // pale tints were text on dark fills: make them dark
@@ -356,6 +394,7 @@ void applyPalette()
         case Skin::emurum:
         case Skin::emutal:
         case Skin::emublox:
+        case Skin::emulator:
         {
             const auto& st = flat();
             red = rotateHue (st.accent, currentShift);
@@ -466,6 +505,28 @@ void drawLogo (juce::Graphics& g, juce::Rectangle<float> area, juce::RectanglePl
 
 void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 {
+    if (isMetal())
+    {
+        // brushed aluminium with a light top edge and a dark outline
+        juce::Path p;
+        p.addRoundedRectangle (r, 8.0f);
+        juce::DropShadow (juce::Colours::black.withAlpha (0.45f), 6, { 0, 2 }).drawForPath (g, p);
+        juce::ColourGradient grad (juce::Colour (0xffc9d0d6), 0.0f, r.getY(), juce::Colour (0xff98a1a9), 0.0f, r.getBottom(), false);
+        grad.addColour (0.5, juce::Colour (0xffb3bbc2));
+        g.setGradientFill (grad);
+        g.fillPath (p);
+        {
+            juce::Graphics::ScopedSaveState state (g);
+            g.reduceClipRegion (p);
+            g.setTiledImageFill (brushedMetal(), 0, 0, 0.35f);
+            g.fillPath (p);
+        }
+        g.setColour (juce::Colours::white.withAlpha (0.7f));
+        g.drawLine (r.getX() + 8.0f, r.getY() + 1.5f, r.getRight() - 8.0f, r.getY() + 1.5f, 1.0f);
+        g.setColour (juce::Colour (0xff4f5961));
+        g.strokePath (p, juce::PathStrokeType (1.2f));
+        return;
+    }
     if (isFlat())
     {
         const auto& st = flat();
@@ -513,6 +574,17 @@ void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 
 void drawInset (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 {
+    if (isMetal())
+    {
+        // a slightly darker recess in the metal
+        g.setGradientFill (juce::ColourGradient::vertical (juce::Colour (0xff8f98a0), r.getY(), juce::Colour (0xffaab2b9), r.getBottom()));
+        g.fillRoundedRectangle (r, 5.0f);
+        g.setColour (juce::Colour (0xff5f6971));
+        g.drawRoundedRectangle (r.reduced (0.5f), 5.0f, 1.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.45f));
+        g.drawLine (r.getX() + 5.0f, r.getBottom() - 0.5f, r.getRight() - 5.0f, r.getBottom() - 0.5f, 1.0f);
+        return;
+    }
     if (isFlat())
     {
         g.setColour (flat().inset);
@@ -542,6 +614,23 @@ void drawInset (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 void drawLed (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& text, float textHeight,
               juce::Justification just, juce::Colour textColour)
 {
+    if (isMetal())
+    {
+        // a light value field with a thin dark border, black text
+        g.setColour (juce::Colour (0xfff2f4f5));
+        g.fillRoundedRectangle (r, 2.0f);
+        g.setColour (juce::Colour (0xff59636c));
+        g.drawRoundedRectangle (r.reduced (0.5f), 2.0f, 1.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.12f));
+        g.fillRect (r.getX() + 1.0f, r.getY() + 1.0f, r.getWidth() - 2.0f, 1.0f);
+        if (text.isNotEmpty())
+        {
+            g.setColour (textColour == red ? ledText : textColour);
+            g.setFont (font (textHeight, 500, 0.02f));
+            g.drawFittedText (text, r.reduced (5.0f, 0.0f).toNearestInt(), just, 1, 0.7f);
+        }
+        return;
+    }
     if (isFlat())
     {
         // a flat value field: dark, thin edge, plain text
@@ -636,6 +725,28 @@ juce::Rectangle<float> drawHeading (juce::Graphics& g, juce::Rectangle<float> in
     {
         // small caps title; EMURUM marks it with a little accent light, EMUBLOX makes it big and bold
         const bool emurum = currentSkin == Skin::emurum;
+        if (isMetal())
+        {
+            // dark engraved label, like on hardware
+            const auto f = font (9.5f, 700, 0.08f);
+            const auto up = title.toUpperCase();
+            g.setFont (f);
+            g.setColour (juce::Colours::white.withAlpha (0.5f));
+            g.drawText (up, row.translated (0.0f, 1.0f), juce::Justification::centredLeft, false);
+            g.setColour (juce::Colour (0xff1b2126));
+            g.drawText (up, row, juce::Justification::centredLeft, false);
+            if (subtitle.isNotEmpty())
+            {
+                juce::GlyphArrangement ga;
+                ga.addLineOfText (f, up, 0, 0);
+                const auto w = ga.getBoundingBox (0, -1, true).getWidth();
+                g.setColour (textMuted);
+                g.setFont (font (8.0f, 500, 0.05f));
+                g.drawText (subtitle.toUpperCase(), row.withTrimmedLeft (w + 8.0f), juce::Justification::centredLeft, true);
+            }
+            inner.removeFromTop (6.0f);
+            return inner;
+        }
         if (currentSkin == Skin::emublox)
         {
             const auto f = font (11.5f, 700, 0.04f);
@@ -723,6 +834,19 @@ juce::Rectangle<float> drawHeading (juce::Graphics& g, juce::Rectangle<float> in
 
 void drawBackground (juce::Graphics& g, juce::Rectangle<int> bounds, float headerBottom)
 {
+    if (isMetal())
+    {
+        g.setGradientFill (juce::ColourGradient::vertical (juce::Colour (0xff56616a), (float) bounds.getY(), juce::Colour (0xff3d464e), (float) bounds.getBottom()));
+        g.fillRect (bounds);
+        const auto bar = bounds.toFloat().withHeight (headerBottom + 8.0f);
+        g.setGradientFill (juce::ColourGradient::vertical (juce::Colour (0xff4a555f), bar.getY(), juce::Colour (0xff2b333a), bar.getBottom()));
+        g.fillRect (bar);
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.fillRect (bar.getX(), bar.getBottom(), bar.getWidth(), 1.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.12f));
+        g.fillRect (bar.getX(), bar.getBottom() + 1.0f, bar.getWidth(), 1.0f);
+        return;
+    }
     if (isFlat())
     {
         const auto& st = flat();
@@ -774,6 +898,12 @@ void drawBackground (juce::Graphics& g, juce::Rectangle<int> bounds, float heade
 
 void drawFrame (juce::Graphics& g, juce::Rectangle<int> bounds)
 {
+    if (isMetal())
+    {
+        g.setColour (juce::Colour (0xff20262b));
+        g.drawRect (bounds.toFloat(), 2.0f);
+        return;
+    }
     if (isFlat())
     {
         g.setColour (flat().outline > 0.0f ? flat().outlineColour : flat().panelEdge);
@@ -793,6 +923,36 @@ void drawFrame (juce::Graphics& g, juce::Rectangle<int> bounds)
     g.drawRect (r, 4.0f);
     g.setColour (light ? juce::Colour (0xff166aee) : juce::Colour (0xff22385e));
     g.drawRect (r.reduced (4.0f), 1.0f);
+}
+
+void drawScreen (juce::Graphics& g, juce::Rectangle<float> r)
+{
+    if (! isMetal())
+    {
+        drawLed (g, r, {});
+        return;
+    }
+    // a teal LCD with a fine grid and a dark bezel
+    g.setGradientFill (juce::ColourGradient::vertical (juce::Colour (0xff3c968d), r.getY(), juce::Colour (0xff2a7870), r.getBottom()));
+    g.fillRect (r);
+    {
+        juce::Graphics::ScopedSaveState state (g);
+        g.reduceClipRegion (r.toNearestInt());
+        g.setColour (juce::Colours::white.withAlpha (0.07f));
+        for (float x = r.getX() + 12.0f; x < r.getRight(); x += 12.0f)
+            g.fillRect (x, r.getY(), 1.0f, r.getHeight());
+        for (float y = r.getY() + 12.0f; y < r.getBottom(); y += 12.0f)
+            g.fillRect (r.getX(), y, r.getWidth(), 1.0f);
+        g.setGradientFill (juce::ColourGradient::vertical (juce::Colours::black.withAlpha (0.35f), r.getY(), juce::Colours::transparentBlack, r.getY() + 6.0f));
+        g.fillRect (r);
+    }
+    g.setColour (juce::Colour (0xff1b2a2b));
+    g.drawRect (r, 1.5f);
+}
+
+juce::Colour headerText() noexcept
+{
+    return isXp() || isMetal() ? juce::Colours::white.withAlpha (0.9f) : textMuted;
 }
 
 void drawNineSlice (juce::Graphics& g, const juce::Image& img, juce::Rectangle<int> d, int s, int b)

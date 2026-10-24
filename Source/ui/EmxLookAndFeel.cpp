@@ -68,6 +68,16 @@ void EmxLookAndFeel::refreshColours()
         setColour (TextEditor::focusedOutlineColourId, theme::red);
         setColour (TextEditor::highlightColourId, theme::red.withAlpha (0.35f));
     }
+    if (theme::isMetal())
+    {
+        setColour (TextButton::textColourOffId, Colour (0xff15191c));
+        setColour (TextButton::textColourOnId, Colours::white);
+        setColour (PopupMenu::backgroundColourId, Colour (0xffeef0f2));
+        setColour (PopupMenu::textColourId, Colour (0xff15191c));
+        setColour (PopupMenu::highlightedBackgroundColourId, Colour (0xff2a9a8f));
+        setColour (PopupMenu::highlightedTextColourId, Colours::white);
+        setColour (HyperlinkButton::textColourId, Colour (0xff0b5f58));
+    }
 }
 
 //== Knob: your knob artwork + a glowing pointer ================================
@@ -79,6 +89,11 @@ void EmxLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int h, 
     if (theme::isXp())
     {
         xpKnob (g, r, startAngle, endAngle, pos);
+        return;
+    }
+    if (theme::isMetal())
+    {
+        metalKnob (g, r, startAngle, endAngle, pos);
         return;
     }
     if (theme::isFlat())
@@ -124,6 +139,11 @@ void EmxLookAndFeel::drawLinearSlider (Graphics& g, int x, int y, int w, int h, 
         xpFader (g, track, pos);
         return;
     }
+    if (theme::isMetal())
+    {
+        metalFader (g, track, pos);
+        return;
+    }
     if (theme::isFlat())
     {
         flatFader (g, track, pos);
@@ -149,6 +169,11 @@ void EmxLookAndFeel::drawButtonBackground (Graphics& g, Button& b, const Colour&
     if (theme::isXp())
     {
         xpButton (g, b, highlighted, down);
+        return;
+    }
+    if (theme::isMetal())
+    {
+        metalButton (g, b, highlighted, down);
         return;
     }
     if (theme::isFlat())
@@ -185,6 +210,13 @@ Font EmxLookAndFeel::getTextButtonFont (TextButton&, int buttonHeight)
 //== Menus =======================================================================
 void EmxLookAndFeel::drawPopupMenuBackground (Graphics& g, int w, int h)
 {
+    if (theme::isMetal())
+    {
+        g.fillAll (Colour (0xffeef0f2));
+        g.setColour (Colour (0xff59636c));
+        g.drawRect (0, 0, w, h);
+        return;
+    }
     if (theme::isFlat())
     {
         g.fillAll (theme::flat().panel);
@@ -224,6 +256,21 @@ void EmxLookAndFeel::drawComboBox (Graphics& g, int w, int h, bool, int, int, in
 {
     auto r = Rectangle<float> (0, 0, (float) w, (float) h);
     theme::drawLed (g, r, {});
+    if (theme::isMetal())
+    {
+        // a small metal box with a dark arrow
+        auto btn = r.removeFromRight ((float) h).reduced (2.0f);
+        g.setGradientFill (ColourGradient::vertical (Colour (box.isPopupActive() ? 0xffb9c1c8 : 0xffe9edf0), btn.getY(), Colour (0xffa9b1b8), btn.getBottom()));
+        g.fillRoundedRectangle (btn, 2.0f);
+        g.setColour (Colour (0xff59636c));
+        g.drawRoundedRectangle (btn.reduced (0.5f), 2.0f, 1.0f);
+        const auto a = btn.withSizeKeepingCentre (7.0f, 4.0f);
+        Path arrow;
+        arrow.addTriangle (a.getX(), a.getY(), a.getRight(), a.getY(), a.getCentreX(), a.getBottom());
+        g.setColour (box.isEnabled() ? Colour (0xff1b2126) : Colour (0xff8a939b));
+        g.fillPath (arrow);
+        return;
+    }
     if (theme::isFlat())
     {
         // a thin chevron
@@ -293,10 +340,10 @@ PopupMenu::Options EmxLookAndFeel::getOptionsForComboBoxPopupMenu (ComboBox& box
 void EmxLookAndFeel::drawTreeviewPlusMinusBox (Graphics& g, const Rectangle<float>& area, Colour, bool isOpen, bool over)
 {
     const auto c = area.getCentre();
-    if (theme::isXp())
+    if (theme::isXp() || theme::isMetal())
     {
         // [+] / [-] boxes
-        const bool light = theme::getSkin() == theme::Skin::xpLight;
+        const bool light = theme::getSkin() == theme::Skin::xpLight || theme::isMetal();
         const auto box = Rectangle<float> (9.0f, 9.0f).withCentre (c);
         g.setGradientFill (ColourGradient::vertical (light ? Colours::white : Colour (0xff3a3a3a), box.getY(),
                                                      light ? Colour (0xffd7d4c6) : Colour (0xff262626), box.getBottom()));
@@ -343,7 +390,7 @@ void EmxLookAndFeel::drawScrollbar (Graphics& g, ScrollBar&, int x, int y, int w
 //== Tooltips: dark in Classic, pale yellow in XP ===============================
 Rectangle<int> EmxLookAndFeel::getTooltipBounds (const String& text, Point<int> screenPos, Rectangle<int> parentArea)
 {
-    if (! theme::isXp() && ! theme::isFlat())
+    if (! theme::isXp() && ! theme::isFlat())   // EMUL8R counts as flat here
         return LookAndFeel_V4::getTooltipBounds (text, screenPos, parentArea);
     const auto f = theme::font (11.0f, 500);
     GlyphArrangement ga;
@@ -356,6 +403,16 @@ Rectangle<int> EmxLookAndFeel::getTooltipBounds (const String& text, Point<int> 
 
 void EmxLookAndFeel::drawTooltip (Graphics& g, const String& text, int width, int height)
 {
+    if (theme::isMetal())
+    {
+        g.fillAll (Colour (0xffffffe1));   // the pale yellow of the era
+        g.setColour (Colour (0xff767676));
+        g.drawRect (0, 0, width, height);
+        g.setColour (Colours::black);
+        g.setFont (theme::font (9.5f, 500));
+        g.drawFittedText (text, Rectangle<int> (width, height).reduced (6, 2), Justification::centredLeft, 2);
+        return;
+    }
     if (theme::isFlat())
     {
         const auto& st = theme::flat();
@@ -681,5 +738,86 @@ void EmxLookAndFeel::flatFader (Graphics& g, Rectangle<float> track, float pos)
     g.fillRoundedRectangle (thumb, 2.5f);
     g.setColour (st.bg);
     g.drawRoundedRectangle (thumb, 2.5f, 1.0f);
+}
+//== EMUL8R drawing =============================================================
+void EmxLookAndFeel::metalButton (Graphics& g, Button& b, bool highlighted, bool down)
+{
+    const bool on = b.getToggleState(), enabled = b.isEnabled();
+    auto r = b.getLocalBounds().toFloat().reduced (0.5f, 1.5f);
+    if (b.getProperties().contains ("emxTab"))
+    {
+        // dark blue-grey tab strip; the active tab glows teal
+        g.setGradientFill (on ? ColourGradient::vertical (Colour (0xff5fd3c6), r.getY(), Colour (0xff1f8378), r.getBottom())
+                              : ColourGradient::vertical (Colour (highlighted ? 0xff6a7680 : 0xff5a6670), r.getY(), Colour (0xff3a444d), r.getBottom()));
+        g.fillRoundedRectangle (r, 3.0f);
+        g.setColour (Colours::white.withAlpha (on ? 0.45f : 0.18f));
+        g.fillRect (r.getX() + 3.0f, r.getY() + 1.0f, r.getWidth() - 6.0f, 1.0f);
+        g.setColour (Colour (0xff1b2126));
+        g.drawRoundedRectangle (r, 3.0f, 1.0f);
+        b.setColour (TextButton::textColourOffId, Colour (0xffe3e9ee));
+        b.setColour (TextButton::textColourOnId, Colours::white);
+        return;
+    }
+    const float rad = jmin (r.getHeight() * 0.5f, 9.0f);   // metal pill
+    if (down)
+        r = r.translated (0.0f, 0.5f);
+    if (on && enabled)
+        g.setGradientFill (ColourGradient::vertical (Colour (0xff74e0d4), r.getY(), Colour (0xff23897e), r.getBottom()));
+    else if (! enabled)
+        g.setGradientFill (ColourGradient::vertical (Colour (0xffd7dce0), r.getY(), Colour (0xffbcc3c9), r.getBottom()));
+    else
+        g.setGradientFill (ColourGradient::vertical (Colour (down ? 0xffb7bfc6 : highlighted ? 0xfff7f9fa : 0xffedf0f2), r.getY(),
+                                                     Colour (down ? 0xffd9dee2 : 0xffaab2b9), r.getBottom()));
+    g.fillRoundedRectangle (r, rad);
+    g.setColour (Colours::white.withAlpha (on ? 0.4f : 0.8f));
+    g.fillRoundedRectangle (r.reduced (rad * 0.6f, 0.0f).withHeight (1.2f).translated (0.0f, 1.2f), 0.6f);
+    g.setColour (enabled ? (on ? Colour (0xff165c55) : Colour (0xff4f5961)) : Colour (0xff8a939b));
+    g.drawRoundedRectangle (r, rad, 1.0f);
+}
+
+void EmxLookAndFeel::metalKnob (Graphics& g, Rectangle<float> r, float startAngle, float endAngle, float pos)
+{
+    const auto c = r.getCentre();
+    const float rad = r.getWidth() * 0.5f;
+    const float angle = startAngle + pos * (endAngle - startAngle);
+    // dark collar
+    const auto collar = r.reduced (rad * 0.08f);
+    g.setColour (Colours::black.withAlpha (0.3f));
+    g.fillEllipse (collar.translated (0.0f, 1.5f));
+    g.setGradientFill (ColourGradient::vertical (Colour (0xff4a535b), collar.getY(), Colour (0xff1c2227), collar.getBottom()));
+    g.fillEllipse (collar);
+    // glossy teal cap
+    const auto cap = r.reduced (rad * 0.2f);
+    g.setGradientFill (ColourGradient (Colour (0xff8beee2), cap.getX() + cap.getWidth() * 0.3f, cap.getY() + cap.getHeight() * 0.25f,
+                                       Colour (0xff15695f), cap.getRight(), cap.getBottom(), true));
+    g.fillEllipse (cap);
+    g.setColour (Colours::white.withAlpha (0.35f));
+    g.fillEllipse (cap.getX() + cap.getWidth() * 0.18f, cap.getY() + cap.getHeight() * 0.1f, cap.getWidth() * 0.45f, cap.getHeight() * 0.3f);
+    g.setColour (Colour (0xff0f3f3a));
+    g.drawEllipse (cap, 1.0f);
+    // white marker near the edge
+    const float mr = cap.getWidth() * 0.36f;
+    const Point<float> m (c.x + mr * std::sin (angle), c.y - mr * std::cos (angle));
+    g.setColour (Colours::white);
+    g.fillEllipse (m.x - 2.2f, m.y - 2.2f, 4.4f, 4.4f);
+    juce::ignoreUnused (endAngle);
+}
+
+void EmxLookAndFeel::metalFader (Graphics& g, Rectangle<float> track, float pos)
+{
+    auto slot = track.withSizeKeepingCentre (5.0f, track.getHeight() - 6.0f);
+    g.setColour (Colour (0xff20272c));
+    g.fillRoundedRectangle (slot, 2.5f);
+    g.setColour (Colours::white.withAlpha (0.4f));
+    g.drawLine (slot.getRight() + 0.5f, slot.getY() + 2.0f, slot.getRight() + 0.5f, slot.getBottom() - 2.0f, 1.0f);
+    auto cap = Rectangle<float> (track.getCentreX() - 12.0f, pos - 7.0f, 24.0f, 14.0f);
+    g.setColour (Colours::black.withAlpha (0.3f));
+    g.fillRoundedRectangle (cap.translated (0.0f, 1.5f), 2.5f);
+    g.setGradientFill (ColourGradient::vertical (Colour (0xfff0f3f5), cap.getY(), Colour (0xff9aa3ab), cap.getBottom()));
+    g.fillRoundedRectangle (cap, 2.5f);
+    g.setColour (Colour (0xff4f5961));
+    g.drawRoundedRectangle (cap, 2.5f, 1.0f);
+    g.setColour (Colour (0xff2aa598));
+    g.fillRect (cap.reduced (4.0f, 0.0f).withSizeKeepingCentre (cap.getWidth() - 8.0f, 2.0f));
 }
 } // namespace emx
