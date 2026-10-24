@@ -129,7 +129,7 @@ void EmulonXEditor::changeListenerCallback (ChangeBroadcaster*)
 bool EmulonXEditor::applyHue()
 {
     const auto skin = (theme::Skin) settings->getSkin();
-    const float h = skin == theme::Skin::classic ? settings->getHueShift() : 0.0f;   // hue shift is Classic only
+    const float h = theme::skinAllowsColourShift (skin) ? settings->getHueShift() : 0.0f;   // not for the XP skins
     if (std::abs (h - appliedHue) < 0.01f && skin == appliedSkin)
         return false;
     theme::setSkin (skin);    // shared by every open Emulon X window

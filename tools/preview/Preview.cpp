@@ -526,7 +526,7 @@ int main (int argc, char** argv)
         editor.showPage (0);
 
         // Skins: EMULON XP light and dark on every page
-        for (auto [skin, sname] : { std::pair<int, const char*> { 1, "xp-light" }, { 2, "xp-dark" } })
+        for (auto [skin, sname] : { std::pair<int, const char*> { 1, "xp-light" }, { 2, "xp-dark" }, { 3, "emurum" }, { 4, "emutal" } })
         {
             st->setSkin (skin);
             MessageManager::getInstance()->runDispatchLoopUntil (80);
@@ -540,6 +540,10 @@ int main (int argc, char** argv)
             save (String ("preview-") + sname + "-settings");
             editor.showSettings (false);
         }
+        st->setHueShift (-60.0f);   // the colour shift works on EMUTAL too
+        MessageManager::getInstance()->runDispatchLoopUntil (80);
+        save ("preview-emutal-shifted");
+        st->setHueShift (0.0f);
         st->setSkin (0);
         MessageManager::getInstance()->runDispatchLoopUntil (80);
     }

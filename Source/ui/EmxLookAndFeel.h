@@ -46,5 +46,9 @@ private:
     void xpButton (juce::Graphics&, juce::Button&, bool highlighted, bool down);
     void xpKnob (juce::Graphics&, juce::Rectangle<float>, float startAngle, float endAngle, float pos);
     void xpFader (juce::Graphics&, juce::Rectangle<float> track, float pos);
+    // EMURUM / EMUTAL versions
+    void flatButton (juce::Graphics&, juce::Button&, bool highlighted, bool down);
+    void flatKnob (juce::Graphics&, juce::Rectangle<float>, float startAngle, float endAngle, float pos);
+    void flatFader (juce::Graphics&, juce::Rectangle<float> track, float pos);
 };
 } // namespace emx

@@ -21,12 +21,27 @@ inline juce::Colour edge       { 0xff3a363d };
 inline juce::Colour highlight  { 0xff4a444f };
 
 //== Skins =========================================================================
-// EMULON CLASSIC is the red metal design (hue shift applies); EMULON XP is a light or dark
-// homage to early-2000s desktops. Every helper below draws in the current skin.
-enum class Skin { classic, xpLight, xpDark };
+// EMULON CLASSIC is the red metal design; EMULON XP is a light or dark homage to early-2000s
+// desktops; EMURUM and EMUTAL are flat, modern synth styles. Every helper below draws in the
+// current skin. The colour shift works on Classic, EMURUM and EMUTAL.
+enum class Skin { classic, xpLight, xpDark, emurum, emutal };
 void setSkin (Skin);   // message thread only
 Skin getSkin() noexcept;
-inline bool isXp() noexcept { return getSkin() != Skin::classic; }
+inline bool isXp() noexcept   { const auto s = getSkin(); return s == Skin::xpLight || s == Skin::xpDark; }
+inline bool isFlat() noexcept { const auto s = getSkin(); return s == Skin::emurum || s == Skin::emutal; }
+inline bool skinAllowsColourShift (Skin s) noexcept { return s == Skin::classic || s == Skin::emurum || s == Skin::emutal; }
+
+/** The flat skins' surfaces (valid while isFlat()). */
+struct FlatStyle
+{
+    juce::Colour bg, topBar, panel, panelEdge, inset, display, displayEdge, text, muted, accent, list,
+                 button, buttonHover, buttonEdge, knobBody, knobTrack;
+    float radius;
+    float neutralHue, neutralChroma, neutralLift;   // how the red design's greys are translated
+};
+const FlatStyle& flat() noexcept;
+/** The colour the colour shift starts from: Classic red, or a flat skin's accent. */
+inline juce::Colour baseAccent() noexcept { return isFlat() ? flat().accent : juce::Colour (0xffff2a2a); }
 
 inline juce::Colour textStrong { 0xffffffff };   // titles and labels on panels (white in Classic)
 inline juce::Colour ledText    { 0xffff2a2a };   // text in LED displays / text fields

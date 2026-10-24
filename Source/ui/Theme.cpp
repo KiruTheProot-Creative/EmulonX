@@ -131,6 +131,59 @@ juce::Colour xpMap (juce::Colour c, bool light)
                                         toSrgb (juce::jlimit (0.0f, 1.0f, b)), c.getFloatAlpha());
 }
 
+const FlatStyle emurumStyle {
+    juce::Colour (0xff13161b), juce::Colour (0xff0d0f13), juce::Colour (0xff20252d), juce::Colour (0xff2f3640),
+    juce::Colour (0xff191d23), juce::Colour (0xff0f1216), juce::Colour (0xff2c333d), juce::Colour (0xffe6ebf0),
+    juce::Colour (0xff8a95a4), juce::Colour (0xff33b5ff), juce::Colour (0xff9ad8ff), juce::Colour (0xff29303a),
+    juce::Colour (0xff323a46), juce::Colour (0xff0e1115), juce::Colour (0xff3b4350), juce::Colour (0xff353d48),
+    3.0f, 250.0f, 0.014f, 0.15f };
+const FlatStyle emutalStyle {
+    juce::Colour (0xff1d1f23), juce::Colour (0xff16181b), juce::Colour (0xff2a2d33), juce::Colour (0xff383c43),
+    juce::Colour (0xff23262b), juce::Colour (0xff1a1c20), juce::Colour (0xff3a3e46), juce::Colour (0xffe8e8ea),
+    juce::Colour (0xff9ba1aa), juce::Colour (0xffaa88ff), juce::Colour (0xffc9b8ff), juce::Colour (0xff363a41),
+    juce::Colour (0xff42464e), juce::Colour (0xff24272c), juce::Colour (0xff2f3238), juce::Colour (0xff484c54),
+    6.0f, 255.0f, 0.008f, 0.17f };
+
+float labHueOf (juce::Colour c)
+{
+    const auto l = linearToLab (toLinear (c.getFloatRed()), toLinear (c.getFloatGreen()), toLinear (c.getFloatBlue()));
+    return juce::radiansToDegrees (std::atan2 (l.b, l.a));
+}
+
+/** How far the flat skin's accent (plus the colour shift) is from the classic red. */
+float flatOffset()
+{
+    const auto& st = currentSkin == Skin::emurum ? emurumStyle : emutalStyle;
+    return labHueOf (st.accent) - labHueOf (juce::Colour (0xffff2a2a)) + currentShift;
+}
+
+/** Translates a colour of the red design into a flat skin: reds become the accent colour,
+    greys become the skin's cool greys; orange / yellow / green keep their hue (plus the shift). */
+juce::Colour flatMap (juce::Colour c)
+{
+    const auto& st = currentSkin == Skin::emurum ? emurumStyle : emutalStyle;
+    auto lab = linearToLab (toLinear (c.getFloatRed()), toLinear (c.getFloatGreen()), toLinear (c.getFloatBlue()));
+    const float chroma = std::hypot (lab.a, lab.b);
+    float h = juce::radiansToDegrees (std::atan2 (lab.b, lab.a)), L = lab.L, C = chroma;
+    if (chroma < 0.035f)
+    {
+        L = st.neutralLift + L * (1.0f - st.neutralLift) * 0.97f;
+        h = st.neutralHue;
+        C = st.neutralChroma;
+    }
+    else
+    {
+        const bool keep = h > 45.0f && h < 150.0f;
+        h += keep ? currentShift : flatOffset();
+        C = juce::jmin (0.22f, C);
+    }
+    float rr, gg, bb;
+    const float rad = juce::degreesToRadians (h);
+    labToLinear ({ L, C * std::cos (rad), C * std::sin (rad) }, rr, gg, bb);
+    return juce::Colour::fromFloatRGBA (toSrgb (juce::jlimit (0.0f, 1.0f, rr)), toSrgb (juce::jlimit (0.0f, 1.0f, gg)),
+                                        toSrgb (juce::jlimit (0.0f, 1.0f, bb)), c.getFloatAlpha());
+}
+
 void applyPalette();
 
 struct BaseColours
@@ -231,12 +284,15 @@ juce::Colour hue (juce::uint32 argb)
     if (auto it = hueCache.find (argb); it != hueCache.end())
         return juce::Colour (it->second);
     const auto c = currentSkin == Skin::classic ? rotateHue (juce::Colour (argb), currentShift)
+                 : isFlat()                     ? flatMap (juce::Colour (argb))
                                                  : xpMap (juce::Colour (argb), currentSkin == Skin::xpLight);
     hueCache[argb] = c.getARGB();
     return c;
 }
 
 Skin getSkin() noexcept { return currentSkin; }
+
+const FlatStyle& flat() noexcept { return currentSkin == Skin::emurum ? emurumStyle : emutalStyle; }
 
 void setSkin (Skin skin)
 {
@@ -260,6 +316,18 @@ void applyPalette()
             ledText = red;
             windowBg = juce::Colours::black;
             break;
+        case Skin::emurum:
+        case Skin::emutal:
+        {
+            const auto& st = flat();
+            red = rotateHue (st.accent, currentShift);
+            redDim = red.brighter (0.12f);
+            redDark = red.interpolatedWith (st.panel, 0.65f);
+            textCol = st.text;  textMuted = st.muted;  listText = rotateHue (st.list, currentShift);
+            ledBg = st.display;  edge = st.displayEdge;  highlight = st.panelEdge;
+            textStrong = st.text;  ledText = st.text;  windowBg = st.bg;
+            break;
+        }
         case Skin::xpLight:
             red = juce::Colour (0xff2f6bd9);  redDim = juce::Colour (0xff3d7ee6);  redDark = juce::Colour (0xffa9c1ec);
             textCol = juce::Colour (0xff101010);  textMuted = juce::Colour (0xff57564f);  listText = juce::Colour (0xff0b3a9e);
@@ -299,14 +367,17 @@ juce::Image image (Img which)
         case Img::slider:     src = juce::ImageCache::getFromMemory (EmxAssets::slider_png, EmxAssets::slider_pngSize); break;
         case Img::logo:       src = juce::ImageCache::getFromMemory (EmxAssets::logo_png, EmxAssets::logo_pngSize); break;
     }
-    if (currentSkin != Skin::classic || std::abs (currentShift) < 0.01f || ! src.isValid())
+    if (isXp() || ! src.isValid())
+        return src;
+    const float deg = isFlat() ? flatOffset() : currentShift;
+    if (std::abs (deg) < 0.01f)
         return src;
 
     struct Tinted { float shift = 0.0f; juce::Image img; };
     static Tinted tinted[5];
     auto& t = tinted[(int) which];
-    if (! t.img.isValid() || std::abs (t.shift - currentShift) > 0.01f)
-        t = { currentShift, recolour (src, currentShift) };
+    if (! t.img.isValid() || std::abs (t.shift - deg) > 0.01f)
+        t = { deg, recolour (src, deg) };
     return t.img;
 }
 
@@ -354,6 +425,15 @@ void drawLogo (juce::Graphics& g, juce::Rectangle<float> area, juce::RectanglePl
 
 void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 {
+    if (isFlat())
+    {
+        const auto& st = flat();
+        g.setColour (st.panel);
+        g.fillRoundedRectangle (r, st.radius);
+        g.setColour (st.panelEdge);
+        g.drawRoundedRectangle (r.reduced (0.5f), st.radius, 1.0f);
+        return;
+    }
     if (isXp())
     {
         // a flat window pane with a thin rounded border
@@ -381,6 +461,12 @@ void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 
 void drawInset (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 {
+    if (isFlat())
+    {
+        g.setColour (flat().inset);
+        g.fillRoundedRectangle (r, juce::jmax (2.0f, flat().radius - 1.0f));
+        return;
+    }
     if (isXp())
     {
         const bool light = currentSkin == Skin::xpLight;
@@ -399,6 +485,23 @@ void drawInset (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 void drawLed (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& text, float textHeight,
               juce::Justification just, juce::Colour textColour)
 {
+    if (isFlat())
+    {
+        // a flat value field: dark, thin edge, plain text
+        const auto& st = flat();
+        const float rad = juce::jmin (st.radius, 4.0f);
+        g.setColour (st.display);
+        g.fillRoundedRectangle (r, rad);
+        g.setColour (st.displayEdge);
+        g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
+        if (text.isNotEmpty())
+        {
+            g.setColour (textColour == red ? ledText : textColour);
+            g.setFont (font (textHeight, 500, 0.03f));
+            g.drawFittedText (text, r.reduced (5.0f, 0.0f).toNearestInt(), just, 1, 0.7f);
+        }
+        return;
+    }
     if (isXp())
     {
         // a plain text field: white (or dark) box, blue-grey border, no glow
@@ -441,6 +544,14 @@ void drawLed (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& t
 void drawGlowText (juce::Graphics& g, const juce::String& text, juce::Rectangle<float> r, const juce::Font& f,
                    juce::Colour colour, juce::Colour glow, int glowRadius, juce::Justification just)
 {
+    if (isFlat())
+    {
+        g.setColour (colour == juce::Colours::white ? textStrong : colour);
+        g.setFont (f);
+        g.drawFittedText (text, r.toNearestInt(), just, 1, 0.7f);
+        juce::ignoreUnused (glow, glowRadius);
+        return;
+    }
     if (isXp())
     {
         // no glow; white text means "strong text" (black on the light skin)
@@ -463,6 +574,34 @@ juce::Rectangle<float> drawHeading (juce::Graphics& g, juce::Rectangle<float> in
                                     const juce::String& title, const juce::String& subtitle)
 {
     auto row = inner.removeFromTop (16.0f);
+    if (isFlat())
+    {
+        // small caps title; EMURUM marks it with a little accent light
+        const bool emurum = currentSkin == Skin::emurum;
+        auto t = row;
+        if (emurum)
+        {
+            g.setColour (red);
+            g.fillRoundedRectangle (t.removeFromLeft (6.0f).withSizeKeepingCentre (5.0f, 5.0f), 1.0f);
+            t.removeFromLeft (6.0f);
+        }
+        const auto f = font (9.5f, 700, 0.1f);
+        g.setColour (emurum ? textStrong : textMuted);
+        g.setFont (f);
+        const auto up = title.toUpperCase();
+        g.drawText (up, t, juce::Justification::centredLeft, false);
+        if (subtitle.isNotEmpty())
+        {
+            juce::GlyphArrangement ga;
+            ga.addLineOfText (f, up, 0, 0);
+            const auto w = ga.getBoundingBox (0, -1, true).getWidth();
+            g.setColour (textMuted.withAlpha (0.8f));
+            g.setFont (font (8.0f, 500, 0.06f));
+            g.drawText (subtitle.toUpperCase(), t.withTrimmedLeft (w + 8.0f), juce::Justification::centredLeft, true);
+        }
+        inner.removeFromTop (6.0f);
+        return inner;
+    }
     if (isXp())
     {
         // bold blue title in normal case, a fading rule underneath (like a task pane header)
@@ -507,6 +646,18 @@ juce::Rectangle<float> drawHeading (juce::Graphics& g, juce::Rectangle<float> in
 
 void drawBackground (juce::Graphics& g, juce::Rectangle<int> bounds, float headerBottom)
 {
+    if (isFlat())
+    {
+        const auto& st = flat();
+        g.setColour (st.bg);
+        g.fillRect (bounds);
+        const auto bar = bounds.toFloat().withHeight (headerBottom + 8.0f);
+        g.setColour (st.topBar);
+        g.fillRect (bar);
+        g.setColour (st.panelEdge);
+        g.fillRect (bar.getX(), bar.getBottom(), bar.getWidth(), 1.0f);
+        return;
+    }
     if (! isXp())
     {
         g.fillAll (juce::Colours::black);
@@ -534,6 +685,12 @@ void drawBackground (juce::Graphics& g, juce::Rectangle<int> bounds, float heade
 
 void drawFrame (juce::Graphics& g, juce::Rectangle<int> bounds)
 {
+    if (isFlat())
+    {
+        g.setColour (flat().panelEdge);
+        g.drawRect (bounds.toFloat(), 1.0f);
+        return;
+    }
     if (! isXp())
     {
         g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);

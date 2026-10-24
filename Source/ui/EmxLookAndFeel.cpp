@@ -51,6 +51,23 @@ void EmxLookAndFeel::refreshColours()
         setColour (TreeView::linesColourId, theme::edge.withAlpha (0.6f));
         setColour (HyperlinkButton::textColourId, light ? Colour (0xff0b47c4) : Colour (0xff8db6ff));
     }
+    if (theme::isFlat())
+    {
+        const auto& st = theme::flat();
+        const bool emutal = theme::getSkin() == theme::Skin::emutal;
+        setColour (TextButton::textColourOffId, st.text.withAlpha (0.85f));
+        setColour (TextButton::textColourOnId, emutal ? theme::textOn (theme::red) : theme::red.brighter (0.2f));
+        setColour (PopupMenu::backgroundColourId, st.panel);
+        setColour (PopupMenu::textColourId, st.text);
+        setColour (PopupMenu::highlightedBackgroundColourId, theme::red.withAlpha (0.35f));
+        setColour (PopupMenu::highlightedTextColourId, Colours::white);
+        for (auto id : { (int) Label::textColourId, (int) Label::textWhenEditingColourId, (int) TextEditor::textColourId,
+                         (int) CaretComponent::caretColourId, (int) ComboBox::textColourId, (int) ListBox::textColourId })
+            setColour (id, st.text);
+        setColour (TextEditor::outlineColourId, st.displayEdge);
+        setColour (TextEditor::focusedOutlineColourId, theme::red);
+        setColour (TextEditor::highlightColourId, theme::red.withAlpha (0.35f));
+    }
 }
 
 //== Knob: your knob artwork + a glowing pointer ================================
@@ -62,6 +79,11 @@ void EmxLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int h, 
     if (theme::isXp())
     {
         xpKnob (g, r, startAngle, endAngle, pos);
+        return;
+    }
+    if (theme::isFlat())
+    {
+        flatKnob (g, r, startAngle, endAngle, pos);
         return;
     }
 
@@ -102,6 +124,11 @@ void EmxLookAndFeel::drawLinearSlider (Graphics& g, int x, int y, int w, int h, 
         xpFader (g, track, pos);
         return;
     }
+    if (theme::isFlat())
+    {
+        flatFader (g, track, pos);
+        return;
+    }
     g.setImageResamplingQuality (Graphics::highResamplingQuality);
     g.drawImage (theme::image (theme::Img::slider), track.withSizeKeepingCentre (jmin ((float) w, h * 0.234f), (float) h),
                  RectanglePlacement::stretchToFit);
@@ -122,6 +149,11 @@ void EmxLookAndFeel::drawButtonBackground (Graphics& g, Button& b, const Colour&
     if (theme::isXp())
     {
         xpButton (g, b, highlighted, down);
+        return;
+    }
+    if (theme::isFlat())
+    {
+        flatButton (g, b, highlighted, down);
         return;
     }
     auto r = b.getLocalBounds().toFloat().reduced (0.5f, 1.0f);
@@ -153,6 +185,13 @@ Font EmxLookAndFeel::getTextButtonFont (TextButton&, int buttonHeight)
 //== Menus =======================================================================
 void EmxLookAndFeel::drawPopupMenuBackground (Graphics& g, int w, int h)
 {
+    if (theme::isFlat())
+    {
+        g.fillAll (theme::flat().panel);
+        g.setColour (theme::flat().panelEdge);
+        g.drawRect (0, 0, w, h);
+        return;
+    }
     if (theme::isXp())
     {
         g.fillAll (findColour (PopupMenu::backgroundColourId));
@@ -185,6 +224,18 @@ void EmxLookAndFeel::drawComboBox (Graphics& g, int w, int h, bool, int, int, in
 {
     auto r = Rectangle<float> (0, 0, (float) w, (float) h);
     theme::drawLed (g, r, {});
+    if (theme::isFlat())
+    {
+        // a thin chevron
+        const auto a = r.removeFromRight ((float) h).withSizeKeepingCentre (8.0f, 4.5f);
+        Path chevron;
+        chevron.startNewSubPath (a.getX(), a.getY());
+        chevron.lineTo (a.getCentreX(), a.getBottom());
+        chevron.lineTo (a.getRight(), a.getY());
+        g.setColour (box.isEnabled() ? (box.isPopupActive() ? theme::red : theme::flat().muted) : theme::flat().muted.withAlpha (0.4f));
+        g.strokePath (chevron, PathStrokeType (1.5f, PathStrokeType::curved, PathStrokeType::rounded));
+        return;
+    }
     if (theme::isXp())
     {
         // drop-down button on the right: light blue, dark arrow
@@ -292,7 +343,7 @@ void EmxLookAndFeel::drawScrollbar (Graphics& g, ScrollBar&, int x, int y, int w
 //== Tooltips: dark in Classic, pale yellow in XP ===============================
 Rectangle<int> EmxLookAndFeel::getTooltipBounds (const String& text, Point<int> screenPos, Rectangle<int> parentArea)
 {
-    if (! theme::isXp())
+    if (! theme::isXp() && ! theme::isFlat())
         return LookAndFeel_V4::getTooltipBounds (text, screenPos, parentArea);
     const auto f = theme::font (11.0f, 500);
     GlyphArrangement ga;
@@ -305,6 +356,17 @@ Rectangle<int> EmxLookAndFeel::getTooltipBounds (const String& text, Point<int> 
 
 void EmxLookAndFeel::drawTooltip (Graphics& g, const String& text, int width, int height)
 {
+    if (theme::isFlat())
+    {
+        const auto& st = theme::flat();
+        g.fillAll (st.panel);
+        g.setColour (st.panelEdge);
+        g.drawRect (0, 0, width, height);
+        g.setColour (st.text);
+        g.setFont (theme::font (9.5f, 500));
+        g.drawFittedText (text, Rectangle<int> (width, height).reduced (6, 2), Justification::centredLeft, 2);
+        return;
+    }
     if (! theme::isXp())
     {
         LookAndFeel_V4::drawTooltip (g, text, width, height);
@@ -432,5 +494,122 @@ void EmxLookAndFeel::xpFader (Graphics& g, Rectangle<float> track, float pos)
     g.drawRoundedRectangle (thumb, 2.0f, 1.0f);
     g.setColour (Colour (0xff3ca33c));   // the little green accent of the era
     g.fillRect (thumb.getX() + 2.0f, thumb.getBottom() - 2.5f, thumb.getWidth() - 4.0f, 1.5f);
+}
+//== EMURUM / EMUTAL drawing ====================================================
+void EmxLookAndFeel::flatButton (Graphics& g, Button& b, bool highlighted, bool down)
+{
+    const auto& st = theme::flat();
+    const bool emutal = theme::getSkin() == theme::Skin::emutal;
+    const bool on = b.getToggleState(), enabled = b.isEnabled();
+    auto r = b.getLocalBounds().toFloat().reduced (0.5f, 1.0f);
+    const float rad = jmin (st.radius, 5.0f);
+
+    if (b.getProperties().contains ("emxTab"))
+    {
+        if (emutal)
+        {
+            // text tabs; the active one is underlined in the accent colour
+            b.setColour (TextButton::textColourOffId, highlighted ? st.text : st.muted);
+            b.setColour (TextButton::textColourOnId, theme::red);
+            if (on)
+            {
+                g.setColour (theme::red);
+                g.fillRoundedRectangle (r.getX() + 10.0f, r.getBottom() - 3.0f, r.getWidth() - 20.0f, 2.0f, 1.0f);
+            }
+            return;
+        }
+        // boxed tabs with a small indicator light
+        g.setColour (highlighted && ! on ? st.buttonHover : st.button);
+        g.fillRoundedRectangle (r, rad);
+        g.setColour (st.buttonEdge);
+        g.drawRoundedRectangle (r, rad, 1.0f);
+        auto dot = Rectangle<float> (6.0f, 6.0f).withCentre ({ r.getX() + 11.0f, r.getCentreY() });
+        if (on)
+            DropShadow (theme::red.withAlpha (0.8f), 6, {}).drawForRectangle (g, dot.toNearestInt());
+        g.setColour (on ? theme::red : st.knobTrack);
+        g.fillEllipse (dot);
+        b.setColour (TextButton::textColourOffId, st.muted);
+        b.setColour (TextButton::textColourOnId, st.text);
+        return;
+    }
+
+    if (on && enabled)
+    {
+        if (emutal)
+        {
+            g.setColour (down ? theme::red.darker (0.2f) : theme::red);
+            g.fillRoundedRectangle (r, rad);
+        }
+        else
+        {
+            g.setColour (st.button.brighter (0.08f));
+            g.fillRoundedRectangle (r, rad);
+            g.setColour (theme::red);
+            g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
+        }
+        return;
+    }
+    g.setColour (! enabled ? st.button.withAlpha (0.5f) : down ? st.button.darker (0.2f) : highlighted ? st.buttonHover : st.button);
+    g.fillRoundedRectangle (r, rad);
+    g.setColour (st.buttonEdge);
+    g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
+}
+
+void EmxLookAndFeel::flatKnob (Graphics& g, Rectangle<float> r, float startAngle, float endAngle, float pos)
+{
+    const auto& st = theme::flat();
+    const bool emutal = theme::getSkin() == theme::Skin::emutal;
+    const auto c = r.getCentre();
+    const float rad = r.getWidth() * 0.5f;
+    const float angle = startAngle + pos * (endAngle - startAngle);
+
+    // ring: grey track, accent value
+    const float arcR = rad - 2.5f, arcW = jmax (2.0f, rad * (emutal ? 0.13f : 0.10f));
+    Path track, value;
+    track.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, startAngle, endAngle, true);
+    value.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, startAngle, angle, true);
+    g.setColour (st.knobTrack);
+    g.strokePath (track, PathStrokeType (arcW, PathStrokeType::curved, PathStrokeType::rounded));
+    g.setColour (theme::red);
+    g.strokePath (value, PathStrokeType (arcW, PathStrokeType::curved, PathStrokeType::rounded));
+
+    // body
+    const auto body = r.reduced (rad * (emutal ? 0.30f : 0.27f));
+    if (emutal)
+    {
+        g.setColour (st.knobBody);
+        g.fillEllipse (body);
+        g.setColour (st.bg);
+        g.drawEllipse (body, 1.0f);
+    }
+    else
+    {
+        g.setGradientFill (ColourGradient (Colour (0xff6a7482), body.getX(), body.getY(), Colour (0xff262c34), body.getRight(), body.getBottom(), false));
+        g.fillEllipse (body);
+        g.setColour (Colour (0xff0b0d10));
+        g.drawEllipse (body, 1.0f);
+    }
+    // pointer
+    Path pointer;
+    pointer.addLineSegment (Line<float> (c.x, c.y - body.getWidth() * (emutal ? 0.12f : 0.05f), c.x, c.y - body.getWidth() * 0.46f),
+                            jmax (1.6f, rad * 0.075f));
+    pointer.applyTransform (AffineTransform::rotation (angle, c.x, c.y));
+    g.setColour (st.text);
+    g.fillPath (pointer);
+}
+
+void EmxLookAndFeel::flatFader (Graphics& g, Rectangle<float> track, float pos)
+{
+    const auto& st = theme::flat();
+    auto groove = track.withSizeKeepingCentre (4.0f, track.getHeight() - 6.0f);
+    g.setColour (st.knobTrack);
+    g.fillRoundedRectangle (groove, 2.0f);
+    g.setColour (theme::red);
+    g.fillRoundedRectangle (groove.withTop (jlimit (groove.getY(), groove.getBottom(), pos)), 2.0f);
+    const auto thumb = Rectangle<float> (track.getCentreX() - 10.0f, pos - 4.5f, 20.0f, 9.0f);
+    g.setColour (theme::getSkin() == theme::Skin::emutal ? Colour (0xffdcdce0) : Colour (0xff9aa5b4));
+    g.fillRoundedRectangle (thumb, 2.5f);
+    g.setColour (st.bg);
+    g.drawRoundedRectangle (thumb, 2.5f, 1.0f);
 }
 } // namespace emx

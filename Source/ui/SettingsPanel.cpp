@@ -118,7 +118,7 @@ public:
         {
             const float x0 = r.getX() + r.getWidth() * (float) i / (float) steps;
             const float x1 = r.getX() + r.getWidth() * (float) (i + 1) / (float) steps;
-            g.setColour (theme::rotateHue (Colour (0xffff2a2a), -180.0f + 360.0f * ((float) i + 0.5f) / (float) steps));
+            g.setColour (theme::rotateHue (theme::baseAccent(), -180.0f + 360.0f * ((float) i + 0.5f) / (float) steps));
             g.fillRect (x0, r.getY(), x1 - x0 + 0.5f, r.getHeight());
         }
         g.setColour (Colours::black);
@@ -170,7 +170,7 @@ public:
     {
         auto r = getLocalBounds().toFloat();
         auto dot = r.removeFromTop (r.getHeight() - 16.0f).withSizeKeepingCentre (30.0f, 30.0f);
-        const auto c = theme::rotateHue (Colour (0xffff2a2a), degrees);
+        const auto c = theme::rotateHue (theme::baseAccent(), degrees);
         const bool active = std::abs (settings.getHueShift() - degrees) < 0.5f;
         if (active)
             DropShadow (c.withAlpha (0.8f), 10, {}).drawForRectangle (g, dot.toNearestInt());
@@ -180,7 +180,9 @@ public:
         g.drawEllipse (dot.reduced (0.5f), active ? 2.0f : 1.0f);
         g.setColour (active ? theme::textStrong : theme::textMuted);
         g.setFont (theme::font (7.5f, active ? 700 : 500, 0.08f));
-        g.drawText (name, r, Justification::centred, false);
+        // flat skins: the picks are turns from the skin's own colour
+        g.drawText (theme::isFlat() ? (degrees > 0 ? "+" : "") + String (roundToInt (degrees)) + String (CharPointer_UTF8 (" \xc2\xb0")) : name,
+                    r, Justification::centred, false);
     }
     void mouseEnter (const MouseEvent&) override { repaint(); }
     void mouseExit (const MouseEvent&) override { repaint(); }
@@ -311,16 +313,19 @@ SettingsPanel::SettingsPanel (EmulonXProcessor& p) : proc (p)
     addChildComponent (resetButton);
 
     //== Customization ===========================================================
-    const char* skinTips[] { "The original red metal look - the colour can be shifted below",
-                             "A light homage to early-2000s desktops: beige windows, glossy blue",
-                             "The same homage in dark" };
-    for (int i = 0; i < 3; ++i)
+    skinBox.addItem ("EMULON CLASSIC  -  RED METAL", 1);
+    skinBox.addItem ("EMULON XP - LIGHT  -  EARLY-2000S DESKTOP", 2);
+    skinBox.addItem ("EMULON XP - DARK  -  EARLY-2000S DESKTOP", 3);
+    skinBox.addItem ("EMURUM  -  FLAT, DEEP BLUE, CYAN LIGHTS", 4);
+    skinBox.addItem ("EMUTAL  -  FLAT, SLATE GREY, PURPLE", 5);
+    skinBox.setTooltip ("The whole look of Emulon X - the colour can be shifted below (not for the XP skins)");
+    skinBox.onChange = [this]
     {
-        skinButtons[i].setClickingTogglesState (false);
-        skinButtons[i].setTooltip (skinTips[i]);
-        skinButtons[i].onClick = [this, i] { settings->setSkin (i); };
-        addChildComponent (skinButtons[i]);
-    }
+        const int i = skinBox.getSelectedItemIndex();
+        if (i >= 0 && i != settings->getSkin())
+            settings->setSkin (i);
+    };
+    addChildComponent (skinBox);
     hueBar = std::make_unique<HueBar> (s);
     addChildComponent (*hueBar);
     const std::pair<const char*, float> swatchDefs[] { { "RED", 0.0f }, { "ORANGE", 25.0f }, { "GOLD", 66.0f }, { "GREEN", 117.0f },
@@ -370,10 +375,9 @@ void SettingsPanel::refresh()
         r->box.setSelectedItemIndex (r->read(), dontSendNotification);
     for (auto* f : folderLists)
         f->refresh();
-    const bool classic = settings->getSkin() == 0;
-    for (int i = 0; i < 3; ++i)
-        skinButtons[i].setToggleState (settings->getSkin() == i, dontSendNotification);
-    // the colour shift only belongs to the Classic skin
+    const bool classic = theme::skinAllowsColourShift ((theme::Skin) settings->getSkin());
+    skinBox.setSelectedItemIndex (settings->getSkin(), dontSendNotification);
+    // the colour shift works on Classic, EMURUM and EMUTAL
     hueBar->setEnabled (classic);
     hueBar->setAlpha (classic ? 1.0f : 0.3f);
     for (auto* sw : swatches)
@@ -382,6 +386,7 @@ void SettingsPanel::refresh()
         sw->setAlpha (classic ? 1.0f : 0.3f);
     }
     hueResetButton.setEnabled (classic && std::abs (settings->getHueShift()) > 0.01f);
+    hueResetButton.setButtonText (settings->getSkin() >= 3 ? "ORIGINAL COLOURS" : "BACK TO RED");
     repaint();
 }
 
@@ -400,8 +405,7 @@ void SettingsPanel::showPage (int index)
     for (auto* sw : swatches)
         sw->setVisible (page == customization);
     hueResetButton.setVisible (page == customization);
-    for (auto& b : skinButtons)
-        b.setVisible (page == customization);
+    skinBox.setVisible (page == customization);
     siteLink.setVisible (page == about);
     resized();
     repaint();
@@ -450,9 +454,7 @@ void SettingsPanel::resized()
 
     // Customization
     const int cx = content.getX() + 16, cw2 = content.getWidth() - 32;
-    const int skinW = (cw2 - 16) / 3;
-    for (int i = 0; i < 3; ++i)
-        skinButtons[i].setBounds (cx + i * (skinW + 8), content.getY() + 16 + 42, skinW, 30);
+    skinBox.setBounds (cx, content.getY() + 16 + 42, jmin (cw2, 420), 28);
     constexpr int colourY = 100;   // the colour section below the skins
     hueBar->setBounds (cx, content.getY() + colourY + 16 + 44, cw2, 36);
     const int swW = cw2 / swatches.size();
@@ -510,10 +512,10 @@ void SettingsPanel::paint (Graphics& g)
         };
         line (16, "SKIN", "THE WHOLE LOOK OF EMULON X - FOR EVERY EMULON X.");
         const float h = settings->getHueShift();
-        const bool classic = settings->getSkin() == 0;
+        const bool classic = theme::skinAllowsColourShift ((theme::Skin) settings->getSkin());
         line (100 + 16, "COLOUR" + String (classic && std::abs (h) > 0.01f ? "  (" + String (h > 0 ? "+" : "") + String (roundToInt (h)) + " DEG)" : String()),
               classic ? "TURNS THE WHOLE INTERFACE TO ANOTHER COLOUR. DOUBLE-CLICK THE BAR FOR RED."
-                      : "ONLY FOR THE EMULON CLASSIC SKIN - THE XP SKINS KEEP THEIR OWN COLOURS.");
+                      : "NOT FOR THE XP SKINS - THEY KEEP THEIR OWN COLOURS.");
         line (100 + 16 + 106, "QUICK PICKS", "ONE CLICK FOR A CLASSIC COLOUR.");
     }
 
