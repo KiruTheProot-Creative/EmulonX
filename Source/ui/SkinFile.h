@@ -137,6 +137,9 @@ bool load (const juce::File&, Design&, juce::String& error, juce::StringArray* w
 bool fromJson (const juce::var& json, const std::function<juce::MemoryBlock (const juce::String&)>& fileData,
                Design&, juce::String& error, juce::StringArray* warnings = nullptr);
 
+/** Reads a skin file for editing: the description as written (with its palette links) and every file inside. */
+bool readForEditing (const juce::File&, juce::var& json, std::map<juce::String, juce::MemoryBlock>& files, juce::String& error);
+
 /** Writes an .emxd file: `json` (the skin description) plus the files it refers to. */
 bool save (const juce::File&, const juce::var& json, const std::map<juce::String, juce::MemoryBlock>& files, juce::String& error);
 

@@ -395,9 +395,6 @@ juce::Colour rotateHue (juce::Colour c, float degrees)
     return juce::Colour::fromFloatRGBA (r, g, b, c.getFloatAlpha());
 }
 
-namespace
-{
-/** The Emulon X logo in a custom skin's colours: white letters take the letter colour, the red X the accent. */
 juce::Image tintedLogo (const juce::Image& src, juce::Colour letters, juce::Colour accent)
 {
     if (! src.isValid())
@@ -427,6 +424,8 @@ juce::Image tintedLogo (const juce::Image& src, juce::Colour letters, juce::Colo
     return out;
 }
 
+namespace
+{
 /** Prepares the custom skin as drawn (after a colour shift or a new skin). */
 void rebuildCustom()
 {

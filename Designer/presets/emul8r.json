@@ -1,0 +1,170 @@
+{
+  "format": "emxd",
+  "version": 2,
+  "name": "My Skin",
+  "author": "",
+  "hueShift": false,
+  "tokens": {
+    "accent": "#3fbcae",
+    "text": "#15191c",
+    "muted": "#3e474f",
+    "surface": "#b4bcc3",
+    "background": "#4a545d",
+    "display": "#f2f4f5"
+  },
+  "font": "Saira",
+  "upper": true,
+  "window": {
+    "fill": {
+      "type": "gradient",
+      "a": "#56616a",
+      "b": "#3d464e",
+      "angle": 180
+    },
+    "texture": "none",
+    "textureColor": "#000000",
+    "textureOpacity": 0,
+    "picture": ""
+  },
+  "frame": {
+    "width": 2,
+    "color": "#20262b"
+  },
+  "topbar": {
+    "fill": {
+      "type": "gradient",
+      "a": "#4a555f",
+      "b": "#2b333a",
+      "angle": 180
+    },
+    "line": 1,
+    "lineColor": "#000000",
+    "logoColor": "#ffffff",
+    "logoGlow": 0,
+    "logo": ""
+  },
+  "panel": {
+    "fill": {
+      "type": "gradient",
+      "a": "#c9d0d6",
+      "b": "#98a1a9",
+      "angle": 180
+    },
+    "radius": 8,
+    "outline": 1.2,
+    "outlineColor": "#4f5961",
+    "shadowY": 2,
+    "shadowBlur": 6,
+    "shadowOpacity": 0.45,
+    "texture": "none",
+    "textureOpacity": 0,
+    "picture": "",
+    "overlay": {
+      "tex": "metal-brushed",
+      "custom": "",
+      "strength": 0.75,
+      "blend": "overlay"
+    }
+  },
+  "heading": {
+    "color": "#1b2126"
+  },
+  "inset": {
+    "fill": {
+      "type": "gradient",
+      "a": "#8f98a0",
+      "b": "#aab2b9",
+      "angle": 180
+    },
+    "radius": 5,
+    "outline": 1,
+    "outlineColor": "#5f6971",
+    "innerShadow": 0
+  },
+  "display": {
+    "fill": {
+      "type": "solid",
+      "a": "@display",
+      "b": "@display",
+      "angle": 180
+    },
+    "radius": 2,
+    "outline": 1,
+    "outlineColor": "#59636c",
+    "textColor": "@text",
+    "glow": 0,
+    "scanlines": false
+  },
+  "list": {
+    "color": "#0b5f58"
+  },
+  "button": {
+    "fill": {
+      "type": "gradient",
+      "a": "#edf0f2",
+      "b": "#aab2b9",
+      "angle": 180
+    },
+    "radius": 12,
+    "outline": 1,
+    "outlineColor": "#4f5961",
+    "textColor": "#15191c",
+    "shadowY": 0,
+    "shadowBlur": 0,
+    "shadowOpacity": 0,
+    "bevel": 0.8
+  },
+  "buttonOn": {
+    "fill": {
+      "type": "gradient",
+      "a": "#74e0d4",
+      "b": "#23897e",
+      "angle": 180
+    },
+    "radius": 12,
+    "outline": 1,
+    "outlineColor": "#165c55",
+    "textColor": "#ffffff",
+    "glow": 0
+  },
+  "tab": {
+    "same": false,
+    "fill": {
+      "type": "gradient",
+      "a": "#5a6670",
+      "b": "#3a444d",
+      "angle": 180
+    },
+    "onFill": {
+      "type": "gradient",
+      "a": "#5fd3c6",
+      "b": "#1f8378",
+      "angle": 180
+    },
+    "textColor": "#e3e9ee",
+    "radius": 3,
+    "outline": 1,
+    "outlineColor": "#1b2126"
+  },
+  "knob": {
+    "style": "cap",
+    "capA": "#8beee2",
+    "capB": "#15695f",
+    "ring": 0,
+    "ringTrack": "#6d7780",
+    "ringColor": "@accent",
+    "pointer": "#ffffff",
+    "pointerGlow": 0,
+    "picture": ""
+  },
+  "fader": {
+    "track": "#20272c",
+    "fill": "#20272c",
+    "thumbA": "#f0f3f5",
+    "thumbB": "#9aa3ab",
+    "thumbLine": "#2aa598"
+  },
+  "label": {
+    "color": "#15191c"
+  }
+}

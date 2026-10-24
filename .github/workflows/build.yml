@@ -69,6 +69,28 @@ jobs:
           name: EmulonX-Windows
           path: dist/
 
+      - name: Emulon X SD (skin designer) - self-test and files
+        shell: pwsh
+        run: |
+          $exe = "build/EmulonXSD_artefacts/Release/Emulon X SD.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--self-test", "sd-selftest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Output "::error title=Emulon X SD self-test failed::exit code $($p.ExitCode) - see the EmulonX-SD-Screenshots artifact"; $failed = $true }
+          New-Item -ItemType Directory -Force sd-dist | Out-Null
+          Copy-Item $exe "sd-dist/Emulon X SD.exe"
+          Copy-Item LICENSE sd-dist/
+          if ($failed) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EmulonX-SD-Windows
+          path: sd-dist/
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: EmulonX-SD-Screenshots
+          path: sd-selftest/
+
       - name: Build installer
         shell: pwsh
         run: |
@@ -139,6 +161,17 @@ jobs:
         with:
           name: EmulonX-macOS
           path: dist/
+
+      - name: Emulon X SD (skin designer) files
+        run: |
+          mkdir -p sd-dist
+          cp -R "build/EmulonXSD_artefacts/Release/Emulon X SD.app" sd-dist/
+          cp LICENSE sd-dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EmulonX-SD-macOS
+          path: sd-dist/
 
       - name: Publish release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')

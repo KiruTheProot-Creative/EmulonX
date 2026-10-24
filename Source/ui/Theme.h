@@ -95,6 +95,8 @@ float getHueShift() noexcept;
 juce::Colour hue (juce::uint32 argbInRedDesign);
 /** Same rotation for any colour; lightness is kept so contrast stays the same. */
 juce::Colour rotateHue (juce::Colour, float degrees);
+/** The Emulon X logo in other colours: white letters take `letters`, the red X turns to `accent`. */
+juce::Image tintedLogo (const juce::Image& logo, juce::Colour letters, juce::Colour accent);
 
 //== Fonts: Saira (SIL Open Font License), weights 500 / 700 / 900 ==============
 juce::Font font (float height, int weight = 700, float kerning = 0.0f);

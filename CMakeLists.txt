@@ -117,6 +117,50 @@ target_link_libraries(EmulonX
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
+# --- Emulon X SD: the skin designer (a separate app) ---------------------------
+set(EMX_SD_VERSION "0.1af")
+juce_add_binary_data(EmulonXSDAssets
+    HEADER_NAME SdAssets.h
+    NAMESPACE   SdAssets
+    SOURCES
+        Designer/presets/classic.json
+        Designer/presets/xp-light.json
+        Designer/presets/xp-dark.json
+        Designer/presets/emurum.json
+        Designer/presets/emutal.json
+        Designer/presets/emublox.json
+        Designer/presets/emul8r.json
+        Designer/textures/metal-brushed.jpg
+        Designer/textures/metal-scratched.jpg
+        Designer/textures/metal-wavy.jpg
+        Designer/textures/metal-polished.jpg)
+
+juce_add_gui_app(EmulonXSD
+    PRODUCT_NAME   "Emulon X SD"
+    COMPANY_NAME   "Emulon"
+    BUNDLE_ID      "org.emulon.emulonxsd"
+    VERSION        "${PROJECT_VERSION}"
+    ICON_BIG       "${CMAKE_CURRENT_SOURCE_DIR}/installer/icon-256.png"
+    DOCUMENT_EXTENSIONS emxd)
+target_sources(EmulonXSD PRIVATE
+    Designer/Main.cpp
+    Designer/MainComponent.cpp
+    Designer/SkinDocument.cpp
+    Designer/PreviewView.cpp
+    Designer/Inspector.cpp
+    Source/Settings.cpp
+    Source/ui/Theme.cpp
+    Source/ui/EmxLookAndFeel.cpp
+    Source/ui/SkinFile.cpp
+    Source/ui/SkinDraw.cpp)
+target_include_directories(EmulonXSD PRIVATE Source Designer)
+target_compile_definitions(EmulonXSD PRIVATE
+    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_USE_XINPUT=0
+    EMX_SD_VERSION="${EMX_SD_VERSION}" EMX_VERSION_STRING="${EMX_FULL_VERSION}")
+target_link_libraries(EmulonXSD PRIVATE
+    EmulonXAssets EmulonXSDAssets juce::juce_gui_extra
+    juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+
 # --- Developer tool: render the UI to PNG files (off by default) -------------
 option(EMX_BUILD_PREVIEW "Build the EmulonXPreview screenshot tool" OFF)
 if(EMX_BUILD_PREVIEW)

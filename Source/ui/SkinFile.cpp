@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SkinFile.h"
 #include "../NaturalSort.h"
+#include <string_view>
 
 namespace emx::skin
 {
@@ -11,6 +12,18 @@ namespace
 constexpr int64 maxEntryBytes = 32 * 1024 * 1024;     // one picture or font
 constexpr int64 maxTotalBytes = 128 * 1024 * 1024;    // the whole skin, unpacked
 constexpr int maxPictureSize = 2048;                  // bigger pictures are scaled down (memory)
+
+/** Decoded pictures and prepared textures, kept for a while so a skin that is edited live
+    (in Emulon X SD) doesn't decode its pictures again on every change. */
+struct DecodeCache
+{
+    CriticalSection lock;
+    std::map<size_t, Image> pictures;
+    std::map<size_t, std::pair<Image, Image>> blends;
+    static DecodeCache& get() { static DecodeCache c; return c; }
+    static size_t hashOf (const MemoryBlock& m) { return std::hash<std::string_view>{} (std::string_view (static_cast<const char*> (m.getData()), m.getSize())); }
+    template <typename Map> static void trim (Map& m) { if (m.size() > 48) m.clear(); }
+};
 
 var prop (const var& o, const char* key) { return o.getProperty (Identifier (key), var()); }
 
@@ -86,6 +99,16 @@ struct Reader
             warnings.add ("Missing picture for " + what + (p.file.isNotEmpty() ? " (" + p.file + ")" : String()));
             return {};
         }
+        auto& cache = DecodeCache::get();
+        const auto hash = DecodeCache::hashOf (data);
+        {
+            const ScopedLock sl (cache.lock);
+            if (auto it = cache.pictures.find (hash); it != cache.pictures.end())
+            {
+                p.image = it->second;
+                return p;
+            }
+        }
         auto img = ImageFileFormat::loadFrom (data.getData(), data.getSize());
         if (! img.isValid())
         {
@@ -98,6 +121,13 @@ struct Reader
             img = img.rescaled (jmax (1, roundToInt (img.getWidth() * s)), jmax (1, roundToInt (img.getHeight() * s)), Graphics::highResamplingQuality);
         }
         p.image = img.convertedToFormat (Image::ARGB);
+        const ScopedLock sl (cache.lock);
+        if (cache.pictures.size() > 48)
+        {
+            cache.pictures.clear();
+            cache.blends.clear();   // keyed by picture, so they go too
+        }
+        cache.pictures[hash] = p.image;
         return p;
     }
 
@@ -151,7 +181,19 @@ struct Reader
                 warnings.add ("Missing texture \"" + ov.name + "\" for " + what);
         }
         if (ov.texture.isValid())
-            makeBlendImages (ov.texture.image, ov.lighter, ov.darker);
+        {
+            auto& cache = DecodeCache::get();
+            const auto key = std::hash<void*>{} (ov.texture.image.getPixelData().get());
+            const ScopedLock sl (cache.lock);
+            if (auto it = cache.blends.find (key); it != cache.blends.end())
+                std::tie (ov.lighter, ov.darker) = it->second;
+            else
+            {
+                makeBlendImages (ov.texture.image, ov.lighter, ov.darker);
+                DecodeCache::trim (cache.blends);
+                cache.blends[key] = { ov.lighter, ov.darker };
+            }
+        }
         return ov;
     }
 
@@ -451,6 +493,51 @@ bool load (const File& file, Design& out, String& error, StringArray* warnings)
         return false;
     }
     return fromJson (JSON::parse (description.toString()), read, out, error, warnings);
+}
+
+bool readForEditing (const File& file, var& json, std::map<String, MemoryBlock>& files, String& error)
+{
+    files.clear();
+    if (! file.existsAsFile() || file.getSize() > maxTotalBytes)
+    {
+        error = file.existsAsFile() ? "The skin file is too big" : "The skin file is missing";
+        return false;
+    }
+    if (file.hasFileExtension ("json"))
+        json = JSON::parse (file.loadFileAsString());
+    else
+    {
+        ZipFile zip (file);
+        int64 total = 0;
+        for (int i = 0; i < zip.getNumEntries(); ++i)
+        {
+            const auto* e = zip.getEntry (i);
+            if (e == nullptr || e->isSymbolicLink || e->uncompressedSize > maxEntryBytes || e->filename.endsWithChar ('/'))
+                continue;
+            total += e->uncompressedSize;
+            if (total > maxTotalBytes)
+                break;
+            MemoryBlock mb;
+            if (std::unique_ptr<InputStream> in (zip.createStreamForEntry (i)); in != nullptr)
+                in->readIntoMemoryBlock (mb, maxEntryBytes);
+            const auto name = e->filename.replaceCharacter ('\\', '/');
+            if (name.equalsIgnoreCase ("skin.json"))
+                json = JSON::parse (mb.toString());
+            else if (! name.contains ("..") && ! name.startsWithChar ('/'))
+                files[name] = std::move (mb);
+        }
+    }
+    if (! json.isObject() || str (json, "format") != "emxd")
+    {
+        error = "This isn't an Emulon X skin file";
+        return false;
+    }
+    if (num (json, "version", 2.0f, 0.0f, 1000.0f) < 2.0f)
+    {
+        error = "This skin was made for an older Emulon X skin designer and can't be opened";
+        return false;
+    }
+    return true;
 }
 
 bool readInfo (const File& file, String& name, String& author)
