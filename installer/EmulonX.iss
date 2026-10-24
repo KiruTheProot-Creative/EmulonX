@@ -1,11 +1,11 @@
 ; Emulon X — Windows installer (Inno Setup 6).
 ; GitHub builds this automatically: see .github/workflows/build.yml.
 ; To build it yourself: install Inno Setup 6, build the plugin, put the files in ..\dist, then
-;   ISCC.exe /DAppVersion=1.1.1 installer\EmulonX.iss
+;   ISCC.exe /DAppVersion=1.1.2 installer\EmulonX.iss
 ; SPDX-License-Identifier: AGPL-3.0-or-later
 
 #ifndef AppVersion
-  #define AppVersion "1.1.1"
+  #define AppVersion "1.1.2"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist"
@@ -80,6 +80,7 @@ Source: "BaseBanks\*.emxb"; DestDir: "{code:BanksDir}"; Components: banks; Flags
 Source: "{#SourceDir}\Emulon X.exe"; DestDir: "{code:StandaloneDir}"; Components: standalone; Flags: ignoreversion
 Source: "emulonx.ico"; DestDir: "{commonpf64}\Emulon X\Uninstall"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{commonpf64}\Emulon X"; Flags: ignoreversion
+Source: "..\docs\SKINS.md"; DestDir: "{commonpf64}\Emulon X"; DestName: "Making skins.md"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{commonpf64}\Emulon X"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
@@ -183,6 +184,6 @@ begin
   Result := Result + 'Your presets:' + NewLine + Space + PresetsDir('') + NewLine + NewLine;
   if WizardIsComponentSelected('standalone') then
     Result := Result + 'Standalone app:' + NewLine + Space + StandaloneDir('') + NewLine + NewLine;
-  Result := Result + 'Uninstaller, README and license:' + NewLine + Space + ExpandConstant('{commonpf64}\Emulon X') + NewLine + NewLine;
+  Result := Result + 'Uninstaller, README, skin guide and license:' + NewLine + Space + ExpandConstant('{commonpf64}\Emulon X') + NewLine + NewLine;
   Result := Result + MemoTypeInfo + NewLine + NewLine + MemoComponentsInfo;
 end;

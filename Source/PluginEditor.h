@@ -16,6 +16,7 @@
 #include "ui/ArpPage.h"
 #include "ui/MasterBar.h"
 #include "ui/Theme.h"
+#include "ui/SkinDesign.h"
 
 namespace emx
 {
@@ -49,8 +50,7 @@ private:
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;   // settings
     bool applyHue();   // true if the colours changed
-    float appliedHue = 0.0f;
-    theme::Skin appliedSkin = theme::Skin::classic;
+    int appliedGeneration = -1;
     void updateTooltips();
 
     /** Everything visible lives in here, at base size; the editor scales it. */

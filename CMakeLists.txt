@@ -2,7 +2,7 @@
 # Licensed under the GNU AGPLv3 (see LICENSE).
 
 cmake_minimum_required(VERSION 3.22)
-project(EmulonX VERSION 1.1.1 LANGUAGES C CXX)
+project(EmulonX VERSION 1.1.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -86,6 +86,8 @@ set(EMX_SOURCES
     Source/ui/EmxLookAndFeel.cpp
     Source/ui/Widgets.cpp
     Source/ui/MasterBar.cpp
+    Source/ui/SkinDesign.cpp
+    Source/ui/SkinDesigner.cpp
     Source/ui/MainPage.cpp)
 
 set(EMX_DEFINITIONS

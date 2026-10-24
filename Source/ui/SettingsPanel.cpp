@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SettingsPanel.h"
+#include "SkinDesigner.h"
 #include "Theme.h"
 #include "../PluginProcessor.h"
 
@@ -118,7 +119,7 @@ public:
         {
             const float x0 = r.getX() + r.getWidth() * (float) i / (float) steps;
             const float x1 = r.getX() + r.getWidth() * (float) (i + 1) / (float) steps;
-            g.setColour (theme::rotateHue (Colour (0xffff2a2a), -180.0f + 360.0f * ((float) i + 0.5f) / (float) steps));
+            g.setColour (theme::rotateHue (theme::baseAccent(), -180.0f + 360.0f * ((float) i + 0.5f) / (float) steps));
             g.fillRect (x0, r.getY(), x1 - x0 + 0.5f, r.getHeight());
         }
         g.setColour (Colours::black);
@@ -170,7 +171,7 @@ public:
     {
         auto r = getLocalBounds().toFloat();
         auto dot = r.removeFromTop (r.getHeight() - 16.0f).withSizeKeepingCentre (30.0f, 30.0f);
-        const auto c = theme::rotateHue (Colour (0xffff2a2a), degrees);
+        const auto c = theme::rotateHue (theme::baseAccent(), degrees);
         const bool active = std::abs (settings.getHueShift() - degrees) < 0.5f;
         if (active)
             DropShadow (c.withAlpha (0.8f), 10, {}).drawForRectangle (g, dot.toNearestInt());
@@ -180,7 +181,9 @@ public:
         g.drawEllipse (dot.reduced (0.5f), active ? 2.0f : 1.0f);
         g.setColour (active ? theme::textStrong : theme::textMuted);
         g.setFont (theme::font (7.5f, active ? 700 : 500, 0.08f));
-        g.drawText (name, r, Justification::centred, false);
+        // custom skins: the picks are turns from the skin's own colour
+        g.drawText (theme::getSkin() == theme::Skin::custom ? (degrees > 0 ? "+" : "") + String (roundToInt (degrees)) + String (juce::CharPointer_UTF8 (" \xc2\xb0")) : name,
+                    r, Justification::centred, false);
     }
     void mouseEnter (const MouseEvent&) override { repaint(); }
     void mouseExit (const MouseEvent&) override { repaint(); }
@@ -313,14 +316,51 @@ SettingsPanel::SettingsPanel (EmulonXProcessor& p) : proc (p)
     //== Customization ===========================================================
     const char* skinTips[] { "The original red metal look - the colour can be shifted below",
                              "A light homage to early-2000s desktops: beige windows, glossy blue",
-                             "The same homage in dark" };
-    for (int i = 0; i < 3; ++i)
+                             "The same homage in dark",
+                             "A skin from a .emxd file - pick it below, import one, or make your own in the skin designer" };
+    for (int i = 0; i < 4; ++i)
     {
         skinButtons[i].setClickingTogglesState (false);
         skinButtons[i].setTooltip (skinTips[i]);
-        skinButtons[i].onClick = [this, i] { settings->setSkin (i); };
+        skinButtons[i].onClick = [this, i]
+        {
+            if (i < 3)
+                settings->setSkin (i);
+            else if (customFiles.contains (settings->getCustomSkin()))
+                settings->useCustomSkin (settings->getCustomSkin());
+            else if (! customFiles.isEmpty())
+                settings->useCustomSkin (customFiles[0]);
+            else
+                importSkin();
+        };
         addChildComponent (skinButtons[i]);
     }
+    customBox.setTextWhenNothingSelected ("CHOOSE A CUSTOM SKIN...");
+    customBox.setTextWhenNoChoicesAvailable ("NO CUSTOM SKINS YET");
+    customBox.setTooltip ("Your custom skins (.emxd files)");
+    customBox.onChange = [this]
+    {
+        const int i = customBox.getSelectedItemIndex();
+        if (i >= 0 && i < customFiles.size() && ! (settings->getSkin() == 3 && settings->getCustomSkin() == customFiles[i]))
+            settings->useCustomSkin (customFiles[i]);
+    };
+    importButton.setTooltip ("Add a .emxd skin file (you can also drop it onto the window)");
+    importButton.onClick = [this] { importSkin(); };
+    deleteButton.setTooltip ("Remove the custom skin in use from your skins (it goes to the recycle bin)");
+    deleteButton.onClick = [this]
+    {
+        if (settings->getSkin() != 3)
+            return;
+        const auto f = settings->getSkinsFolder().getChildFile (settings->getCustomSkin());
+        settings->setSkin (0);
+        if (f.existsAsFile() && ! f.moveToTrash())
+            f.deleteFile();
+        refreshCustomSkins();
+    };
+    designerButton.setTooltip ("Make your own skin: pictures, font and colours");
+    designerButton.onClick = [this] { showPage (skinDesigner); };
+    for (auto* c : { (Component*) &customBox, (Component*) &importButton, (Component*) &deleteButton, (Component*) &designerButton })
+        addChildComponent (c);
     hueBar = std::make_unique<HueBar> (s);
     addChildComponent (*hueBar);
     const std::pair<const char*, float> swatchDefs[] { { "RED", 0.0f }, { "ORANGE", 25.0f }, { "GOLD", 66.0f }, { "GREEN", 117.0f },
@@ -370,19 +410,75 @@ void SettingsPanel::refresh()
         r->box.setSelectedItemIndex (r->read(), dontSendNotification);
     for (auto* f : folderLists)
         f->refresh();
-    const bool classic = settings->getSkin() == 0;
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 4; ++i)
         skinButtons[i].setToggleState (settings->getSkin() == i, dontSendNotification);
-    // the colour shift only belongs to the Classic skin
-    hueBar->setEnabled (classic);
-    hueBar->setAlpha (classic ? 1.0f : 0.3f);
+    refreshCustomSkins();
+    updateColourSection();
+    // the window's look may update after us (same change message): check again in a moment
+    MessageManager::callAsync ([safe = Component::SafePointer<SettingsPanel> (this)] { if (safe != nullptr) safe->updateColourSection(); });
+    repaint();
+}
+
+void SettingsPanel::updateColourSection()
+{
+    // the colour shift belongs to Classic, and to custom skins that allow it
+    const int skin = settings->getSkin();
+    const bool allowed = skin == 0 || (skin == 3 && theme::getSkin() == theme::Skin::custom && theme::customHueShift());
+    hueBar->setEnabled (allowed);
+    hueBar->setAlpha (allowed ? 1.0f : 0.3f);
     for (auto* sw : swatches)
     {
-        sw->setEnabled (classic);
-        sw->setAlpha (classic ? 1.0f : 0.3f);
+        sw->setEnabled (allowed);
+        sw->setAlpha (allowed ? 1.0f : 0.3f);
     }
-    hueResetButton.setEnabled (classic && std::abs (settings->getHueShift()) > 0.01f);
+    hueResetButton.setEnabled (allowed && std::abs (settings->getHueShift()) > 0.01f);
+    hueResetButton.setButtonText (skin == 3 ? "ORIGINAL COLOURS" : "BACK TO RED");
     repaint();
+}
+
+void SettingsPanel::refreshCustomSkins()
+{
+    customFiles.clear();
+    customBox.clear (dontSendNotification);
+    const auto dir = settings->getSkinsFolder();
+    Array<File> files;
+    for (const auto& e : RangedDirectoryIterator (dir, false, "*.emxd", File::findFiles))
+        files.add (e.getFile());
+    std::sort (files.begin(), files.end(), [] (const File& a, const File& b) { return a.getFileName().compareIgnoreCase (b.getFileName()) < 0; });
+    // the designer's work in progress first, then your skins
+    const auto work = dir.getChildFile (SkinDesigner::workFileName);
+    if (work.existsAsFile())
+    {
+        customFiles.add (work.getFileName());
+        customBox.addItem ("SKIN DESIGNER (WORK IN PROGRESS)", 1);
+    }
+    for (auto& f : files)
+        if (! f.getFileName().startsWithChar ('.'))
+        {
+            customFiles.add (f.getFileName());
+            customBox.addItem (f.getFileNameWithoutExtension().toUpperCase(), customFiles.size());
+        }
+    if (settings->getSkin() == 3)
+        customBox.setSelectedItemIndex (customFiles.indexOf (settings->getCustomSkin()), dontSendNotification);
+    deleteButton.setEnabled (settings->getSkin() == 3 && settings->getCustomSkin() != SkinDesigner::workFileName);
+}
+
+void SettingsPanel::importSkin()
+{
+    skinChooser = std::make_unique<FileChooser> ("Import a skin", File::getSpecialLocation (File::userDocumentsDirectory), "*.emxd");
+    skinChooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles, [this] (const FileChooser& fc)
+    {
+        const auto f = fc.getResult();
+        if (f == File())
+            return;
+        SkinDesign d;
+        String err;
+        if (! SkinDesign::load (f, d, err))
+            return;
+        const auto dest = settings->getSkinsFolder().getChildFile (f.getFileName());
+        if (f == dest || f.copyFileTo (dest))
+            settings->useCustomSkin (dest.getFileName());
+    });
 }
 
 void SettingsPanel::showPage (int index)
@@ -402,6 +498,15 @@ void SettingsPanel::showPage (int index)
     hueResetButton.setVisible (page == customization);
     for (auto& b : skinButtons)
         b.setVisible (page == customization);
+    for (auto* c : { (Component*) &customBox, (Component*) &importButton, (Component*) &deleteButton, (Component*) &designerButton })
+        c->setVisible (page == customization);
+    if (page == skinDesigner && designer == nullptr)
+    {
+        designer = std::make_unique<SkinDesigner> (*settings);
+        addChildComponent (*designer);
+    }
+    if (designer != nullptr)
+        designer->setVisible (page == skinDesigner);
     siteLink.setVisible (page == about);
     resized();
     repaint();
@@ -450,10 +555,21 @@ void SettingsPanel::resized()
 
     // Customization
     const int cx = content.getX() + 16, cw2 = content.getWidth() - 32;
-    const int skinW = (cw2 - 16) / 3;
-    for (int i = 0; i < 3; ++i)
+    const int skinW = (cw2 - 24) / 4;
+    for (int i = 0; i < 4; ++i)
         skinButtons[i].setBounds (cx + i * (skinW + 8), content.getY() + 16 + 42, skinW, 30);
-    constexpr int colourY = 100;   // the colour section below the skins
+    {
+        auto row = Rectangle<int> (cx, content.getY() + 16 + 80, cw2, 26);
+        customBox.setBounds (row.removeFromLeft (240));
+        row.removeFromLeft (8);
+        importButton.setBounds (row.removeFromLeft (120));
+        row.removeFromLeft (8);
+        deleteButton.setBounds (row.removeFromLeft (80));
+        designerButton.setBounds (row.removeFromRight (160));
+    }
+    if (designer != nullptr)
+        designer->setBounds (content.reduced (14));
+    constexpr int colourY = 140;   // the colour section below the skins
     hueBar->setBounds (cx, content.getY() + colourY + 16 + 44, cw2, 36);
     const int swW = cw2 / swatches.size();
     for (int i = 0; i < swatches.size(); ++i)
@@ -508,13 +624,15 @@ void SettingsPanel::paint (Graphics& g)
             g.setFont (theme::font (7.5f, 500, 0.05f));
             g.drawText (help, a, Justification::topLeft, true);
         };
-        line (16, "SKIN", "THE WHOLE LOOK OF EMULON X - FOR EVERY EMULON X.");
+        line (16, "SKIN", "THE WHOLE LOOK OF EMULON X - FOR EVERY EMULON X. CUSTOM SKINS ARE .EMXD FILES: IMPORT ONE OR MAKE YOUR OWN.");
         const float h = settings->getHueShift();
-        const bool classic = settings->getSkin() == 0;
-        line (100 + 16, "COLOUR" + String (classic && std::abs (h) > 0.01f ? "  (" + String (h > 0 ? "+" : "") + String (roundToInt (h)) + " DEG)" : String()),
-              classic ? "TURNS THE WHOLE INTERFACE TO ANOTHER COLOUR. DOUBLE-CLICK THE BAR FOR RED."
-                      : "ONLY FOR THE EMULON CLASSIC SKIN - THE XP SKINS KEEP THEIR OWN COLOURS.");
-        line (100 + 16 + 106, "QUICK PICKS", "ONE CLICK FOR A CLASSIC COLOUR.");
+        const int skin = settings->getSkin();
+        const bool allowed = hueBar->isEnabled();
+        line (140 + 16, "COLOUR" + String (allowed && std::abs (h) > 0.01f ? "  (" + String (h > 0 ? "+" : "") + String (roundToInt (h)) + " DEG)" : String()),
+              allowed ? "TURNS THE WHOLE INTERFACE TO ANOTHER COLOUR. DOUBLE-CLICK THE BAR TO GO BACK."
+                      : skin == 3 ? "THIS CUSTOM SKIN KEEPS ITS OWN COLOURS (IT TURNS THE COLOUR SHIFT OFF)."
+                                  : "ONLY FOR EMULON CLASSIC AND CUSTOM SKINS - THE XP SKINS KEEP THEIR OWN COLOURS.");
+        line (140 + 16 + 106, "QUICK PICKS", "ONE CLICK FOR A CLASSIC COLOUR.");
     }
 
     if (page == about)

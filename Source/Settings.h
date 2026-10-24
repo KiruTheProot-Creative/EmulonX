@@ -42,9 +42,21 @@ public:
     void  setBankColumns (int v)     { set ("bankColumns", juce::jlimit (1, maxBankColumns, v)); }
 
     //== Customization =========================================================
-    /** 0 EMULON CLASSIC, 1 EMULON XP (light), 2 EMULON XP (dark). */
-    int   getSkin() const             { return juce::jlimit (0, 2, get ("skin", 0)); }
-    void  setSkin (int v)             { set ("skin", juce::jlimit (0, 2, v)); }
+    /** 0 EMULON CLASSIC, 1 EMULON XP (light), 2 EMULON XP (dark), 3 a custom skin (.emxd). */
+    int   getSkin() const             { return juce::jlimit (0, 3, get ("skin", 0)); }
+    void  setSkin (int v)             { set ("skin", juce::jlimit (0, 3, v)); }
+    /** File name of the custom skin (inside getSkinsFolder()) used when getSkin() == 3. */
+    juce::String getCustomSkin() const { return props->getValue ("customSkin"); }
+    /** Switches to a custom skin; bumps the revision so open windows reload it. */
+    void  useCustomSkin (const juce::String& fileName)
+    {
+        props->setValue ("customSkin", fileName);
+        props->setValue ("skinRevision", props->getIntValue ("skinRevision") + 1);
+        set ("skin", 3);
+    }
+    int   getSkinRevision() const     { return props->getIntValue ("skinRevision"); }
+    /** Where imported and exported .emxd skins live (next to the settings file). */
+    juce::File getSkinsFolder() const  { auto d = props->getFile().getSiblingFile ("Skins"); d.createDirectory(); return d; }
     /** Colour scheme rotation in degrees, -180..180 (0 = the original red). */
     float getHueShift() const         { return (float) juce::jlimit (-180.0, 180.0, props->getDoubleValue ("hueShift", 0.0)); }
     void  setHueShift (float deg)     { props->setValue ("hueShift", (double) juce::jlimit (-180.0f, 180.0f, deg)); sendChangeMessage(); }   // saved by the file's own timer (cheap while dragging)

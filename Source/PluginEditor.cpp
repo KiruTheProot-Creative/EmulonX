@@ -126,17 +126,58 @@ void EmulonXEditor::changeListenerCallback (ChangeBroadcaster*)
     }
 }
 
+/** Brings the (process-wide) theme in line with the settings; returns a number that changes
+    whenever the look changed, so every open window knows to refresh. */
+static int syncThemeWithSettings (Settings& s)
+{
+    static int generation = 0;
+    static String loadedKey;
+    static float lastHue = 0.0f;
+    static theme::Skin lastSkin = theme::Skin::classic;
+
+    auto skin = (theme::Skin) s.getSkin();
+    if (skin == theme::Skin::custom)
+    {
+        const auto file = s.getSkinsFolder().getChildFile (s.getCustomSkin());
+        const auto key = file.getFullPathName() + "|" + String (file.getLastModificationTime().toMilliseconds()) + "|"
+                       + String (file.getSize()) + "|" + String (s.getSkinRevision());
+        if (key != loadedKey)
+        {
+            SkinDesign d;
+            String err;
+            if (s.getCustomSkin().isNotEmpty() && file.existsAsFile() && SkinDesign::load (file, d, err))
+            {
+                theme::setCustomSkin (d);
+                loadedKey = key;
+                ++generation;
+            }
+            else
+            {
+                skin = theme::Skin::classic;   // missing or broken: fall back to Classic
+                loadedKey = {};
+            }
+        }
+    }
+    const bool hueAllowed = skin == theme::Skin::classic || (skin == theme::Skin::custom && theme::customHueShift());
+    const float h = hueAllowed ? s.getHueShift() : 0.0f;
+    if (skin != lastSkin || std::abs (h - lastHue) > 0.01f)
+    {
+        theme::setSkin (skin);
+        theme::setHueShift (h);
+        lastSkin = skin;
+        lastHue = h;
+        ++generation;
+    }
+    return generation;
+}
+
 bool EmulonXEditor::applyHue()
 {
-    const auto skin = (theme::Skin) settings->getSkin();
-    const float h = skin == theme::Skin::classic ? settings->getHueShift() : 0.0f;   // hue shift is Classic only
-    if (std::abs (h - appliedHue) < 0.01f && skin == appliedSkin)
+    const int gen = syncThemeWithSettings (*settings);
+    if (gen == appliedGeneration)
         return false;
-    theme::setSkin (skin);    // shared by every open Emulon X window
-    theme::setHueShift (h);
     lnf.refreshColours();
-    appliedHue = h;
-    appliedSkin = skin;
+    appliedGeneration = gen;
     return true;
 }
 
@@ -189,7 +230,7 @@ void EmulonXEditor::resized()
 bool EmulonXEditor::isInterestedInFileDrag (const StringArray& files)
 {
     for (auto& f : files)
-        if (loader::isSupported (File (f)))
+        if (loader::isSupported (File (f)) || File (f).hasFileExtension ("emxd"))
             return true;
     return false;
 }
@@ -200,9 +241,26 @@ void EmulonXEditor::filesDropped (const StringArray& files, int, int)
     repaint();
     Array<File> list;
     for (auto& f : files)
+    {
+        if (File (f).hasFileExtension ("emxd"))   // a skin: install it and use it
+        {
+            SkinDesign d;
+            String err;
+            if (SkinDesign::load (File (f), d, err))
+            {
+                const auto dest = settings->getSkinsFolder().getChildFile (File (f).getFileName());
+                if (File (f) == dest || File (f).copyFileTo (dest))
+                    settings->useCustomSkin (dest.getFileName());
+            }
+            continue;
+        }
         list.add (File (f));
-    proc.loadFiles (list);
-    root->showPage (0);
+    }
+    if (! list.isEmpty())
+    {
+        proc.loadFiles (list);
+        root->showPage (0);
+    }
 }
 
 void EmulonXEditor::paintOverChildren (Graphics& g)
@@ -214,7 +272,7 @@ void EmulonXEditor::paintOverChildren (Graphics& g)
     g.fillRoundedRectangle (r, 12.0f * uiScale);
     g.setColour (theme::red);
     g.drawRoundedRectangle (r, 12.0f * uiScale, 3.0f * uiScale);
-    theme::drawGlowText (g, "DROP SAMPLES, PRESETS OR BANKS", r, theme::font (28.0f * uiScale, 900, 0.14f), Colours::white,
+    theme::drawGlowText (g, "DROP SAMPLES, PRESETS, BANKS OR SKINS", r, theme::font (28.0f * uiScale, 900, 0.14f), Colours::white,
                          theme::red, roundToInt (14.0f * uiScale), Justification::centred);
 }
 
