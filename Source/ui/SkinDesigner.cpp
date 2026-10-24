@@ -167,6 +167,8 @@ SkinDesigner::SkinDesigner (Settings& s) : settings (s)
     knobButton.onClick = [this] { design.knobRotates = ! design.knobRotates; changed(); };
     shadowButton.setTooltip ("A slight drop shadow under your pictures (buttons, panels, displays, knobs)");
     shadowButton.onClick = [this] { design.shadows = ! design.shadows; changed(); };
+    cornersButton.setTooltip ("Fill: the whole picture covers each button, display and panel. Keep corners: the corners stay sharp and only the middle stretches (for frame-style pictures).");
+    cornersButton.onClick = [this] { design.keepCorners = ! design.keepCorners; changed(); };
     fontButton.setTooltip ("Pick a font file (.ttf or .otf) - it is packed into the skin");
     fontButton.onClick = [this] { chooseFont(); };
     fontClear.setTooltip ("Back to the standard font");
@@ -180,7 +182,7 @@ SkinDesigner::SkinDesigner (Settings& s) : settings (s)
     exportButton.setTooltip ("Save the skin as one .emxd file to share - it is also added to your skins");
     exportButton.onClick = [this] { exportSkin(); };
 
-    for (auto* c : { (Component*) &nameField, (Component*) &authorField, (Component*) &hueButton, (Component*) &knobButton, (Component*) &shadowButton,
+    for (auto* c : { (Component*) &nameField, (Component*) &authorField, (Component*) &hueButton, (Component*) &knobButton, (Component*) &shadowButton, (Component*) &cornersButton,
                      (Component*) &fontButton, (Component*) &fontClear, (Component*) &startOver, (Component*) &loadFolderButton,
                      (Component*) &templateButton, (Component*) &exportButton })
         addAndMakeVisible (c);
@@ -206,6 +208,7 @@ void SkinDesigner::refreshControls()
     knobButton.setButtonText (design.knobRotates ? "KNOB: PICTURE TURNS" : "KNOB: POINTER TURNS");
     shadowButton.setButtonText (design.shadows ? "SHADOWS: ON" : "SHADOWS: OFF");
     shadowButton.setToggleState (design.shadows, dontSendNotification);
+    cornersButton.setButtonText (design.keepCorners ? "PICTURES: KEEP CORNERS" : "PICTURES: FILL");
     fontName = "STANDARD FONT";
     if (! design.font.isEmpty())
         if (auto tf = Typeface::createSystemTypefaceFor (design.font.data.getData(), design.font.data.getSize()))
@@ -387,24 +390,24 @@ void SkinDesigner::resized()
     {
         auto row = rowName;
         row.removeFromLeft (46);
-        nameField.setBounds (row.removeFromLeft (210));
-        row.removeFromLeft (40);
-        authorField.setBounds (row.removeFromLeft (170));
+        nameField.setBounds (row.removeFromLeft (170));
+        row.removeFromLeft (36);
+        authorField.setBounds (row.removeFromLeft (130));
+        fontClear.setBounds (row.removeFromRight (26));
+        row.removeFromRight (4);
+        fontButton.setBounds (row.removeFromRight (106));
+        fontRect = row.withTrimmedLeft (10).withTrimmedRight (6);
     }
     r.removeFromTop (8);
     rowFont = r.removeFromTop (26);
     {
         auto row = rowFont;
-        const int bw = (row.getWidth() - 26 - 4 * 6 - 4) / 4;
-        hueButton.setBounds (row.removeFromLeft (bw));
-        row.removeFromLeft (6);
-        knobButton.setBounds (row.removeFromLeft (bw));
-        row.removeFromLeft (6);
-        shadowButton.setBounds (row.removeFromLeft (bw));
-        row.removeFromLeft (6);
-        fontClear.setBounds (row.removeFromRight (26));
-        row.removeFromRight (4);
-        fontButton.setBounds (row);
+        const int bw = (row.getWidth() - 3 * 6) / 4;
+        for (auto* b : { &hueButton, &knobButton, &shadowButton, &cornersButton })
+        {
+            b->setBounds (row.removeFromLeft (bw));
+            row.removeFromLeft (6);
+        }
     }
     r.removeFromTop (10);
     const int cols = 6, gap = 8;
@@ -436,14 +439,10 @@ void SkinDesigner::paint (Graphics& g)
     g.setColour (theme::textStrong);
     g.setFont (theme::font (8.5f, 700, 0.1f));
     g.drawText ("NAME", rowName.withWidth (44), Justification::centredLeft, false);
-    g.drawText ("BY", rowName.withTrimmedLeft (46 + 210 + 8).withWidth (30), Justification::centredLeft, false);
+    g.drawText ("BY", rowName.withTrimmedLeft (46 + 170 + 8).withWidth (28), Justification::centredLeft, false);
     g.drawText ("COLOURS", colourRow.withWidth (58), Justification::centredLeft, false);
-    // the font in use, at the end of the name row
-    {
-        auto a = rowName.withTrimmedLeft (46 + 210 + 40 + 170 + 10).toFloat();
-        if (a.getWidth() > 60.0f)
-            theme::drawLed (g, a, "FONT: " + fontName, 8.5f);
-    }
+    if (fontRect.getWidth() > 40)   // the font in use, next to its buttons
+        theme::drawLed (g, fontRect.toFloat(), fontName, 8.5f);
     g.setColour (theme::textMuted);
     g.setFont (theme::font (8.0f, 500, 0.04f));
     g.drawText (status.isNotEmpty() ? status : String ("Changes show right away. Pictures you don't choose keep the Classic look, tinted to your accent colour."),

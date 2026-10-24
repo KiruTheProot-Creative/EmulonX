@@ -39,13 +39,13 @@ private:
     Settings& settings;
     SkinDesign design;
     LedLabel nameField { 10.0f }, authorField { 10.0f };
-    juce::TextButton hueButton, knobButton, shadowButton, fontButton { "CHOOSE FONT..." }, fontClear { "X" };
+    juce::TextButton hueButton, knobButton, shadowButton, cornersButton, fontButton { "CHOOSE FONT..." }, fontClear { "X" };
     juce::TextButton startOver { "START OVER" }, loadFolderButton { "LOAD FOLDER..." }, templateButton { "SAVE TEMPLATE..." },
                      exportButton { "EXPORT .EMXD..." };
     juce::OwnedArray<PartTile> tiles;
     juce::OwnedArray<ColourTile> colourTiles;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::String status, fontName;
-    juce::Rectangle<int> rowName, rowFont, colourRow, statusRow;
+    juce::Rectangle<int> rowName, rowFont, colourRow, statusRow, fontRect;
 };
 } // namespace emx

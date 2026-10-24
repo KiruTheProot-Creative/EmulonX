@@ -34,6 +34,7 @@ struct SkinDesign
     bool hueShift = true;      // may the colour shift in Settings move this skin?
     bool knobRotates = false;  // false: the knob image stays and a pointer turns; true: the image itself turns
     bool shadows = true;       // a slight drop shadow under the skin's pictures
+    bool keepCorners = false;  // panels / buttons / displays: false = the whole picture fills them; true = 9-slice (corners kept)
     std::map<juce::String, juce::Colour> colours;
     Blob images[numParts];
     Blob font;

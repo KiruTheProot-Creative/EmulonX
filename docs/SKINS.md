@@ -12,6 +12,7 @@ Open **Settings → Skin designer**. Everything you change shows up in the plugi
 |---|---|
 | **Name / By** | The skin's name and yours. |
 | **Colour shift: allowed / off** | Whether the colour bar in *Settings → Customization* may turn your skin's colours. |
+| **Pictures: fill / keep corners** | *Fill* (default): the whole picture covers each button, display, panel and knob area. *Keep corners*: 9-slice, for frame-style pictures whose corners must not stretch. |
 | **Shadows: on / off** | A slight drop shadow under your pictures (on by default). |
 | **Knob: pointer turns / picture turns** | *Pointer*: your knob picture stays still and a pointer turns on top of it. *Picture*: the picture itself turns. Its marker should point straight up. |
 | **Choose font…** | A `.ttf` or `.otf` file, packed into the skin. It is sized automatically so all text still fits. Only use fonts whose licence lets you share them. |
@@ -37,16 +38,17 @@ Anything you leave out keeps the EMULON CLASSIC look, turned to your accent colo
 | `frame.png` | Window frame | 9-slice over the window edges, middle transparent | 1920 × 1080, like the template |
 | `knob.png` | Knob | Square; a pointer turns on it, or it turns itself | 256 × 256 |
 | `fader.png` | Fader track | Stretched to the fader's height | 35 × 150 |
-| `panel.png` | Panel background | 9-slice | 96 × 96 |
-| `inset.png` | Knob area inside panels | 9-slice | 80 × 80 |
-| `display.png` | Value displays / text fields | 9-slice | 48 × 32 |
-| `button.png` | Buttons | 9-slice | 64 × 36 |
-| `button-on.png` | Buttons that are on | 9-slice | 64 × 36 |
+| `panel.png` | Panel background | Fills it (or 9-slice) | 96 × 96 |
+| `inset.png` | Knob area inside panels | Fills it (or 9-slice) | 80 × 80 |
+| `display.png` | Value displays / text fields | Fills them (or 9-slice) | 48 × 32 |
+| `button.png` | Buttons | Fills them (or 9-slice) | 64 × 36 |
+| `button-on.png` | Buttons that are on | Fills them (or 9-slice) | 64 × 36 |
 | `logo.png` | Top-left logo | Fitted, keeps its shape | 871 × 200, transparent |
 | `fader-knob.png` | The knob that slides on faders | About 32 px wide on screen, keeps its shape | 64 × 32 |
 | any `.ttf` / `.otf` | Font | All text | — |
 
-**9-slice** means the corners keep their shape while the edges and middle stretch. The corner
+With **Pictures: fill**, each picture is stretched over the whole button, display or panel.
+With **Pictures: keep corners** (9-slice),  the corners keep their shape while the edges and middle stretch. The corner
 is a quarter of the picture's shorter side, and it shrinks by the same amount as the rest of
 the picture. So a big, detailed picture (for example a 640 × 96 button) looks like a smaller
 copy of itself, stretched only along its long side. Pictures are drawn at most at half their
@@ -65,6 +67,7 @@ A `.emxd` file is a normal **zip** file containing the part files above plus `sk
   "hueShift": true,
   "knobRotates": false,
   "shadows": true,
+  "keepCorners": false,
   "colours": {
     "accent": "#35d06b",
     "text": "#e8f0ea",
