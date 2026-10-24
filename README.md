@@ -149,8 +149,8 @@ Xcode on macOS). JUCE 9 is downloaded automatically.
 
 Emulon X is free software under the **GNU Affero General Public License v3**
 (see `LICENSE`). It is built with [JUCE](https://juce.com), used under its
-AGPLv3 option. The Orbitron font is under the SIL Open Font License
-(`Assets/fonts/OFL-Orbitron.txt`).
+AGPLv3 option. The Saira font is under the SIL Open Font License
+(`Assets/fonts/OFL-Saira.txt`).
 
 "Emulator X" and "E-mu" are trademarks of their respective owners. Emulon X is
 an independent project and is not affiliated with them.

@@ -81,13 +81,7 @@ void EmulonXEditor::Root::paint (Graphics& g)
     g.drawImage (theme::image (theme::Img::background), getLocalBounds().toFloat(),
                  RectanglePlacement (RectanglePlacement::xMid | RectanglePlacement::yMid | RectanglePlacement::fillDestination));
 
-    const auto f = theme::font (21.0f, 900, 0.14f);
-    auto t = titleArea;
-    GlyphArrangement ga;
-    ga.addLineOfText (f, "EMULON ", 0, 0);
-    const auto w = ga.getBoundingBox (0, -1, true).getWidth();
-    theme::drawGlowText (g, "EMULON", t, f, Colours::white, theme::red.withAlpha (0.8f), 10);
-    theme::drawGlowText (g, "X", t.withTrimmedLeft (w), f, theme::red, theme::red.withAlpha (0.9f), 12);
+    theme::drawLogo (g, titleArea.expanded (0.0f, 2.0f));
 }
 
 void EmulonXEditor::Root::paintOverChildren (Graphics& g)

@@ -484,7 +484,7 @@ void SettingsPanel::paint (Graphics& g)
     if (page == about)
     {
         auto a = content.reduced (16).toFloat();
-        theme::drawGlowText (g, "EMULON X", a.removeFromTop (34.0f), theme::font (24.0f, 900, 0.16f), Colours::white, theme::red.withAlpha (0.8f), 10);
+        theme::drawLogo (g, a.removeFromTop (44.0f));
         g.setColour (theme::red);
         g.setFont (theme::font (10.0f, 700, 0.1f));
         g.drawText ("VERSION " EMX_VERSION_STRING, a.removeFromTop (20.0f), Justification::centredLeft, false);
@@ -492,7 +492,7 @@ void SettingsPanel::paint (Graphics& g)
         g.setColour (theme::textCol);
         g.setFont (theme::font (9.0f, 500, 0.04f));
         g.drawFittedText ("A free and open-source sampler - a spiritual successor to E-mu's Emulator X.\n"
-                          "Licensed under the GNU AGPL v3. Built with JUCE. Orbitron font: SIL Open Font License.",
+                          "Licensed under the GNU AGPL v3. Built with JUCE. Saira font: SIL Open Font License.",
                           a.removeFromTop (40.0f).toNearestInt(), Justification::topLeft, 3, 1.0f);
         a.removeFromTop (40.0f);   // link sits here
         g.setColour (theme::textMuted);

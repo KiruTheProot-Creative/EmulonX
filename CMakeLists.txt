@@ -56,9 +56,10 @@ juce_add_binary_data(EmulonXAssets
         Assets/images/frame.png
         Assets/images/knob.png
         Assets/images/slider.png
-        Assets/fonts/Orbitron-500.ttf
-        Assets/fonts/Orbitron-700.ttf
-        Assets/fonts/Orbitron-900.ttf)
+        Assets/images/logo.png
+        Assets/fonts/Saira-500.ttf
+        Assets/fonts/Saira-700.ttf
+        Assets/fonts/Saira-900.ttf)
 
 set(EMX_SOURCES
     Source/PluginProcessor.cpp

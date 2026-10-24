@@ -369,7 +369,7 @@ void Explorer::rescan()
         addCategory ("SAMPLE FOLDERS", Settings::Folder::samples, Show::samples, "NO FOLDERS - PRESS THE FOLDER + BUTTON");
     else
     {
-        addCategory ("BASE BANKS", Settings::Folder::base, Show::banks, "NONE YET - THEY ARRIVE WITH 1.0");
+        addCategory ("BASE BANKS", Settings::Folder::base, Show::banks, "NONE YET");
         addCategory ("OTHER BANKS", Settings::Folder::other, Show::banks, "NO FOLDERS - PRESS FOLDER +");
         addCategory ("USER", Settings::Folder::user, Show::presets, "NO FOLDERS - PRESS FOLDER +");
     }

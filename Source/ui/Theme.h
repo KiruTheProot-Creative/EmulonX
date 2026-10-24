@@ -28,11 +28,14 @@ juce::Colour hue (juce::uint32 argbInRedDesign);
 /** Same rotation for any colour; lightness is kept so contrast stays the same. */
 juce::Colour rotateHue (juce::Colour, float degrees);
 
-//== Fonts: Orbitron (SIL Open Font License), weights 500 / 700 / 900 ===========
+//== Fonts: Saira (SIL Open Font License), weights 500 / 700 / 900 ==============
 juce::Font font (float height, int weight = 700, float kerning = 0.0f);
 
 //== Artwork (your PNGs, embedded at 2x so they stay sharp up to 200%) ==========
-enum class Img { background, frame, knob, slider };
+enum class Img { background, frame, knob, slider, logo };
+
+/** The Emulon X logo, fitted into the area (keeps its shape), with a soft glow. */
+void drawLogo (juce::Graphics&, juce::Rectangle<float> area, juce::RectanglePlacement = juce::RectanglePlacement::xLeft | juce::RectanglePlacement::yMid);
 juce::Image image (Img which);
 
 //== Drawing helpers =============================================================

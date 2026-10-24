@@ -8,15 +8,18 @@ namespace emx::theme
 {
 static juce::Typeface::Ptr typefaceFor (int weight)
 {
-    static auto w500 = juce::Typeface::createSystemTypefaceFor (EmxAssets::Orbitron500_ttf, (size_t) EmxAssets::Orbitron500_ttfSize);
-    static auto w700 = juce::Typeface::createSystemTypefaceFor (EmxAssets::Orbitron700_ttf, (size_t) EmxAssets::Orbitron700_ttfSize);
-    static auto w900 = juce::Typeface::createSystemTypefaceFor (EmxAssets::Orbitron900_ttf, (size_t) EmxAssets::Orbitron900_ttfSize);
+    static auto w500 = juce::Typeface::createSystemTypefaceFor (EmxAssets::Saira500_ttf, (size_t) EmxAssets::Saira500_ttfSize);
+    static auto w700 = juce::Typeface::createSystemTypefaceFor (EmxAssets::Saira700_ttf, (size_t) EmxAssets::Saira700_ttfSize);
+    static auto w900 = juce::Typeface::createSystemTypefaceFor (EmxAssets::Saira900_ttf, (size_t) EmxAssets::Saira900_ttfSize);
     return weight >= 900 ? w900 : weight >= 700 ? w700 : w500;
 }
 
 juce::Font font (float height, int weight, float kerning)
 {
-    juce::Font f { juce::FontOptions (typefaceFor (weight)).withHeight (height) };
+    // Saira's capitals are smaller for the same font height than the old Orbitron's; this keeps
+    // every size in the interface the same as it was designed (equal capital height).
+    constexpr float capMatch = 1.3137f;
+    juce::Font f { juce::FontOptions (typefaceFor (weight)).withHeight (height * capMatch) };
     return std::abs (kerning) > 1.0e-6f ? f.withExtraKerningFactor (kerning) : f;
 }
 
@@ -203,16 +206,56 @@ juce::Image image (Img which)
         case Img::frame:      src = juce::ImageCache::getFromMemory (EmxAssets::frame_png, EmxAssets::frame_pngSize); break;
         case Img::knob:       src = juce::ImageCache::getFromMemory (EmxAssets::knob_png, EmxAssets::knob_pngSize); break;
         case Img::slider:     src = juce::ImageCache::getFromMemory (EmxAssets::slider_png, EmxAssets::slider_pngSize); break;
+        case Img::logo:       src = juce::ImageCache::getFromMemory (EmxAssets::logo_png, EmxAssets::logo_pngSize); break;
     }
     if (std::abs (currentShift) < 0.01f || ! src.isValid())
         return src;
 
     struct Tinted { float shift = 0.0f; juce::Image img; };
-    static Tinted tinted[4];
+    static Tinted tinted[5];
     auto& t = tinted[(int) which];
     if (! t.img.isValid() || std::abs (t.shift - currentShift) > 0.01f)
         t = { currentShift, recolour (src, currentShift) };
     return t.img;
+}
+
+void drawLogo (juce::Graphics& g, juce::Rectangle<float> area, juce::RectanglePlacement placement)
+{
+    const auto img = image (Img::logo);
+    if (! img.isValid())
+        return;
+    const auto dest = placement.appliedTo (img.getBounds().toFloat(), area);
+
+    // logo + soft glow, rendered once per size, screen scale and hue (the title is repainted often)
+    const float px = g.getInternalContext().getPhysicalPixelScaleFactor();
+    const float pad = dest.getHeight() * 0.35f;
+    const int w = juce::jmax (1, juce::roundToInt ((dest.getWidth() + 2.0f * pad) * px));
+    const int h = juce::jmax (1, juce::roundToInt ((dest.getHeight() + 2.0f * pad) * px));
+    struct Cache { int w = 0, h = 0; float shift = 1000.0f; juce::Image img; };
+    static Cache cache;
+    if (cache.w != w || cache.h != h || std::abs (cache.shift - currentShift) > 0.01f)
+    {
+        juce::Image out (juce::Image::ARGB, w, h, true);
+        {
+            juce::Graphics cg (out);
+            cg.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+            const auto inner = juce::Rectangle<float> (pad * px, pad * px, dest.getWidth() * px, dest.getHeight() * px);
+            juce::Image shape (juce::Image::ARGB, w, h, true);
+            {
+                juce::Graphics sg (shape);
+                sg.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+                sg.drawImage (img, inner);
+            }
+            juce::DropShadow (red.withAlpha (0.45f), juce::roundToInt (dest.getHeight() * 0.3f * px), {}).drawForImage (cg, shape);
+            cg.setOpacity (1.0f);   // the shadow leaves its own colour (45 %) set
+            cg.drawImageAt (shape, 0, 0);
+        }
+        cache = { w, h, currentShift, out };
+    }
+    juce::Graphics::ScopedSaveState state (g);
+    g.setOpacity (1.0f);
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImage (cache.img, dest.expanded (pad));
 }
 
 void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, float radius)
