@@ -31,7 +31,8 @@ private:
     juce::Viewport viewport;
     int selected = -1;
     juce::TextButton addButton { "ADD CURRENT" }, loadButton { "LOAD" }, removeButton { "REMOVE" },
-                     openButton { "OPEN..." }, exportButton { "EXPORT..." }, clearButton { "CLEAR" };
+                     openButton { "OPEN..." }, exportButton { "EXPORT..." }, clearButton { "CLEAR" },
+                     sortButton { "SORT A-Z" };
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Rectangle<float> listArea;
 };

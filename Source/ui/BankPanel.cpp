@@ -137,6 +137,8 @@ BankPanel::BankPanel (EmulonXProcessor& p) : proc (p)
     removeButton.setTooltip ("Take the selected preset out of the bank");
     removeButton.onClick = [this] { proc.removeBankEntry (selected); };
     clearButton.setTooltip ("Empty the bank");
+    sortButton.setTooltip ("Put the presets in name order, like the Windows file explorer (Pad 2 before Pad 10)");
+    sortButton.onClick = [this] { select (proc.sortBank (selected)); };
     clearButton.onClick = [this] { proc.clearBank(); };
 
     openButton.setTooltip ("Open an .emxb bank file into this list");
@@ -172,7 +174,7 @@ BankPanel::BankPanel (EmulonXProcessor& p) : proc (p)
                               });
     };
 
-    for (auto* b : { &addButton, &loadButton, &removeButton, &openButton, &exportButton, &clearButton })
+    for (auto* b : { &addButton, &loadButton, &removeButton, &openButton, &exportButton, &clearButton, &sortButton })
         addAndMakeVisible (b);
 
     proc.addChangeListener (this);
@@ -207,6 +209,7 @@ void BankPanel::refresh()
     const bool any = n > 0;
     for (auto* b : { &exportButton, &clearButton })
         b->setEnabled (any);
+    sortButton.setEnabled (n > 1);
     addButton.setEnabled (! proc.getZones().empty());
     select (selected);
     resized();
@@ -226,7 +229,7 @@ void BankPanel::resized()
     auto colA = side.removeFromLeft (104);
     side.removeFromLeft (6);
     auto colB = side;
-    for (auto* b : { &addButton, &loadButton, &removeButton })
+    for (auto* b : { &addButton, &loadButton, &removeButton, &sortButton })
     {
         b->setBounds (colA.removeFromTop (24));
         colA.removeFromTop (6);

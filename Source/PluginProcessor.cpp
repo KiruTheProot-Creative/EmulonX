@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginProcessor.h"
+#include "NaturalSort.h"
 #include "PluginEditor.h"
 
 namespace emx
@@ -890,6 +891,25 @@ void EmulonXProcessor::removeBankEntry (int index)
     if (index >= 0 && index < (int) bank.size())
         bank.erase (bank.begin() + index);
     sendChangeMessage();
+}
+
+int EmulonXProcessor::sortBank (int keepIndex)
+{
+    std::vector<int> order ((size_t) bank.size());
+    for (size_t i = 0; i < order.size(); ++i)
+        order[i] = (int) i;
+    std::stable_sort (order.begin(), order.end(), [this] (int a, int b) { return naturalLess (bank[(size_t) a].name, bank[(size_t) b].name); });
+    std::vector<BankEntry> sorted;
+    int newIndex = -1;
+    for (size_t i = 0; i < order.size(); ++i)
+    {
+        if (order[i] == keepIndex)
+            newIndex = (int) i;
+        sorted.push_back (std::move (bank[(size_t) order[i]]));
+    }
+    bank = std::move (sorted);
+    sendChangeMessage();
+    return newIndex;
 }
 
 void EmulonXProcessor::clearBank()

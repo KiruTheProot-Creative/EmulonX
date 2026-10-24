@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Explorer.h"
+#include "../NaturalSort.h"
 #include "Theme.h"
 #include "../PluginProcessor.h"
 
@@ -188,22 +189,23 @@ public:
                 else if (accepts (f))
                     files.add (f);
             }
-            auto byName = [] (const File& a, const File& b) { return a.getFileName().compareNatural (b.getFileName()) < 0; };
-            std::sort (dirs.begin(), dirs.end(), byName);
-            std::sort (files.begin(), files.end(), byName);
+            // shown names (without .emxp / .emxb), sorted like the Windows file explorer
+            auto shownName = [] (const File& f)
+            {
+                auto name = f.getFileName();
+                for (auto ext : { ".emxp.zip", ".emxb.zip", ".emxp", ".emxb" })
+                    if (name.endsWithIgnoreCase (ext))
+                        return name.dropLastCharacters ((int) strlen (ext));
+                return name;
+            };
+            std::sort (dirs.begin(), dirs.end(), [] (const File& a, const File& b) { return naturalLess (a.getFileName(), b.getFileName()); });
+            std::sort (files.begin(), files.end(), [&] (const File& a, const File& b) { return naturalLess (shownName (a), shownName (b)); });
             for (auto& d : dirs)
                 addSubItem (new Item (explorer, Kind::folder, d.getFileName(), d, show));
             for (auto& f : files)
             {
                 const auto k = loader::isBankFile (f) ? Kind::bank : loader::isPresetFile (f) ? Kind::preset : Kind::audio;
-                auto name = f.getFileName();
-                for (auto ext : { ".emxp.zip", ".emxb.zip", ".emxp", ".emxb" })
-                    if (name.endsWithIgnoreCase (ext))
-                    {
-                        name = name.dropLastCharacters ((int) strlen (ext));
-                        break;
-                    }
-                addSubItem (new Item (explorer, k, name, f, show));
+                addSubItem (new Item (explorer, k, shownName (f), f, show));
             }
             if (! file.isDirectory())
                 addSubItem (new Item (explorer, Kind::placeholder, "FOLDER NOT FOUND"));
@@ -213,7 +215,11 @@ public:
         else if (kind == Kind::bank)
         {
             const auto info = loader::readBankInfo (file);
+            std::vector<int> order;   // the bank's presets, sorted by name (Windows-explorer style)
             for (int i = 0; i < info.presetEntries.size(); ++i)
+                order.push_back (i);
+            std::stable_sort (order.begin(), order.end(), [&info] (int a, int b) { return naturalLess (info.presetNames[a], info.presetNames[b]); });
+            for (int i : order)
             {
                 auto* it = new Item (explorer, Kind::bankPreset, info.presetNames[i], file, show);
                 it->bankEntry = info.presetEntries[i];

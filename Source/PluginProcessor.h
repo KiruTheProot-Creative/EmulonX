@@ -203,6 +203,9 @@ public:
     const std::vector<BankEntry>& getBank() const noexcept { return bank; }
     void addCurrentPresetToBank();
     void removeBankEntry (int index);
+    /** Puts the bank's presets in name order (Windows-explorer style); returns where the preset
+        that was at keepIndex ended up (-1 if none). */
+    int sortBank (int keepIndex);
     void clearBank();
     void loadBankEntry (int index);
     void openBank (const juce::File&);

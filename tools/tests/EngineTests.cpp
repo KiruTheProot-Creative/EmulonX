@@ -7,6 +7,7 @@
 #include "engine/SampleLoader.h"
 #include "fx/FxEngine.h"
 #include "engine/Arpeggiator.h"
+#include "NaturalSort.h"
 
 using namespace emx;
 using namespace juce;
@@ -952,6 +953,17 @@ int main (int argc, char** argv)
                        << " dB, level " << String (lvEarly, 3) << ">" << String (lvLate, 3) << (good ? "" : " BAD") << "  ";
             }
             check (ok, "shimmer stays smooth with a long held note", report);
+        }
+
+        // Preset names sort like the Windows file explorer: no case, numbers by value.
+        {
+            const StringArray want { "EMX - A001 - BASS 001", "EMX - A001 - BASS 002", "EMX - A001 - BASS 010", "EMX - B001 - KEYS 001",
+                                     "emx - b002 - keys 001", "Pad", "Pad 2", "Pad 10", "pad 11", "Strings" };
+            StringArray got;
+            for (int i : { 7, 3, 9, 0, 5, 8, 2, 4, 1, 6 })
+                got.add (want[i]);
+            std::sort (got.begin(), got.end(), emx::naturalLess);
+            check (got == want, "preset names sort like the Windows file explorer", got.joinIntoString (" | "));
         }
 
         // Every reverb type stays stable at maximum size and decay (Shimmer feeds itself).
