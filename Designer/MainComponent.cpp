@@ -69,6 +69,7 @@ Colour PartsPanel::swatchFor (const String& key) const
     if (key == "heading") return d->heading;
     if (key == "inset") return d->inset.fill.average();
     if (key == "display") return d->display.fill.average();
+    if (key == "screen") return d->screen.fill.average();
     if (key == "list") return d->list;
     if (key == "button") return d->button.fill.average();
     if (key == "buttonOn") return d->buttonOn.fill.average();

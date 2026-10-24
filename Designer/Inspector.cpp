@@ -333,7 +333,7 @@ private:
     Image thumb;
 };
 
-/** The overlay texture tiles: none, the built-in metals, your own. */
+/** The overlay texture tiles: none, the built-in metals, your own ones, and "+" to add another. */
 class TexturePicker final : public Row
 {
 public:
@@ -344,14 +344,31 @@ public:
     int heightFor (int width) const override
     {
         const int tileH = (int) ((float) (width - 12) / 3.0f / 1.4f);
-        return 2 * (tileH + 6);
+        const int count = 1 + SkinDocument::builtInTextures().size() + doc.ownTextures().size() + 1;
+        return ((count + 2) / 3) * (tileH + 6);
     }
     void paint (Graphics& g) override
     {
-        const auto current = doc.get (base + ".tex").toString();
         for (auto& t : tiles())
         {
             const auto r = t.r.toFloat();
+            if (t.id == "add")
+            {
+                Path p;
+                p.addRoundedRectangle (r.reduced (0.5f), 5.0f);
+                Path dashed;
+                const float dashes[] { 4.0f, 3.0f };
+                PathStrokeType (1.0f).createDashedStroke (dashed, p, dashes, 2);
+                g.setColour (Colour (0xff8a7a84));
+                g.fillPath (dashed);
+                g.setColour (theme::textCol);
+                g.setFont (theme::font (16.0f, 700));
+                g.drawText ("+", r.withTrimmedBottom (r.getHeight() * 0.35f), Justification::centred, false);
+                g.setColour (theme::textMuted);
+                g.setFont (theme::font (7.0f, 700, 0.08f));
+                g.drawText ("ADD A TEXTURE", r.withTrimmedTop (r.getHeight() * 0.55f), Justification::centred, false);
+                continue;
+            }
             g.setColour (Colour (0xff0b090c));
             g.fillRoundedRectangle (r, 5.0f);
             const auto img = thumbFor (t.id);
@@ -365,30 +382,18 @@ public:
             }
             else if (t.id == "none")
             {
+                Graphics::ScopedSaveState state (g);
+                g.reduceClipRegion (t.r);
                 g.setColour (Colour (0xff1a171c));
                 for (float x = r.getX() - r.getHeight(); x < r.getRight(); x += 12.0f)
                     g.drawLine (x, r.getBottom(), x + r.getHeight(), r.getY(), 6.0f);
-            }
-            const bool on = t.id == current || (t.id == "none" && current.isEmpty());
-            if (t.id == "add")
-            {
-                Path p;
-                p.addRoundedRectangle (r.reduced (0.5f), 5.0f);
-                Path dashed;
-                const float dashes[] { 4.0f, 3.0f };
-                PathStrokeType (1.0f).createDashedStroke (dashed, p, dashes, 2);
-                g.setColour (Colour (0xff6a5f66));
-                g.fillPath (dashed);
-                g.setColour (theme::textMuted);
-                g.setFont (theme::font (7.5f, 700, 0.08f));
-                g.drawFittedText (t.title, t.r.reduced (4), Justification::centred, 2);
-                continue;
             }
             g.setColour (Colours::black.withAlpha (0.7f));
             g.fillRect (r.withTop (r.getBottom() - 14.0f).reduced (1.0f, 0.0f));
             g.setColour (Colours::white);
             g.setFont (theme::font (7.0f, 700, 0.08f));
-            g.drawText (t.title, r.withTop (r.getBottom() - 14.0f), Justification::centred, false);
+            g.drawText (t.title, r.withTop (r.getBottom() - 14.0f).reduced (3.0f, 0.0f), Justification::centred, true);
+            const bool on = isSelected (t.id);
             g.setColour (on ? theme::red : Colours::black);
             g.drawRoundedRectangle (r.reduced (on ? 1.0f : 0.5f), 5.0f, on ? 2.0f : 1.0f);
         }
@@ -411,8 +416,26 @@ public:
                     const auto name = importPicture (doc, fc.getResult(), "images");
                     if (name.isEmpty())
                         return;
-                    doc.set (base + ".custom", name, base);
-                    pick ("custom");
+                    doc.addOwnTexture (name);
+                    pick ("own:" + name);
+                });
+                return;
+            }
+            if (t.id.startsWith ("own:") && e.mods.isPopupMenu())
+            {
+                const auto file = t.id.fromFirstOccurrenceOf ("own:", false, false);
+                const bool used = doc.textureInUse (file, base);
+                PopupMenu m;
+                m.addItem (1, used ? "Used by another part - can't remove" : "Remove from this skin", ! used);
+                SafePointer<TexturePicker> safe (this);
+                m.showMenuAsync (PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (t.r)), [safe, file] (int r)
+                {
+                    if (safe == nullptr || r != 1)
+                        return;
+                    if (safe->isSelected ("own:" + file))
+                        safe->doc.set (safe->base + ".tex", "none");
+                    safe->doc.removeOwnTexture (file);
+                    if (safe->rebuild) later (safe->rebuild);
                 });
                 return;
             }
@@ -422,15 +445,22 @@ public:
     }
 private:
     struct Tile { String id, title; Rectangle<int> r; };
+    bool isSelected (const String& id) const
+    {
+        const auto tex = doc.get (base + ".tex").toString();
+        if (id.startsWith ("own:"))
+            return tex == "custom" && doc.get (base + ".custom").toString() == id.substring (4);
+        return id == tex || (id == "none" && tex.isEmpty());
+    }
     std::vector<Tile> tiles() const
     {
         std::vector<Tile> t { { "none", "NONE", {} } };
         for (int i = 0; i < SkinDocument::builtInTextures().size(); ++i)
             t.push_back ({ SkinDocument::builtInTextures()[i], SkinDocument::builtInTextureTitles()[i], {} });
-        const bool hasOwn = doc.get (base + ".custom").toString().isNotEmpty();
-        if (hasOwn)
-            t.push_back ({ "custom", "YOURS", {} });
-        t.push_back ({ "add", hasOwn ? "REPLACE YOURS" : "+ ADD YOUR OWN", {} });
+        const auto own = doc.ownTextures();
+        for (int i = 0; i < own.size(); ++i)
+            t.push_back ({ "own:" + own[i], own[i].fromLastOccurrenceOf ("/", false, false).upToLastOccurrenceOf (".", false, false).toUpperCase(), {} });
+        t.push_back ({ "add", {}, {} });
         const int w = (getWidth() - 12) / 3, h = (int) ((float) w / 1.4f);
         for (size_t i = 0; i < t.size(); ++i)
             t[i].r = { (int) (i % 3) * (w + 6), (int) (i / 3) * (h + 6), w, h };
@@ -449,10 +479,17 @@ private:
             }
             return img;
         }
-        if (id == "custom")
+        if (id.startsWith ("own:"))
         {
-            const auto data = doc.fileData (doc.get (base + ".custom").toString());
-            return data.getSize() > 0 ? ImageFileFormat::loadFrom (data.getData(), data.getSize()) : Image();
+            const auto file = id.substring (4);
+            auto& img = ownThumbs[file];
+            if (! img.isValid())
+            {
+                const auto data = doc.fileData (file);
+                if (data.getSize() > 0)
+                    img = ImageFileFormat::loadFrom (data.getData(), data.getSize()).rescaled (160, 160);
+            }
+            return img;
         }
         return {};
     }
@@ -462,13 +499,54 @@ private:
             doc.set (base + ".strength", 0.6, base);
         if (doc.get (base + ".blend").isVoid())
             doc.set (base + ".blend", "overlay", base);
-        doc.set (base + ".tex", id, base);
+        if (id.startsWith ("own:"))
+        {
+            doc.set (base + ".custom", id.substring (4), base);
+            doc.set (base + ".tex", "custom", base);
+        }
+        else
+            doc.set (base + ".tex", id, base);
         if (rebuild) later (rebuild);
     }
     SkinDocument& doc;
     String base;
     std::function<void()> rebuild;
     std::unique_ptr<FileChooser> chooser;
+    mutable std::map<String, Image> ownThumbs;
+};
+
+/** A drop-down list of choices. */
+class DropdownRow final : public Row
+{
+public:
+    DropdownRow (SkinDocument& d, String p, String l, StringArray vals, StringArray labels, String def, std::function<void()> rb)
+        : doc (d), path (std::move (p)), label (std::move (l)), values (std::move (vals)), fallback (std::move (def)), rebuild (std::move (rb))
+    {
+        for (int i = 0; i < labels.size(); ++i)
+            box.addItem (labels[i].toUpperCase(), i + 1);
+        box.onChange = [this]
+        {
+            const int i = box.getSelectedItemIndex();
+            if (i >= 0 && values[i] != current())
+            {
+                doc.set (path, values[i]);
+                if (rebuild) later (rebuild);
+            }
+        };
+        addAndMakeVisible (box);
+        refresh();
+    }
+    void refresh() override { box.setSelectedItemIndex (jmax (0, values.indexOf (current())), dontSendNotification); }
+    void resized() override { box.setBounds (getLocalBounds().withTrimmedLeft (labelWidth).reduced (0, 3)); }
+    void paint (Graphics& g) override { paintLabel (g, getLocalBounds().withWidth (labelWidth - 6), label); }
+private:
+    String current() const { const auto v = doc.get (path); return v.isVoid() ? fallback : v.toString(); }
+    SkinDocument& doc;
+    String path, label;
+    StringArray values;
+    String fallback;
+    std::function<void()> rebuild;
+    ComboBox box;
 };
 
 class FontRow final : public Row
@@ -592,6 +670,22 @@ struct Builder
         choice (path, label, { true, false }, { onText, offText }, def, false);
     }
     void picture (const String& path, const String& label) { rows.push_back (std::make_unique<PictureRow> (doc, path, label, rebuild)); }
+    void dropdown (const String& path, const String& label, StringArray values, StringArray labels, const String& def)
+    {
+        rows.push_back (std::make_unique<DropdownRow> (doc, path, label, values, labels, def, rebuild));
+    }
+
+    void effects (const String& base)
+    {
+        heading ("Effects", "drawn over this part");
+        number (base + ".fx.blur", "Blur", 0, 12, 0.25, "px", 0);
+        percent (base + ".fx.bloom", "Bloom", 0);
+        number (base + ".fx.bloomSize", "Bloom size", 1, 32, 0.5, "px", 8);
+        percent (base + ".fx.bloomThreshold", "Bloom from", 0.55);
+        note ("**Blur** softens the whole part, like a Gaussian blur. **Bloom** makes its bright areas glow, like light spilling "
+              "out of a screen. **Bloom size** is how far the glow spreads; **Bloom from** is how bright something has to be to "
+              "glow (lower = more of it glows). Double-click a slider to reset it.", true);
+    }
 
     void fill (const String& path)
     {
@@ -699,9 +793,32 @@ void ColourSwatch::mouseUp (const MouseEvent& e)
 }
 
 //== Inspector ======================================================================
-std::vector<std::unique_ptr<Row>> Inspector::rowsFor (const String& part, SkinDocument& doc, std::function<void()> rebuild)
+std::vector<std::unique_ptr<Row>> Inspector::rowsFor (const String& part, int page, SkinDocument& doc, std::function<void()> rebuild)
 {
     Builder b { doc, std::move (rebuild), {} };
+    if (page == 1)
+    {
+        const bool tabsLikeButtons = doc.get ("tab.same").isVoid() || (bool) doc.get ("tab.same");
+        if (part == "list" || part == "label" || part == "type")
+        {
+            b.heading ("Effects");
+            b.note ("Effects work on the parts Emulon X draws as surfaces and on panel titles. List text and knob captions "
+                    "are drawn by the lists and knobs themselves, so they can't take effects yet.");
+        }
+        else if (part == "screen" && (doc.get ("screen.same").isVoid() || (bool) doc.get ("screen.same")))
+        {
+            b.heading ("Effects");
+            b.note ("Screens look like the displays, so they use the displays' effects. Choose Own look on the Style page to give screens their own.");
+        }
+        else if (part == "tab" && tabsLikeButtons)
+        {
+            b.heading ("Effects");
+            b.note ("Tabs look like the buttons, so they use the buttons' effects. Choose Own look on the Style page to give tabs their own.");
+        }
+        else
+            b.effects (part);
+        return std::move (b.rows);
+    }
     const auto mu = String (CharPointer_UTF8 ("\xc2\xb0"));
     if (part == "window")
     {
@@ -770,6 +887,37 @@ std::vector<std::unique_ptr<Row>> Inspector::rowsFor (const String& part, SkinDo
         b.shape ("display", 14, 4);
         b.overlay ("display");
     }
+    else if (part == "screen")
+    {
+        b.heading ("Screens", "behind the waveform and the step sequencer");
+        b.choice ("screen.same", "Surface", { true, false }, { "Like displays", "Own look" }, true, true, [&doc] (const var& v)
+        {
+            if (! (bool) v && doc.get ("screen.fill").isVoid())
+                for (auto k : { "fill", "radius", "shape", "outline", "outlineColor" })   // start the own look from the displays
+                    if (! doc.get (String ("display.") + k).isVoid())
+                        doc.set (String ("screen.") + k, cloneVar (doc.get (String ("display.") + k)), "screen-own");
+        });
+        const auto defaultPattern = doc.get ("display.scanlines").isVoid() || (bool) doc.get ("display.scanlines") ? String ("scanlines") : String ("none");
+        b.heading ("Pattern and glass", "only on these screens");
+        b.dropdown ("screen.pattern", "Pattern", { "none", "scanlines", "grid", "dots", "stripes" },
+                    { "None", "Scan lines", "Grid", "Dots (LCD matrix)", "Stripes" }, defaultPattern);
+        const auto pattern = doc.get ("screen.pattern").isVoid() ? defaultPattern : doc.get ("screen.pattern").toString();
+        if (pattern != "none")
+        {
+            b.colour ("screen.patternColor", "Pattern colour");
+            b.percent ("screen.patternStrength", "Pattern strength", 1.0);
+        }
+        b.toggle ("screen.glass", "Glass", false);
+        b.note ("These settings change only the backgrounds of the waveform (Editor) and the step sequencer (Arp) - every other display stays as it is. "
+                "**Glass** adds a glossy reflection. A light pattern colour shows best on dark screens, a dark one on light screens.");
+        if (! (doc.get ("screen.same").isVoid() || (bool) doc.get ("screen.same")))
+        {
+            b.heading ("Surface");
+            b.fill ("screen.fill");
+            b.shape ("screen", 14, 4);
+            b.overlay ("screen");
+        }
+    }
     else if (part == "list")
     {
         b.heading ("Lists");
@@ -832,9 +980,18 @@ std::vector<std::unique_ptr<Row>> Inspector::rowsFor (const String& part, SkinDo
         b.choice ("knob.style", "Style", { "cap", "ring", "picture" }, { "Cap", "Ring", "Picture" }, "cap", true);
         if (doc.get ("knob.style").toString() == "picture")
         {
-            b.heading ("Picture");
-            b.picture ("knob.picture", "Knob picture");
-            b.note ("A square PNG that turns with the value, pointing up at the middle position.");
+            b.heading ("Lower layer", "drawn first");
+            b.picture ("knob.lower.picture", "Picture");
+            b.choice ("knob.lower.turns", "Movement", { true, false }, { "Turns", "Stays still" }, false, false);
+            b.heading ("Upper layer", "drawn on top");
+            b.picture ("knob.upper.picture", "Picture");
+            b.choice ("knob.upper.turns", "Movement", { true, false }, { "Turns", "Stays still" }, true, false);
+            b.note ("Square PNGs (see-through where there's nothing), pointing up at the middle position. For example: a still "
+                    "base with a turning cap on top, or a turning knob with a still glossy highlight over it.");
+            b.heading ("Ring", "around the pictures");
+            b.number ("knob.ring", "Thickness", 0, 8, 0.25, "px", 0);
+            b.colour ("knob.ringTrack", "Track");
+            b.colour ("knob.ringColor", "Value");
         }
         else
         {
@@ -885,6 +1042,12 @@ Inspector::Inspector (SkinDocument& d) : doc (d)
     viewport.setScrollBarsShown (true, false);
     viewport.setScrollBarThickness (8);
     addAndMakeVisible (viewport);
+    styleTab.setTooltip ("Colours, fills, shapes and textures of this part");
+    fxTab.setTooltip ("Blur and bloom for this part");
+    styleTab.onClick = [this] { page = 0; viewport.setViewPosition (0, 0); rebuild(); };
+    fxTab.onClick = [this] { page = 1; viewport.setViewPosition (0, 0); rebuild(); };
+    addAndMakeVisible (styleTab);
+    addAndMakeVisible (fxTab);
     doc.addChangeListener (this);
     rebuild();
 }
@@ -901,7 +1064,9 @@ void Inspector::show (const String& key)
 void Inspector::rebuild()
 {
     SafePointer<Inspector> safe (this);
-    rows = rowsFor (part, doc, [safe] { if (safe != nullptr) safe->rebuild(); });
+    rows = rowsFor (part, page, doc, [safe] { if (safe != nullptr) safe->rebuild(); });
+    styleTab.setToggleState (page == 0, dontSendNotification);
+    fxTab.setToggleState (page == 1, dontSendNotification);
     for (auto& r : rows)
         content.addAndMakeVisible (*r);
     seenStructure = doc.getStructureRevision();
@@ -935,7 +1100,10 @@ void Inspector::layoutRows()
 
 void Inspector::resized()
 {
-    viewport.setBounds (getLocalBounds().withTrimmedTop (42));
+    auto tabs = getLocalBounds().withTrimmedTop (36).withHeight (26);
+    styleTab.setBounds (tabs.removeFromLeft (tabs.getWidth() / 2).reduced (0, 0).withTrimmedRight (3));
+    fxTab.setBounds (tabs.withTrimmedLeft (3));
+    viewport.setBounds (getLocalBounds().withTrimmedTop (72));
     layoutRows();
 }
 

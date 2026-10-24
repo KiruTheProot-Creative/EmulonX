@@ -54,6 +54,9 @@ Numbers are in pixels unless noted. Anything left out keeps the Emulon Classic v
   "heading": { "color": COLOUR },                       // panel titles
   "inset":   BOX + { "innerShadow": 0-1 },              // the areas that hold knobs
   "display": BOX + { "textColor": COLOUR, "glow": 0-1, "scanlines": true },
+  "screen":  { "same": true,                            // backgrounds of the waveform and step sequencer only:
+               "pattern": "none|scanlines|grid|dots|stripes", "patternColor": COLOUR, "patternStrength": 0-1,
+               "glass": false }                         // surface like the displays, or with "same": false + the BOX fields
   "list":    { "color": COLOUR },                       // names in lists
   "button":  BOX + { "textColor": COLOUR, "bevel": 0-1 },  // bevel = shine on the upper half
   "buttonOn": BOX + { "textColor": COLOUR, "glow": 0-1 },
@@ -61,7 +64,9 @@ Numbers are in pixels unless noted. Anything left out keeps the Emulon Classic v
           // { "same": false, "fill": FILL, "onFill": FILL, "textColor": COLOUR, + the BOX shape fields }
   "knob":    { "style": "cap|ring|picture", "capA": COLOUR, "capB": COLOUR, "ring": 0-16,
                "ringTrack": COLOUR, "ringColor": COLOUR, "pointer": COLOUR, "pointerGlow": 0-1,
-               "picture": "images/knob.png", "overlay": OVERLAY },
+               "lower": { "picture": "images/base.png", "turns": false },   // picture knobs: two layers,
+               "upper": { "picture": "images/cap.png",  "turns": true },    // each turning with the value or not
+               "overlay": OVERLAY },
   "fader":   { "track": COLOUR, "fill": COLOUR, "thumbA": COLOUR, "thumbB": COLOUR,
                "thumbPic": "images/handle.png", "overlay": OVERLAY },
   "label":   { "color": COLOUR }                        // captions under knobs
@@ -76,6 +81,13 @@ Numbers are in pixels unless noted. Anything left out keeps the Emulon Classic v
 "shadowY": 0, "shadowBlur": 0, "shadowOpacity": 0, "overlay": OVERLAY }`.
 `shape` is the corner roundness: 0 cuts the corners straight, 0.5 is a normal round corner, 1 is an extra-smooth squircle.
 A `shadowBlur` of 0 gives a hard, cartoon-style shadow.
+
+**FX** (in any part, as `"fx"`): `{ "blur": 0-24, "bloom": 0-1, "bloomSize": 1-48, "bloomThreshold": 0-1 }`.
+Blur softens the part like a Gaussian blur; bloom makes its bright areas glow (bloomSize = how far, bloomThreshold =
+how bright something has to be to glow).
+
+`"textureLibrary": ["images/grain.png", ...]` lists your own textures in the skin (Emulon X SD keeps them there so any
+part can use them); a part uses one with `"overlay": { "tex": "custom", "custom": "images/grain.png" }`.
 
 **OVERLAY**: `{ "tex": "none" | "<name>" | "custom", "custom": "images/my-texture.png", "strength": 0-1, "blend": "overlay|soft-light" }`.
 A named texture is read from `textures/<name>.jpg` (or `.png`) inside the skin, so a skin always carries its own textures.

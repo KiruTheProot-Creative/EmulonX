@@ -447,7 +447,7 @@ public:
 
     void paint (Graphics& g) override
     {
-        theme::drawScreen (g, getLocalBounds().toFloat());
+        theme::drawScreen (g, getLocalBounds().toFloat(), false);   // a display, not a waveform / step screen
         const auto* E = env();
         if (E == nullptr)
             return;

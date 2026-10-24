@@ -43,6 +43,16 @@ struct Overlay
     bool isActive() const noexcept { return lighter.isValid() && strength > 0.001f; }
 };
 
+/** Effects drawn over a part: a Gaussian-style blur and a bloom (a glow around its bright areas). */
+struct Effects
+{
+    float blur = 0.0f;              // pixels
+    float bloom = 0.0f;             // 0..1: how strong the glow is
+    float bloomSize = 8.0f;         // pixels: how far it spreads
+    float bloomThreshold = 0.55f;   // 0..1: from which brightness things glow
+    bool isActive() const noexcept { return blur > 0.05f || bloom > 0.001f; }
+};
+
 /** A rounded surface: panels, knob areas, displays, buttons, tabs. */
 struct Box
 {
@@ -53,11 +63,13 @@ struct Box
     juce::Colour outlineColour { 0xff000000 };
     float shadowY = 0.0f, shadowBlur = 0.0f, shadowOpacity = 0.0f;
     Overlay overlay;
+    Effects fx;
 };
 
 /** Everything a custom skin defines, with links to the palette already resolved. */
 struct Design
 {
+    int uid = 0;                 // different for every design that's built (drawing caches use it)
     juce::String name { "Custom skin" }, author;
     bool hueShift = true;        // may players turn this skin to another colour?
     juce::Colour accent { 0xffff2a2a }, text { 0xffe8e4e4 }, muted { 0xffb8a6a6 },
@@ -75,6 +87,7 @@ struct Design
     juce::Colour patternColour { 0xffff2a2a };
     float patternOpacity = 0.12f;
     Overlay windowOverlay;
+    Effects windowFx, frameFx, topBarFx, headingFx, knobFx, faderFx;
     float frameWidth = 3.0f;
     juce::Colour frameColour { 0xff000000 };
 
@@ -95,6 +108,16 @@ struct Design
     juce::Colour displayText { 0xffff2a2a };
     float displayGlow = 0.55f;
     bool scanlines = true;
+
+    // screens: the backgrounds of the waveform and the step sequencer only. Their surface is like the
+    // displays' or their own; pattern and glass are theirs alone.
+    enum class ScreenPattern { none, scanlines, grid, dots, stripes };
+    bool screensLikeDisplays = true;
+    Box screen;
+    ScreenPattern graphPattern = ScreenPattern::scanlines;
+    float graphPatternStrength = 1.0f;
+    juce::Colour graphPatternColour { 0xff000000 };
+    bool graphGlass = false;
     juce::Colour list { 0xffff4a4a };
 
     // controls
@@ -114,7 +137,8 @@ struct Design
     float ring = 0.0f;
     juce::Colour ringTrack { 0xff2a262c }, ringValue { 0xffff2a2a }, pointer { 0xffff2a2a };
     float pointerGlow = 0.9f;
-    Picture knobPicture;
+    Picture knobLower, knobUpper;            // picture knobs: two layers, each turning with the value or not
+    bool lowerTurns = false, upperTurns = true;
     Overlay knobOverlay;
 
     juce::Colour faderTrack { 0xff2a262c }, faderFill { 0xffff2a2a }, thumbTop { 0xff8a8590 }, thumbBottom { 0xff202025 };

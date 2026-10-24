@@ -13,7 +13,7 @@ const std::vector<Part>& allParts()
     static const std::vector<Part> parts {
         { "window", "Background", "WINDOW" }, { "frame", "Window frame", "WINDOW" }, { "topbar", "Top bar & logo", "WINDOW" },
         { "panel", "Panels", "SURFACES" }, { "heading", "Panel titles", "SURFACES" }, { "inset", "Knob areas", "SURFACES" },
-        { "display", "Displays", "READOUTS" }, { "list", "List text", "READOUTS" },
+        { "display", "Displays", "READOUTS" }, { "screen", "Screens (graphs)", "READOUTS" }, { "list", "List text", "READOUTS" },
         { "button", "Buttons", "CONTROLS" }, { "buttonOn", "Buttons (on)", "CONTROLS" }, { "tab", "Tabs", "CONTROLS" },
         { "knob", "Knobs", "CONTROLS" }, { "fader", "Faders", "CONTROLS" }, { "label", "Knob captions", "CONTROLS" },
         { "type", "Font", "TYPE" } };
@@ -266,6 +266,7 @@ void PreviewView::drawPreview (Graphics& g, const skin::Design& d)
                 }
                 g.drawImage (glow, Rectangle<float> (dest.getX() - 10.0f, dest.getY() - 10.0f, dest.getWidth() + 20.0f, dest.getHeight() + 20.0f));
             }
+            g.setOpacity (1.0f);
             g.setImageResamplingQuality (Graphics::highResamplingQuality);
             g.drawImage (logo, dest);
             hit (dest, "topbar");
@@ -294,19 +295,22 @@ void PreviewView::drawPreview (Graphics& g, const skin::Design& d)
         const auto f = skinFont (d, 10.0f, 700, 0.14f);
         const auto t = up (title);
         auto row = Rectangle<float> (panel.getX() + 12.0f, panel.getY() + 8.0f, panel.getWidth() - 24.0f, 16.0f);
-        g.setColour (d.heading);
-        g.setFont (f);
-        g.drawText (t, row, Justification::centredLeft, false);
         GlyphArrangement ga;
         ga.addLineOfText (f, t, 0, 0);
         const float w = ga.getBoundingBox (0, -1, true).getWidth();
         hit (row.withWidth (w + 4.0f), "heading");
-        if (sub.isNotEmpty())
+        skin::drawWithEffects (g, row, d.headingFx, skin::effectKey (d, 40, row, (uint64) (title + "|" + sub).hashCode64()), [&] (Graphics& gg)
         {
-            g.setColour (d.muted);
-            g.setFont (skinFont (d, 8.0f, 500, 0.1f));
-            g.drawText (up (sub), row.withTrimmedLeft (w + 8.0f), Justification::centredLeft, true);
-        }
+            gg.setColour (d.heading);
+            gg.setFont (f);
+            gg.drawText (t, row, Justification::centredLeft, false);
+            if (sub.isNotEmpty())
+            {
+                gg.setColour (d.muted);
+                gg.setFont (skinFont (d, 8.0f, 500, 0.1f));
+                gg.drawText (up (sub), row.withTrimmedLeft (w + 8.0f), Justification::centredLeft, true);
+            }
+        });
     };
     auto caption = [&] (Rectangle<float> r, const String& text)
     {
@@ -407,7 +411,7 @@ void PreviewView::drawPreview (Graphics& g, const skin::Design& d)
         hit (p, "panel");
         heading (p, "Preset", "3 zones - 4.6 MB");
         display ({ p.getX() + 150, p.getY() + 7, 200, 20 }, "Glass Pad");
-        const auto l = Rectangle<float> (p.getX() + 12, p.getY() + 36, 520, 100);
+        const auto l = Rectangle<float> (p.getX() + 12, p.getY() + 36, 300, 100);
         skin::drawDisplay (g, d, l, {}, skinFont (d, 9.0f), Justification::centred, d.displayText);
         const char* rows[][2] { { "Glass Pad_C3", "C-1 - F#3   ROOT C3   LOOP" }, { "Glass Pad_C4", "G3 - F#4   ROOT C4   LOOP" }, { "Glass Pad_C5", "G4 - G9   ROOT C5" } };
         for (int i = 0; i < 3; ++i)
@@ -421,6 +425,26 @@ void PreviewView::drawPreview (Graphics& g, const skin::Design& d)
             g.drawText (rows[i][1], row, Justification::centredRight, true);
         }
         hit (l, "list");
+        // a waveform on a screen
+        const auto scr = Rectangle<float> (p.getX() + 320, p.getY() + 36, 212, 100);
+        skin::drawScreen (g, d, scr);
+        {
+            Path wave;
+            const auto inner = scr.reduced (6.0f, 10.0f);
+            for (int i = 0; i <= 140; ++i)
+            {
+                const float t = (float) i / 140.0f;
+                const float env = std::sin (t * MathConstants<float>::pi) * (0.55f + 0.45f * std::sin (t * 7.0f));
+                const float y = inner.getCentreY() - std::sin (t * 63.0f) * env * inner.getHeight() * 0.5f;
+                const float x = inner.getX() + t * inner.getWidth();
+                if (i == 0) wave.startNewSubPath (x, y); else wave.lineTo (x, y);
+            }
+            g.setColour (d.displayText.withAlpha (0.9f));
+            g.strokePath (wave, PathStrokeType (1.2f));
+            g.setColour (d.accent.withAlpha (0.8f));
+            g.fillRect (inner.getX() + inner.getWidth() * 0.18f, scr.getY() + 3.0f, 1.0f, scr.getHeight() - 6.0f);
+        }
+        hit (scr, "screen");
         button ({ p.getX() + 544, p.getY() + 36, 84, 24 }, "Load...", false);
         button ({ p.getX() + 544, p.getY() + 66, 84, 24 }, "Save", false);
         button ({ p.getX() + 544, p.getY() + 96, 84, 24 }, "Save as...", false);

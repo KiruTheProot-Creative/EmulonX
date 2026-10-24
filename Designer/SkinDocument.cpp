@@ -196,6 +196,77 @@ MemoryBlock SkinDocument::builtInTexture (const String& id)
     return {};
 }
 
+namespace
+{
+/** Every own texture a part uses: { overlay prefix ("panel.overlay"), file }. */
+void collectCustomTextures (const var& v, const String& path, std::vector<std::pair<String, String>>& out)
+{
+    if (auto* o = v.getDynamicObject())
+    {
+        if (o->getProperty ("tex").toString() == "custom" && o->getProperty ("custom").toString().isNotEmpty())
+            out.push_back ({ path, o->getProperty ("custom").toString() });
+        for (auto& p : o->getProperties())
+            collectCustomTextures (p.value, path.isEmpty() ? p.name.toString() : path + "." + p.name.toString(), out);
+    }
+}
+} // namespace
+
+StringArray SkinDocument::ownTextures() const
+{
+    StringArray out;
+    if (auto* arr = get ("textureLibrary").getArray())
+        for (auto& v : *arr)
+            if (v.toString().isNotEmpty())
+                out.addIfNotAlreadyThere (v.toString());
+    std::vector<std::pair<String, String>> used;
+    collectCustomTextures (json, {}, used);
+    for (auto& u : used)
+        out.addIfNotAlreadyThere (u.second);
+    return out;
+}
+
+void SkinDocument::addOwnTexture (const String& f)
+{
+    Array<var> arr;
+    if (auto* existing = get ("textureLibrary").getArray())
+        arr = *existing;
+    if (! arr.contains (f))
+        arr.add (f);
+    set ("textureLibrary", arr, "texture-library");
+}
+
+void SkinDocument::removeOwnTexture (const String& f)
+{
+    Array<var> arr;
+    if (auto* existing = get ("textureLibrary").getArray())
+        arr = *existing;
+    arr.removeAllInstancesOf (f);
+    set ("textureLibrary", arr);
+}
+
+bool SkinDocument::textureInUse (const String& f, const String& exceptPrefix) const
+{
+    std::vector<std::pair<String, String>> used;
+    collectCustomTextures (json, {}, used);
+    for (auto& u : used)
+        if (u.second == f && u.first != exceptPrefix)
+            return true;
+    return false;
+}
+
+void SkinDocument::migrate()
+{
+    // earlier picture knobs had one turning picture: it becomes the upper layer
+    const auto old = get ("knob.picture").toString();
+    if (old.isNotEmpty() && get ("knob.upper.picture").isVoid())
+    {
+        at ("knob.upper.picture", true) = old;
+        at ("knob.upper.turns", true) = true;
+    }
+    if (auto* k = get ("knob").getDynamicObject())
+        k->removeProperty ("picture");
+}
+
 //== Starting points ===============================================================
 const StringArray& SkinDocument::presetTitles()
 {
@@ -274,6 +345,7 @@ bool SkinDocument::open (const File& f, String& error)
     json = newJson;
     files = std::move (newFiles);
     importDataUrls (json);
+    migrate();
     file = f.hasFileExtension ("emxd") ? f : File();
     changed (true);
     savedRevision = revision;
@@ -393,6 +465,7 @@ bool SkinDocument::loadDraft()
         return false;
     json = newJson;
     files = std::move (newFiles);
+    migrate();
     const auto info = StringArray::fromLines (dir.getChildFile ("draft.txt").loadFileAsString());
     file = info[0].isNotEmpty() && File::isAbsolutePath (info[0]) ? File (info[0]) : File();
     undoStack.clear();

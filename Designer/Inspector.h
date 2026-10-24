@@ -36,7 +36,8 @@ public:
     void resized() override;
 
     /** Rows for a part (used by the inspector; public so the palette can reuse them). */
-    static std::vector<std::unique_ptr<Row>> rowsFor (const juce::String& partKey, SkinDocument&, std::function<void()> rebuild);
+    /** page 0 = the part's look, 1 = its effects. */
+    static std::vector<std::unique_ptr<Row>> rowsFor (const juce::String& partKey, int page, SkinDocument&, std::function<void()> rebuild);
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
@@ -45,6 +46,8 @@ private:
 
     SkinDocument& doc;
     juce::String part { "panel" };
+    int page = 0;
+    juce::TextButton styleTab { "STYLE" }, fxTab { "FX" };
     juce::Viewport viewport;
     juce::Component content;
     std::vector<std::unique_ptr<Row>> rows;

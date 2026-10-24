@@ -70,7 +70,8 @@ struct FlatStyle
 };
 
 /** A graph area (waveform, envelope, step bars): an LCD screen in EMUL8R, a display elsewhere. */
-void drawScreen (juce::Graphics&, juce::Rectangle<float>);
+/** `graph` = the waveform or step-sequencer background (custom skins give these their own look); otherwise a display. */
+void drawScreen (juce::Graphics&, juce::Rectangle<float>, bool graph = true);
 /** Readable text colour on the top bar. */
 juce::Colour headerText() noexcept;
 const FlatStyle& flat() noexcept;

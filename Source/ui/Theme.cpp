@@ -958,18 +958,22 @@ juce::Rectangle<float> drawHeading (juce::Graphics& g, juce::Rectangle<float> in
     {
         const auto f = font (10.0f, 700, 0.14f);
         const auto t = d->upperCase ? title.toUpperCase() : title;
-        g.setColour (d->heading);
-        g.setFont (f);
-        g.drawText (t, row, juce::Justification::centredLeft, false);
-        if (subtitle.isNotEmpty())
+        skin::drawWithEffects (g, row, d->headingFx, skin::effectKey (*d, 40, row, (juce::uint64) (title + "|" + subtitle).hashCode64()),
+                               [&] (juce::Graphics& gg)
         {
-            juce::GlyphArrangement ga;
-            ga.addLineOfText (f, t, 0, 0);
-            const auto w = ga.getBoundingBox (0, -1, true).getWidth();
-            g.setColour (d->muted);
-            g.setFont (font (8.0f, 500, 0.1f));
-            g.drawText (d->upperCase ? subtitle.toUpperCase() : subtitle, row.withTrimmedLeft (w + 8.0f), juce::Justification::centredLeft, true);
-        }
+            gg.setColour (d->heading);
+            gg.setFont (f);
+            gg.drawText (t, row, juce::Justification::centredLeft, false);
+            if (subtitle.isNotEmpty())
+            {
+                juce::GlyphArrangement ga;
+                ga.addLineOfText (f, t, 0, 0);
+                const auto w = ga.getBoundingBox (0, -1, true).getWidth();
+                gg.setColour (d->muted);
+                gg.setFont (font (8.0f, 500, 0.1f));
+                gg.drawText (d->upperCase ? subtitle.toUpperCase() : subtitle, row.withTrimmedLeft (w + 8.0f), juce::Justification::centredLeft, true);
+            }
+        });
         inner.removeFromTop (6.0f);
         return inner;
     }
@@ -1187,8 +1191,16 @@ void drawFrame (juce::Graphics& g, juce::Rectangle<int> bounds)
     g.drawRect (r.reduced (4.0f), 1.0f);
 }
 
-void drawScreen (juce::Graphics& g, juce::Rectangle<float> r)
+void drawScreen (juce::Graphics& g, juce::Rectangle<float> r, bool graph)
 {
+    if (const auto* d = isCustom() ? customSkin() : nullptr)
+    {
+        if (graph)
+            skin::drawScreen (g, *d, r);
+        else
+            drawLed (g, r, {});
+        return;
+    }
     if (! isMetal())
     {
         drawLed (g, r, {});

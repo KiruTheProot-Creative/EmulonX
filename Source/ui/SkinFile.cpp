@@ -2,6 +2,7 @@
 #include "SkinFile.h"
 #include "../NaturalSort.h"
 #include <string_view>
+#include <atomic>
 
 namespace emx::skin
 {
@@ -197,6 +198,19 @@ struct Reader
         return ov;
     }
 
+    static Effects effects (const var& part)
+    {
+        Effects e;
+        const auto o = prop (part, "fx");
+        if (! o.isObject())
+            return e;
+        e.blur = num (o, "blur", 0.0f, 0.0f, 24.0f);
+        e.bloom = num (o, "bloom", 0.0f, 0.0f, 1.0f);
+        e.bloomSize = num (o, "bloomSize", 8.0f, 1.0f, 48.0f);
+        e.bloomThreshold = num (o, "bloomThreshold", 0.55f, 0.0f, 1.0f);
+        return e;
+    }
+
     Box box (const var& o, const Box& fallback, const String& what) const
     {
         Box b = fallback;
@@ -211,6 +225,7 @@ struct Reader
         b.shadowBlur = num (o, "shadowBlur", fallback.shadowBlur, 0.0f, 64.0f);
         b.shadowOpacity = num (o, "shadowOpacity", fallback.shadowOpacity, 0.0f, 1.0f);
         b.overlay = overlay (o, what);
+        b.fx = effects (o);
         return b;
     }
 };
@@ -287,6 +302,8 @@ bool fromJson (const var& json, const std::function<MemoryBlock (const String&)>
     StringArray warnings;
     Reader rd { fileData, {}, warnings };
     Design d;
+    static std::atomic<int> uids { 0 };
+    d.uid = ++uids;
     d.name = str (json, "name", "Custom skin").trim().substring (0, 60);
     if (d.name.isEmpty())
         d.name = "Custom skin";
@@ -319,9 +336,11 @@ bool fromJson (const var& json, const std::function<MemoryBlock (const String&)>
     d.patternColour = rd.colour (win, "textureColor", d.accent);
     d.patternOpacity = num (win, "textureOpacity", 0.12f, 0.0f, 1.0f);
     d.windowOverlay = rd.overlay (win, "the background");
+    d.windowFx = Reader::effects (win);
     const auto frame = prop (json, "frame");
     d.frameWidth = num (frame, "width", 3.0f, 0.0f, 16.0f);
     d.frameColour = rd.colour (frame, "color", Colours::black);
+    d.frameFx = Reader::effects (frame);
 
     const auto top = prop (json, "topbar");
     d.topBar = rd.fill (prop (top, "fill"), gradientFill (Colour (0xff1b1418), Colour (0xff0a0708)), "the top bar");
@@ -331,6 +350,7 @@ bool fromJson (const var& json, const std::function<MemoryBlock (const String&)>
     d.logoGlow = num (top, "logoGlow", 0.8f, 0.0f, 1.0f);
     d.logo = rd.picture (str (top, "logo"), "the logo");
     d.topBarOverlay = rd.overlay (top, "the top bar");
+    d.topBarFx = Reader::effects (top);
 
     // surfaces
     Box panel;
@@ -339,6 +359,7 @@ bool fromJson (const var& json, const std::function<MemoryBlock (const String&)>
     panel.shadowY = 3.0f; panel.shadowBlur = 10.0f; panel.shadowOpacity = 0.7f;
     d.panel = rd.box (prop (json, "panel"), panel, "panels");
     d.heading = rd.colour (prop (json, "heading"), "color", d.text);
+    d.headingFx = Reader::effects (prop (json, "heading"));
 
     Box inset;
     inset.fill = gradientFill (Colour (0xff1c1a1f), Colour (0xff111014));
@@ -353,7 +374,23 @@ bool fromJson (const var& json, const std::function<MemoryBlock (const String&)>
     d.display = rd.box (disp, display, "displays");
     d.displayText = rd.colour (disp, "textColor", d.accent);
     d.displayGlow = num (disp, "glow", 0.55f, 0.0f, 1.0f);
+    auto patternOf = [] (const String& p)
+    {
+        return p == "grid" ? Design::ScreenPattern::grid : p == "dots" ? Design::ScreenPattern::dots
+             : p == "stripes" ? Design::ScreenPattern::stripes : p == "scanlines" ? Design::ScreenPattern::scanlines
+             : Design::ScreenPattern::none;
+    };
     d.scanlines = flag (disp, "scanlines", true);
+
+    // screens (waveform and step-sequencer backgrounds): surface like the displays unless they have their own
+    // look; pattern and glass are theirs alone (without settings they look like a display, as before)
+    const auto scr = prop (json, "screen");
+    d.screensLikeDisplays = flag (scr, "same", true);
+    d.screen = d.screensLikeDisplays ? d.display : rd.box (scr, d.display, "screens");
+    d.graphPattern = patternOf (str (scr, "pattern", d.scanlines ? "scanlines" : "none"));
+    d.graphPatternStrength = num (scr, "patternStrength", 1.0f, 0.0f, 1.0f);
+    d.graphPatternColour = rd.colour (scr, "patternColor", Colours::black);
+    d.graphGlass = flag (scr, "glass", false);
     d.list = rd.colour (prop (json, "list"), "color", Colour (0xffff4a4a));
 
     // controls
@@ -401,11 +438,17 @@ bool fromJson (const var& json, const std::function<MemoryBlock (const String&)>
     d.pointerGlow = num (knob, "pointerGlow", 0.9f, 0.0f, 1.0f);
     if (d.knobStyle == Design::KnobStyle::picture)
     {
-        d.knobPicture = rd.picture (str (knob, "picture"), "the knob");
-        if (! d.knobPicture.isValid())
+        const auto lower = prop (knob, "lower"), upper = prop (knob, "upper");
+        d.knobLower = rd.picture (str (lower, "picture"), "the knob's lower layer");
+        d.lowerTurns = flag (lower, "turns", false);
+        // "picture" is the single turning picture of earlier skins
+        d.knobUpper = rd.picture (upper.isObject() ? str (upper, "picture") : str (knob, "picture"), "the knob's upper layer");
+        d.upperTurns = upper.isObject() ? flag (upper, "turns", true) : true;
+        if (! d.knobLower.isValid() && ! d.knobUpper.isValid())
             d.knobStyle = Design::KnobStyle::cap;
     }
     d.knobOverlay = rd.overlay (knob, "knobs");
+    d.knobFx = Reader::effects (knob);
 
     const auto fader = prop (json, "fader");
     d.faderTrack = rd.colour (fader, "track", d.faderTrack);
@@ -414,6 +457,7 @@ bool fromJson (const var& json, const std::function<MemoryBlock (const String&)>
     d.thumbBottom = rd.colour (fader, "thumbB", d.thumbBottom);
     d.thumbPicture = rd.picture (str (fader, "thumbPic"), "the fader handle");
     d.faderOverlay = rd.overlay (fader, "faders");
+    d.faderFx = Reader::effects (fader);
 
     d.label = rd.colour (prop (json, "label"), "color", d.text);
 
@@ -610,7 +654,8 @@ void forEachColour (Design& d, const std::function<void (Colour&)>& fn)
         fn (*c);
     fill (d.window);
     fill (d.topBar);
-    for (auto* b : { &d.panel, &d.inset, &d.display, &d.button, &d.buttonOn, &d.tab, &d.tabOn })
+    fn (d.graphPatternColour);
+    for (auto* b : { &d.panel, &d.inset, &d.display, &d.screen, &d.button, &d.buttonOn, &d.tab, &d.tabOn })
         box (*b);
 }
 

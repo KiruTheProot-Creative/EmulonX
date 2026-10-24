@@ -299,6 +299,43 @@ static void skinFileTests()
         dir.deleteRecursively();
     }
     {
+        // effects: bloom makes bright things glow, it must never hide them; blur softens
+        Design d;
+        d.uid = 4242;
+        auto render = [&] (const Effects& fx, int salt)
+        {
+            Image out (Image::ARGB, 200, 100, true);
+            Graphics g (out);
+            g.fillAll (Colour (0xff202020));
+            g.setColour (Colours::white.withAlpha (0.08f));   // something see-through drawn just before
+            g.fillRect (0, 0, 2, 2);
+            const Rectangle<float> r (40, 30, 120, 40);
+            drawWithEffects (g, r, fx, effectKey (d, 99, r, (uint64) salt), [&] (Graphics& gg)
+            {
+                gg.setColour (Colours::white);
+                gg.fillRect (r.reduced (30, 12));     // 70..130 x 42..58
+            });
+            return out;
+        };
+        auto lum = [] (Colour c) { return c.getPerceivedBrightness(); };
+        Effects bloom;
+        bloom.bloom = 0.9f;
+        bloom.bloomSize = 8.0f;
+        auto b = render (bloom, 1);
+        std::printf ("  bloom: centre %s, edge glow %s, far %s\n", b.getPixelAt (100, 50).toDisplayString (false).toRawUTF8(),
+                     b.getPixelAt (64, 50).toDisplayString (false).toRawUTF8(), b.getPixelAt (10, 10).toDisplayString (false).toRawUTF8());
+        check (lum (b.getPixelAt (100, 50)) > 0.95f, "skin: bloom keeps bright things bright");
+        check (lum (b.getPixelAt (64, 50)) > lum (Colour (0xff202020)) + 0.05f, "skin: bloom glows around bright things");
+        check (std::abs (lum (b.getPixelAt (10, 10)) - lum (Colour (0xff202020))) < 0.02f, "skin: bloom leaves the rest alone");
+        auto b2 = render (bloom, 1);   // from the cache
+        check (b2.getPixelAt (100, 50) == b.getPixelAt (100, 50) && b2.getPixelAt (64, 50) == b.getPixelAt (64, 50), "skin: effects drawn from the cache look the same");
+        Effects blur;
+        blur.blur = 4.0f;
+        auto u = render (blur, 2);
+        check (lum (u.getPixelAt (100, 50)) > 0.8f && lum (u.getPixelAt (68, 50)) > lum (Colour (0xff202020)) + 0.05f
+                   && lum (u.getPixelAt (68, 50)) < 0.9f, "skin: blur softens the edges");
+    }
+    {
         // corner shapes: cut, round and squircle corners leave the very corner out; no rounding keeps it
         const Rectangle<float> r (0, 0, 100, 60);
         const Point<float> corner (2.0f, 2.0f), nearRound (5.0f, 5.0f);

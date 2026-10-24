@@ -43,6 +43,13 @@ public:
     static const juce::StringArray& builtInTextureTitles();
     static juce::MemoryBlock builtInTexture (const juce::String& id);
 
+    /** Your own textures in this skin (added with "+", or used by any part). */
+    juce::StringArray ownTextures() const;
+    void addOwnTexture (const juce::String& file);
+    void removeOwnTexture (const juce::String& file);
+    /** True if some part other than `exceptPrefix` uses this texture. */
+    bool textureInUse (const juce::String& file, const juce::String& exceptPrefix = {}) const;
+
     //== Starting points =========================================================
     static const juce::StringArray& presetTitles();   // EMULON CLASSIC, EMULON XP - LIGHT, ...
     /** Starts over from a built-in skin (keeps the name and author). Can be undone. */
@@ -83,6 +90,7 @@ private:
     juce::String snapshot() const;
     void restore (const juce::String&);
     void importDataUrls (juce::var&);
+    void migrate();
     std::map<juce::String, juce::MemoryBlock> usedFiles() const;
 
     juce::var json;
