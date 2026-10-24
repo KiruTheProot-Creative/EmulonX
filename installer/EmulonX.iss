@@ -1,11 +1,15 @@
 ; Emulon X — Windows installer (Inno Setup 6).
 ; GitHub builds this automatically: see .github/workflows/build.yml.
 ; To build it yourself: install Inno Setup 6, build the plugin, put the files in ..\dist, then
-;   ISCC.exe /DAppVersion=1.1.1 installer\EmulonX.iss
+;   ISCC.exe /DAppVersion=1.1.1ea /DNumericVersion=1.1.1 installer\EmulonX.iss
 ; SPDX-License-Identifier: AGPL-3.0-or-later
 
 #ifndef AppVersion
-  #define AppVersion "1.1.1"
+  #define AppVersion "1.1.1ea"
+#endif
+; Windows needs plain numbers for the file version (the tag like "ea" is only in the name).
+#ifndef NumericVersion
+  #define NumericVersion "1.1.1"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist"
@@ -21,7 +25,7 @@ AppPublisher=KiruTheProot-Creative
 AppPublisherURL=https://github.com/KiruTheProot-Creative/EmulonX
 AppSupportURL=https://github.com/KiruTheProot-Creative/EmulonX/issues
 AppUpdatesURL=https://github.com/KiruTheProot-Creative/EmulonX/releases
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#NumericVersion}
 VersionInfoDescription=Emulon X installer
 
 ; The folder picked on the "where" page is the VST3 folder; the plugin goes inside it.
