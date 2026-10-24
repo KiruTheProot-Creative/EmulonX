@@ -23,7 +23,7 @@ struct CustomSkin
 {
     juce::Image img[11];                 // by Img
     std::map<juce::String, juce::Colour> colours;
-    bool hue = true, knobRotates = false, shadows = true, keepCorners = false;
+    bool hue = true, knobRotates = false, shadows = true;
     juce::Typeface::Ptr font;
     float fontScale = 1.0f;
     float accentOffset = 0.0f;           // hue turn from the classic red to the skin's accent
@@ -404,13 +404,6 @@ void drawSliced (juce::Graphics& g, const juce::Image& img, juce::Rectangle<floa
     const float scale = juce::jmin (0.5f, juce::jmin (r.getWidth(), r.getHeight()) / (float) srcMin);
     const int d = juce::jmax (1, juce::jmin (juce::roundToInt ((float) s * scale), (int) juce::jmin (r.getWidth(), r.getHeight()) / 2));
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    if (currentSkin == Skin::custom && ! customSkin.keepCorners)
-    {
-        // the whole picture fills the area
-        drawImageWithShadow (g, img, juce::RectanglePlacement (juce::RectanglePlacement::stretchToFit)
-                                         .getTransformToFit (img.getBounds().toFloat(), r));
-        return;
-    }
     const auto dest = r.toNearestInt();
     if (currentSkin == Skin::custom && customSkin.shadows)
     {
@@ -556,7 +549,6 @@ void setCustomSkin (const SkinDesign& d)
     c.hue = d.hueShift;
     c.knobRotates = d.knobRotates;
     c.shadows = d.shadows;
-    c.keepCorners = d.keepCorners;
     if (! d.font.isEmpty())
     {
         c.font = juce::Typeface::createSystemTypefaceFor (d.font.data.getData(), d.font.data.getSize());

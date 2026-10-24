@@ -24,11 +24,11 @@ const char* SkinDesign::partHelp (int p)
         "Drawn over the edges of the window (the middle stays see-through). 1920 x 1080 PNG with transparency, like the template.",
         "Square, e.g. 256 x 256 PNG. A pointer turns on top of it, or the image itself turns (see KNOB TURNS).",
         "The fader track, tall and thin, e.g. 35 x 150 PNG. The fader knob slides along it.",
-        "Behind every panel: fills it (or keeps its corners, see PICTURES), e.g. 96 x 96 PNG.",
-        "Behind groups of knobs inside a panel, fills them, e.g. 80 x 80 PNG.",
-        "Fills value displays and text fields, e.g. 48 x 24 PNG.",
-        "Fills normal buttons, e.g. 64 x 32 PNG.",
-        "Fills buttons that are switched on, e.g. 64 x 32 PNG.",
+        "Behind every panel. Stretched with its corners kept (9-slice), e.g. 96 x 96 PNG.",
+        "Behind groups of knobs inside a panel. 9-slice, e.g. 80 x 80 PNG.",
+        "Behind value displays and text fields. 9-slice, e.g. 48 x 24 PNG.",
+        "Normal buttons. 9-slice, e.g. 64 x 32 PNG.",
+        "Buttons that are switched on. 9-slice, e.g. 64 x 32 PNG.",
         "Top-left logo, transparent PNG (wide, e.g. 871 x 200).",
         "The knob that slides on a fader, e.g. 64 x 32 PNG (drawn about 32 px wide)." };
     return h[jlimit (0, numParts - 1, p)];
@@ -64,7 +64,6 @@ var SkinDesign::toJson() const
     o->setProperty ("hueShift", hueShift);
     o->setProperty ("knobRotates", knobRotates);
     o->setProperty ("shadows", shadows);
-    o->setProperty ("keepCorners", keepCorners);
     auto* c = new DynamicObject();
     for (auto& [k, col] : colours)
         c->setProperty (k, "#" + col.toDisplayString (false).toLowerCase());
@@ -86,7 +85,6 @@ void SkinDesign::fromJson (const var& v)
     hueShift = (bool) v.getProperty ("hueShift", true);
     knobRotates = (bool) v.getProperty ("knobRotates", false);
     shadows = (bool) v.getProperty ("shadows", true);
-    keepCorners = (bool) v.getProperty ("keepCorners", false);
     colours.clear();
     if (auto* c = v.getProperty ("colours", var()).getDynamicObject())
         for (auto& p : c->getProperties())
