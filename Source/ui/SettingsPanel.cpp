@@ -301,6 +301,11 @@ SettingsPanel::SettingsPanel (EmulonXProcessor& p) : proc (p)
             { "ON", "OFF" },
             [&s] { return s.getShowHints() ? 0 : 1; },
             [&s] (int i) { s.setShowHints (i == 0); });
+    StringArray cols;
+    for (int c = 1; c <= Settings::maxBankColumns; ++c) cols.add (String (c) + (c == 1 ? " PRESET PER ROW (LIST)" : " PRESETS PER ROW"));
+    addRow (3, "BANK GRID", "HOW MANY PRESETS SIT SIDE BY SIDE IN THE BANK ON THE MAIN TAB.", cols,
+            [&s] { return s.getBankColumns() - 1; },
+            [&s] (int i) { s.setBankColumns (i + 1); });
     resetButton.setTooltip ("Puts every setting except your folders back to its default");
     resetButton.onClick = [this] { settings->resetToDefaults(); };
     addChildComponent (resetButton);
@@ -415,8 +420,9 @@ void SettingsPanel::resized()
         row->box.setBounds (content.getRight() - 16 - 250, y + 6, 250, 26);
         y += 54;
     }
-    panicButton.setBounds (content.getX() + 16, content.getY() + 16 + 4 * 54 + 12, 150, 28);
-    resetButton.setBounds (content.getX() + 16, content.getY() + 16 + 3 * 54 + 12, 150, 28);
+    auto rowsOn = [this] (int pg) { int n = 0; for (auto* row : rows) n += row->page == pg ? 1 : 0; return n; };
+    panicButton.setBounds (content.getX() + 16, content.getY() + 16 + rowsOn (audioMidi) * 54 + 12, 150, 28);
+    resetButton.setBounds (content.getX() + 16, content.getY() + 16 + rowsOn (interface) * 54 + 12, 150, 28);
     siteLink.setBounds (content.getX() + 16, content.getY() + 128, 400, 22);
 
     // Customization

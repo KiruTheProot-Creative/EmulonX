@@ -83,8 +83,11 @@ void MainPage::resized()
     top.removeFromLeft (8);
     masterArea = top.toFloat();
 
+    // Macros sit at the very bottom; the bank fills everything in between
+    macroArea = r.removeFromBottom (2 * macros[0]->getPreferredHeight() + 60).toFloat();
+    r.removeFromBottom (8);
     r.removeFromTop (8);
-    bankPanel.setBounds (r.removeFromTop (136));
+    bankPanel.setBounds (r);
 
     // Master panel content
     auto m = masterArea.reduced (10.0f, 8.0f).withTrimmedTop (22.0f).reduced (4.0f, 6.0f);
@@ -95,8 +98,6 @@ void MainPage::resized()
     peakLed.setBounds (row.withSizeKeepingCentre (jmin (row.getWidth(), 78), 22));
 
     // Macro panel
-    r.removeFromTop (8);
-    macroArea = r.removeFromTop (2 * macros[0]->getPreferredHeight() + 60).toFloat();
     macroInset = macroArea.reduced (10.0f, 8.0f).withTrimmedTop (22.0f);
     auto grid = macroInset.reduced (6.0f, 8.0f).toNearestInt();
     constexpr int perRow = numMacros / 2;   // two rows of 8
@@ -114,11 +115,5 @@ void MainPage::paint (Graphics& g)
     theme::drawPanel (g, macroArea.reduced (1.0f));
     theme::drawHeading (g, macroArea.reduced (11.0f, 9.0f), "Macro controller", "automatable in your DAW - double-click a name to rename - right-click to link to FX");
     theme::drawInset (g, macroInset);
-
-    auto hint = getLocalBounds().toFloat().withTrimmedTop (macroArea.getBottom() + 10.0f).removeFromTop (16.0f);
-    g.setColour (theme::textMuted);
-    g.setFont (theme::font (9.0f, 500, 0.06f));
-    g.drawText ("DOUBLE-CLICK A ZONE TO EDIT ITS LOOP, ENVELOPE AND KEY RANGE IN THE EDITOR TAB.",
-                hint, Justification::centredLeft, true);
 }
 } // namespace emx

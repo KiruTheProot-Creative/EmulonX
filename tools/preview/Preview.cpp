@@ -397,6 +397,21 @@ int main (int argc, char** argv)
         openAll (tv->getRootItem());
     }
     save ("preview-main-banks-open");
+    {
+        // A fuller bank, shown as a grid with different column settings
+        SharedResourcePointer<emx::Settings> st;
+        for (int i = 0; i < 9; ++i)
+            proc.addCurrentPresetToBank();
+        for (int i = 0; i < 40 && proc.getBank().size() < 11; ++i)
+            MessageManager::getInstance()->runDispatchLoopUntil (100);   // adding runs in the background
+        for (int cols : { 3, 1, 5 })
+        {
+            st->setBankColumns (cols);
+            save ("preview-main-bank-grid-" + String (cols));
+        }
+        st->setBankColumns (3);
+        std::printf ("bank entries now: %d\n", (int) proc.getBank().size());
+    }
     const char* settingsPages[] { "folders", "performance", "midi", "interface", "customization", "about" };
     for (int p = 0; p < 6; ++p)
     {

@@ -37,6 +37,9 @@ public:
     void  setKnobSensitivity (int v) { set ("knobSensitivity", v); }
     bool  getShowHints() const       { return get ("showHints", 1) != 0; }
     void  setShowHints (bool v)      { set ("showHints", v ? 1 : 0); }
+    static constexpr int maxBankColumns = 6;
+    int   getBankColumns() const     { return juce::jlimit (1, maxBankColumns, get ("bankColumns", 3)); }   // presets per row in the bank grid
+    void  setBankColumns (int v)     { set ("bankColumns", juce::jlimit (1, maxBankColumns, v)); }
 
     //== Customization =========================================================
     /** Colour scheme rotation in degrees, -180..180 (0 = the original red). */

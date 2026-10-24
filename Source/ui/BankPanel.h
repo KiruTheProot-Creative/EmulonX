@@ -9,8 +9,7 @@ namespace emx
 class EmulonXProcessor;
 
 class BankPanel final : public juce::Component,
-                        private juce::ChangeListener,
-                        private juce::ListBoxModel
+                        private juce::ChangeListener
 {
 public:
     explicit BankPanel (EmulonXProcessor&);
@@ -23,15 +22,14 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void refresh();
 
-    int getNumRows() override;
-    void paintListBoxItem (int row, juce::Graphics&, int width, int height, bool selected) override;
-    void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override;
-    void deleteKeyPressed (int lastRowSelected) override;
-    void returnKeyPressed (int lastRowSelected) override;
+    class Grid;
+    void select (int index);
 
     EmulonXProcessor& proc;
     LedLabel nameLabel { 10.0f };
-    juce::ListBox list { "bank", this };
+    std::unique_ptr<Grid> grid;
+    juce::Viewport viewport;
+    int selected = -1;
     juce::TextButton addButton { "ADD CURRENT" }, loadButton { "LOAD" }, removeButton { "REMOVE" },
                      openButton { "OPEN..." }, exportButton { "EXPORT..." }, clearButton { "CLEAR" };
     std::unique_ptr<juce::FileChooser> chooser;
