@@ -2,6 +2,8 @@
 
 a Vibecoded project to make a Sampler, inspired by Emulator X (by E-MU) and with the ease to use like Vital.
 
+all Code has been written by CLAUDE. visuals have been made by me. all Sounds in the base presets / base bank that will be shipped are also made by me.
+
 # Current Features in V.1.1.1
 
 - ### Sound engine
@@ -58,3 +60,9 @@ a Vibecoded project to make a Sampler, inspired by Emulator X (by E-MU) and with
 ### Installer (Windows)
 - You choose every folder: the plugin (VST3), base banks, your presets and the standalone app. The summary before installing lists every folder that will be used, and Emulon X finds the chosen folders by itself.
 - Optional standalone app, to play Emulon X without a DAW.
+<img width="2031" height="1300" alt="Screenshot 2026-10-24 123249" src="https://github.com/user-attachments/assets/677bc3f1-98c8-44dd-b454-573ee0a735fc" />
+<img width="1522" height="982" alt="Screenshot 2026-10-24 123301" src="https://github.com/user-attachments/assets/b6fa3b4d-ca6d-4c0a-86cb-35dce2563376" />
+<img width="2016" height="1298" alt="Screenshot 2026-10-24 123219" src="https://github.com/user-attachments/assets/ec520115-c1ee-439e-a556-572671f21380" />
+<img width="2028" height="1307" alt="Screenshot 2026-10-24 123230" src="https://github.com/user-attachments/assets/5515f043-6634-4f73-9222-966bd78ec984" />
+<img width="2023" height="1295" alt="Screenshot 2026-10-24 123240" src="https://github.com/user-attachments/assets/dfcee3cb-73ed-49ae-9d35-6d670166266d" />
+
