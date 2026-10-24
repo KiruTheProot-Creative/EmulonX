@@ -350,9 +350,20 @@ int main (int argc, char** argv)
                                                     { "Strings C-1", 0 }, { "Bell_C5_v2", 72 }, { "Take 12", -1 } };
         bool ok = true;
         String bad;
+        setMiddleCOctave (4);   // scientific pitch: C4 = middle C
         for (auto& [name, want] : cases)
             if (noteFromName (name) != want) { ok = false; bad << name << "=" << noteFromName (name) << " "; }
-        check (ok, "note names in file names", bad);
+        check (ok, "note names in file names (C4 = middle C)", bad);
+
+        // Ableton's naming (the default): C3 = middle C = MIDI 60
+        setMiddleCOctave (3);
+        const std::pair<const char*, int> ableton[] { { "Piano_C3", 60 }, { "Pad A#2", 58 }, { "Bell_C5", 84 }, { "Sub C-2", 0 } };
+        ok = true;
+        bad = {};
+        for (auto& [name, want] : ableton)
+            if (noteFromName (name) != want) { ok = false; bad << name << "=" << noteFromName (name) << " "; }
+        ok = ok && noteName (60) == "C3" && noteName (69) == "A3" && noteName (0) == "C-2";
+        check (ok, "note names like Ableton: C3 = middle C (MIDI 60)", bad + noteName (60) + " " + noteName (0));
     }
 
     //== WAV loop markers + root note (smpl chunk) =================================

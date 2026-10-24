@@ -71,6 +71,9 @@ public:
     int   getBendRange() const        { return get ("bendRange", 2); }
     void  setBendRange (int v)        { set ("bendRange", v); }
     float getA4() const               { return (float) props->getDoubleValue ("a4", 440.0); }
+    /** Octave number of middle C in note names: 3 (Ableton, Kontakt) or 4 (scientific pitch). */
+    int   getMiddleCOctave() const    { return juce::jlimit (3, 4, get ("middleC", 3)); }
+    void  setMiddleCOctave (int v)    { set ("middleC", juce::jlimit (3, 4, v)); }
     void  setA4 (float hz)            { props->setValue ("a4", (double) hz); changed(); }
 
     void resetToDefaults();

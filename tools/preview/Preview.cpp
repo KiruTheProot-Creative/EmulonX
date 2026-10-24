@@ -194,12 +194,15 @@ int main (int argc, char** argv)
         sustain.format = [] (double v) { return String (roundToInt (v * 100.0)) + "%"; };
         check (sustain, "50%", 0.5, 0.006);
         check (sustain, "75", 0.75, 0.006);
+        emx::setMiddleCOctave (4);   // the checks below use C4 = middle C
         ValueControl root ("Root", ValueControl::Style::knob);
         root.setRange (NormalisableRange<double> (0, 127, 1), 60);
         root.format = [] (double v) { return emx::noteName (roundToInt (v)); };
         check (root, "C4", 60, 0.0);
         check (root, "F#3", 54, 0.0);
         check (root, "a#2", 46, 0.0);
+        emx::setMiddleCOctave (3);   // Ableton's names (the default): C3 = MIDI 60
+        check (root, "C3", 60, 0.0);
         ValueControl pan ("Pan", ValueControl::Style::knob);
         pan.setRange (NormalisableRange<double> (-100, 100, 1), 0);
         pan.format = [] (double v) { const int c = roundToInt (v); return c == 0 ? String ("C") : (c < 0 ? "L" + String (-c) : "R" + String (c)); };

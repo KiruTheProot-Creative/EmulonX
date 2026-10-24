@@ -70,7 +70,12 @@ struct ZoneSet
     }
 };
 
-/** Reads a note from a file name like "Piano_C4", "Pad A#3" or "Bass-Eb1". -1 if none. */
+/** Which octave number middle C (MIDI note 60) gets in note names: 3 like Ableton / Kontakt
+    (the default), or 4 (scientific pitch). Used by noteName and noteFromName. */
+void setMiddleCOctave (int octave) noexcept;
+int getMiddleCOctave() noexcept;
+
+/** Reads a note from a file name like "Piano_C3", "Pad A#3" or "Bass-Eb1". -1 if none. */
 int noteFromName (const juce::String& name);
 juce::String noteName (int midiNote);
 } // namespace emx

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Zone.h"
+#include <atomic>
 
 namespace emx
 {
@@ -35,6 +36,10 @@ void ZoneParams::clampTo (int n) noexcept
     root  = juce::jlimit (0, 127, root);
 }
 
+static std::atomic<int> middleCOctave { 3 };
+void setMiddleCOctave (int octave) noexcept { middleCOctave = juce::jlimit (3, 4, octave); }
+int getMiddleCOctave() noexcept { return middleCOctave.load(); }
+
 int noteFromName (const juce::String& name)
 {
     // Last match of: (start or non-letter) [A-G] [#|b]? -? digit (not followed by a digit)
@@ -58,7 +63,7 @@ int noteFromName (const juce::String& name)
         if (j + 1 < s.size() && std::isdigit ((unsigned char) s[j + 1]))
             continue;
         const int octave = (s[j] - '0') * (neg ? -1 : 1);
-        const int note = semis[li] + acc + 12 * (octave + 1);
+        const int note = semis[li] + acc + 12 * (octave + 5 - middleCOctave.load());   // middle C = MIDI 60
         if (note >= 0 && note < 128)
             found = note;
     }
@@ -68,6 +73,7 @@ int noteFromName (const juce::String& name)
 juce::String noteName (int n)
 {
     static const char* names[] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-    return juce::String (names[((n % 12) + 12) % 12]) + juce::String (n / 12 - 1);
+    const int octave = (n >= 0 ? n / 12 : (n - 11) / 12) + middleCOctave.load() - 5;
+    return juce::String (names[((n % 12) + 12) % 12]) + juce::String (octave);
 }
 } // namespace emx

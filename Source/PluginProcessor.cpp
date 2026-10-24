@@ -97,6 +97,7 @@ void EmulonXProcessor::applySettings()
     setMidiChannel = settings->getMidiChannel();
     setVelocityCurve = settings->getVelocityCurve();
     setBendRange = settings->getBendRange();
+    emx::setMiddleCOctave (settings->getMiddleCOctave());
     setTuneCents = (float) (1200.0 * std::log2 (jlimit (400.0f, 480.0f, settings->getA4()) / 440.0));
     if (settings->getEmbedSamples())
     {

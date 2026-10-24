@@ -118,6 +118,11 @@ void EmulonXEditor::changeListenerCallback (ChangeBroadcaster*)
 {
     if (std::abs (settings->getUiScale() - uiScale) > 0.001f)
         setUiScale (settings->getUiScale());
+    if (getMiddleCOctave() != settings->getMiddleCOctave())
+    {
+        setMiddleCOctave (settings->getMiddleCOctave());   // note names everywhere change
+        repaint();
+    }
     updateTooltips();
     if (applyHue())
     {

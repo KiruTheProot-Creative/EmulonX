@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Widgets.h"
 #include "Theme.h"
+#include "../engine/Zone.h"
 
 namespace emx
 {
@@ -40,7 +41,7 @@ bool meaning (String text, double& value, String& unit)
         value = 0.0; unit = {};
         return true;
     }
-    // note names: C4 = 60
+    // note names: middle C (MIDI 60) is C3 or C4, as set in the settings
     {
         static const char* names = "C D EF G A B";
         if (text.isNotEmpty() && text[0] >= 'A' && text[0] <= 'G')
@@ -52,7 +53,7 @@ bool meaning (String text, double& value, String& unit)
             const auto rest = text.substring (i).trim();
             if (rest.isNotEmpty() && (rest.containsOnly ("-0123456789")))
             {
-                value = (rest.getIntValue() + 1) * 12 + pc;
+                value = (rest.getIntValue() + 5 - getMiddleCOctave()) * 12 + pc;
                 unit = "NOTE";
                 return true;
             }

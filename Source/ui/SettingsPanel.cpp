@@ -285,6 +285,10 @@ SettingsPanel::SettingsPanel (EmulonXProcessor& p) : proc (p)
                 return 5;
             },
             [&s] (int i) { s.setA4 (tuningChoices[i]); });
+    addRow (2, "NOTE NAMES", "WHAT MIDDLE C (MIDI NOTE 60) IS CALLED - ALSO FOR ROOT NOTES IN FILE NAMES.",
+            { "C3 = MIDDLE C (LIKE ABLETON, KONTAKT)", "C4 = MIDDLE C (SCIENTIFIC PITCH)" },
+            [&s] { return s.getMiddleCOctave() == 4 ? 1 : 0; },
+            [&s] (int i) { s.setMiddleCOctave (i == 1 ? 4 : 3); });
     panicButton.setTooltip ("Stops every sounding note immediately");
     panicButton.onClick = [this] { proc.panic(); };
     addChildComponent (panicButton);
