@@ -13,7 +13,7 @@ namespace emx
 struct SkinDesign
 {
     // Everything a skin can replace. Missing parts keep the EMULON CLASSIC look.
-    enum Part { background, frame, knob, fader, panel, inset, display, button, buttonOn, logo, numParts };
+    enum Part { background, frame, knob, fader, panel, inset, display, button, buttonOn, logo, faderKnob, numParts };
     static const char* partKey (int part);     // file name without extension, e.g. "button-on"
     static const char* partTitle (int part);   // shown in the designer
     static const char* partHelp (int part);    // size / how it is drawn
@@ -33,6 +33,7 @@ struct SkinDesign
     juce::String name { "My Skin" }, author;
     bool hueShift = true;      // may the colour shift in Settings move this skin?
     bool knobRotates = false;  // false: the knob image stays and a pointer turns; true: the image itself turns
+    bool shadows = true;       // a slight drop shadow under the skin's pictures
     std::map<juce::String, juce::Colour> colours;
     Blob images[numParts];
     Blob font;

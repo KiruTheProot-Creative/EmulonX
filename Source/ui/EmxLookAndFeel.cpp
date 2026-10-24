@@ -74,11 +74,17 @@ void EmxLookAndFeel::drawRotarySlider (Graphics& g, int x, int y, int w, int h, 
         if (img.isValid())
         {
             const auto fit = RectanglePlacement (RectanglePlacement::centred).getTransformToFit (img.getBounds().toFloat(), r);
-            g.drawImageTransformed (img, fit.followedBy (AffineTransform::rotation (angle, r.getCentreX(), r.getCentreY())));
+            theme::drawImageWithShadow (g, img, fit.followedBy (AffineTransform::rotation (angle, r.getCentreX(), r.getCentreY())));
             return;
         }
     }
-    g.drawImage (theme::image (theme::Img::knob), r, RectanglePlacement::centred);
+    if (theme::customShadows())
+    {
+        const auto img = theme::image (theme::Img::knob);
+        theme::drawImageWithShadow (g, img, RectanglePlacement (RectanglePlacement::centred).getTransformToFit (img.getBounds().toFloat(), r));
+    }
+    else
+        g.drawImage (theme::image (theme::Img::knob), r, RectanglePlacement::centred);
 
     const auto c = r.getCentre();
     // Pointer runs from near the centre (2%) to 42% of the knob size, like the prototype.
@@ -119,6 +125,15 @@ void EmxLookAndFeel::drawLinearSlider (Graphics& g, int x, int y, int w, int h, 
 
     const auto capH = 16.0f;
     auto cap = Rectangle<float> (track.getCentreX() - w * 0.5f - 4.0f, pos - capH * 0.5f, w + 8.0f, capH);
+    if (theme::hasImage (theme::Img::faderCap))
+    {
+        // the skin's fader knob: as wide as the usual cap, its own shape, centred on the value
+        const auto img = theme::image (theme::Img::faderCap);
+        const float iw = cap.getWidth(), ih = iw * (float) img.getHeight() / (float) jmax (1, img.getWidth());
+        const auto dest = Rectangle<float> (iw, ih).withCentre ({ track.getCentreX(), pos });
+        theme::drawImageWithShadow (g, img, RectanglePlacement (RectanglePlacement::stretchToFit).getTransformToFit (img.getBounds().toFloat(), dest));
+        return;
+    }
     g.setGradientFill (ColourGradient::vertical (theme::hue (0xff8a8590), cap.getY(), theme::hue (0xff202025), cap.getBottom()));
     g.fillRoundedRectangle (cap, 4.0f);
     g.setColour (Colours::black);

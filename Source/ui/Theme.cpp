@@ -21,9 +21,9 @@ namespace
 /** The loaded custom design (decoded once). */
 struct CustomSkin
 {
-    juce::Image img[10];                 // by Img
+    juce::Image img[11];                 // by Img
     std::map<juce::String, juce::Colour> colours;
-    bool hue = true, knobRotates = false;
+    bool hue = true, knobRotates = false, shadows = true;
     juce::Typeface::Ptr font;
     float fontScale = 1.0f;
     float accentOffset = 0.0f;           // hue turn from the classic red to the skin's accent
@@ -373,7 +373,7 @@ juce::Image image (Img which)
             case Img::knob:       src = juce::ImageCache::getFromMemory (EmxAssets::knob_png, EmxAssets::knob_pngSize); break;
             case Img::slider:     src = juce::ImageCache::getFromMemory (EmxAssets::slider_png, EmxAssets::slider_pngSize); break;
             case Img::logo:       src = juce::ImageCache::getFromMemory (EmxAssets::logo_png, EmxAssets::logo_pngSize); break;
-            case Img::panel: case Img::inset: case Img::display: case Img::button: case Img::buttonOn:
+            case Img::panel: case Img::inset: case Img::display: case Img::button: case Img::buttonOn: case Img::faderCap:
                 break;   // drawn, not pictures (unless a skin brings one)
         }
     }
@@ -387,22 +387,52 @@ juce::Image image (Img which)
         return src;
 
     struct Tinted { float deg = 0.0f; bool own = false; int gen = -1; juce::Image img; };
-    static Tinted tinted[10];
+    static Tinted tinted[11];
     auto& t = tinted[idx];
     if (! t.img.isValid() || std::abs (t.deg - deg) > 0.01f || t.own != own || t.gen != customSkin.generation)
         t = { deg, own, customSkin.generation, recolour (src, deg) };
     return t.img;
 }
 
-void drawSliced (juce::Graphics& g, const juce::Image& img, juce::Rectangle<float> r, int sourceBorder)
+void drawSliced (juce::Graphics& g, const juce::Image& img, juce::Rectangle<float> r, int)
+{
+    if (! img.isValid() || r.isEmpty())
+        return;
+    const int srcMin = juce::jmax (1, juce::jmin (img.getWidth(), img.getHeight()));
+    const int s = juce::jmax (1, juce::roundToInt ((float) srcMin * 0.25f));
+    // shrink corners as much as the picture's short side has to shrink (at most to half: 2x artwork)
+    const float scale = juce::jmin (0.5f, juce::jmin (r.getWidth(), r.getHeight()) / (float) srcMin);
+    const int d = juce::jmax (1, juce::jmin (juce::roundToInt ((float) s * scale), (int) juce::jmin (r.getWidth(), r.getHeight()) / 2));
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    const auto dest = r.toNearestInt();
+    if (currentSkin == Skin::custom && customSkin.shadows)
+    {
+        juce::Graphics::ScopedSaveState state (g);
+        g.setColour (juce::Colours::black.withAlpha (0.16f));
+        drawNineSlice (g, img, dest.translated (0, 3), s, d, true);
+        g.setColour (juce::Colours::black.withAlpha (0.30f));
+        drawNineSlice (g, img, dest.translated (0, 1), s, d, true);
+    }
+    drawNineSlice (g, img, dest, s, d);
+}
+
+void drawImageWithShadow (juce::Graphics& g, const juce::Image& img, juce::AffineTransform t)
 {
     if (! img.isValid())
         return;
-    const int s = juce::jlimit (1, juce::jmax (1, juce::jmin (img.getWidth(), img.getHeight()) / 2 - 1), sourceBorder);
-    const int d = juce::jmax (1, juce::jmin (s / 2, (int) juce::jmin (r.getWidth(), r.getHeight()) / 2));
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    drawNineSlice (g, img, r.toNearestInt(), s, d);
+    if (currentSkin == Skin::custom && customSkin.shadows)
+    {
+        juce::Graphics::ScopedSaveState state (g);
+        g.setColour (juce::Colours::black.withAlpha (0.16f));
+        g.drawImageTransformed (img, t.translated (0.0f, 3.0f), true);
+        g.setColour (juce::Colours::black.withAlpha (0.30f));
+        g.drawImageTransformed (img, t.translated (0.0f, 1.2f), true);
+    }
+    g.drawImageTransformed (img, t);
 }
+
+bool customShadows() noexcept { return currentSkin == Skin::custom && customSkin.shadows; }
 
 juce::MemoryBlock defaultArtworkFile (Img which, juce::String& ext)
 {
@@ -414,7 +444,7 @@ juce::MemoryBlock defaultArtworkFile (Img which, juce::String& ext)
         case Img::knob:       return { EmxAssets::knob_png, (size_t) EmxAssets::knob_pngSize };
         case Img::slider:     return { EmxAssets::slider_png, (size_t) EmxAssets::slider_pngSize };
         case Img::logo:       return { EmxAssets::logo_png, (size_t) EmxAssets::logo_pngSize };
-        case Img::panel: case Img::inset: case Img::display: case Img::button: case Img::buttonOn:
+        case Img::panel: case Img::inset: case Img::display: case Img::button: case Img::buttonOn: case Img::faderCap:
             break;
     }
     return {};
@@ -478,6 +508,16 @@ juce::Image defaultPartImage (Img which)
                 g.drawRoundedRectangle (r, 10.0f, 2.0f);
             });
         }
+        case Img::faderCap:
+            return make (64, 32, [] (juce::Graphics& g, juce::Rectangle<float> r)
+            {
+                g.setGradientFill (juce::ColourGradient::vertical (juce::Colour (0xff8a8590), r.getY(), juce::Colour (0xff202025), r.getBottom()));
+                g.fillRoundedRectangle (r, 8.0f);
+                g.setColour (juce::Colours::black);
+                g.drawRoundedRectangle (r, 8.0f, 2.0f);
+                g.setColour (juce::Colour (0xffff2a2a));
+                g.fillRect (r.withSizeKeepingCentre (r.getWidth() - 12.0f, 4.0f));
+            });
         case Img::background: case Img::frame: case Img::knob: case Img::slider: case Img::logo:
             break;
     }
@@ -500,7 +540,7 @@ bool customKnobRotates() noexcept { return customSkin.knobRotates; }
 void setCustomSkin (const SkinDesign& d)
 {
     static const Img order[SkinDesign::numParts] { Img::background, Img::frame, Img::knob, Img::slider, Img::panel,
-                                                   Img::inset, Img::display, Img::button, Img::buttonOn, Img::logo };
+                                                   Img::inset, Img::display, Img::button, Img::buttonOn, Img::logo, Img::faderCap };
     CustomSkin c;
     for (int p = 0; p < SkinDesign::numParts; ++p)
         if (! d.images[p].isEmpty())
@@ -508,6 +548,7 @@ void setCustomSkin (const SkinDesign& d)
     c.colours = d.colours;
     c.hue = d.hueShift;
     c.knobRotates = d.knobRotates;
+    c.shadows = d.shadows;
     if (! d.font.isEmpty())
     {
         c.font = juce::Typeface::createSystemTypefaceFor (d.font.data.getData(), d.font.data.getSize());
@@ -806,14 +847,14 @@ void drawFrame (juce::Graphics& g, juce::Rectangle<int> bounds)
     g.drawRect (r.reduced (4.0f), 1.0f);
 }
 
-void drawNineSlice (juce::Graphics& g, const juce::Image& img, juce::Rectangle<int> d, int s, int b)
+void drawNineSlice (juce::Graphics& g, const juce::Image& img, juce::Rectangle<int> d, int s, int b, bool fill)
 {
     const int W = img.getWidth(), H = img.getHeight();
     const int dw = d.getWidth(), dh = d.getHeight(), x = d.getX(), y = d.getY();
     auto blit = [&] (int dx, int dy, int dW, int dH, int sx, int sy, int sW, int sH)
     {
         if (dW > 0 && dH > 0)
-            g.drawImage (img, dx, dy, dW, dH, sx, sy, sW, sH);
+            g.drawImage (img, dx, dy, dW, dH, sx, sy, sW, sH, fill);
     };
     blit (x, y, b, b, 0, 0, s, s);
     blit (x + b, y, dw - 2 * b, b, s, 0, W - 2 * s, s);

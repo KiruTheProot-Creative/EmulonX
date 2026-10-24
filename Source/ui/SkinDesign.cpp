@@ -7,13 +7,13 @@ using namespace juce;
 
 const char* SkinDesign::partKey (int p)
 {
-    static const char* k[] { "background", "frame", "knob", "fader", "panel", "inset", "display", "button", "button-on", "logo" };
+    static const char* k[] { "background", "frame", "knob", "fader", "panel", "inset", "display", "button", "button-on", "logo", "fader-knob" };
     return k[jlimit (0, numParts - 1, p)];
 }
 
 const char* SkinDesign::partTitle (int p)
 {
-    static const char* t[] { "BACKGROUND", "FRAME", "KNOB", "FADER", "PANEL", "KNOB AREA", "DISPLAY", "BUTTON", "BUTTON (ON)", "LOGO" };
+    static const char* t[] { "BACKGROUND", "FRAME", "KNOB", "FADER", "PANEL", "KNOB AREA", "DISPLAY", "BUTTON", "BUTTON (ON)", "LOGO", "FADER KNOB" };
     return t[jlimit (0, numParts - 1, p)];
 }
 
@@ -23,13 +23,14 @@ const char* SkinDesign::partHelp (int p)
         "Fills the whole window. 1920 x 1200 or larger.",
         "Drawn over the edges of the window (the middle stays see-through). 1920 x 1080 PNG with transparency, like the template.",
         "Square, e.g. 256 x 256 PNG. A pointer turns on top of it, or the image itself turns (see KNOB TURNS).",
-        "The fader track, tall and thin, e.g. 35 x 150 PNG. A cap slides along it.",
+        "The fader track, tall and thin, e.g. 35 x 150 PNG. The fader knob slides along it.",
         "Behind every panel. Stretched with its corners kept (9-slice), e.g. 96 x 96 PNG.",
         "Behind groups of knobs inside a panel. 9-slice, e.g. 80 x 80 PNG.",
         "Behind value displays and text fields. 9-slice, e.g. 48 x 24 PNG.",
         "Normal buttons. 9-slice, e.g. 64 x 32 PNG.",
         "Buttons that are switched on. 9-slice, e.g. 64 x 32 PNG.",
-        "Top-left logo, transparent PNG (wide, e.g. 871 x 200)." };
+        "Top-left logo, transparent PNG (wide, e.g. 871 x 200).",
+        "The knob that slides on a fader, e.g. 64 x 32 PNG (drawn about 32 px wide)." };
     return h[jlimit (0, numParts - 1, p)];
 }
 
@@ -62,6 +63,7 @@ var SkinDesign::toJson() const
     o->setProperty ("author", author);
     o->setProperty ("hueShift", hueShift);
     o->setProperty ("knobRotates", knobRotates);
+    o->setProperty ("shadows", shadows);
     auto* c = new DynamicObject();
     for (auto& [k, col] : colours)
         c->setProperty (k, "#" + col.toDisplayString (false).toLowerCase());
@@ -82,6 +84,7 @@ void SkinDesign::fromJson (const var& v)
     author = v.getProperty ("author", "").toString().substring (0, 60);
     hueShift = (bool) v.getProperty ("hueShift", true);
     knobRotates = (bool) v.getProperty ("knobRotates", false);
+    shadows = (bool) v.getProperty ("shadows", true);
     colours.clear();
     if (auto* c = v.getProperty ("colours", var()).getDynamicObject())
         for (auto& p : c->getProperties())
@@ -116,7 +119,8 @@ void take (SkinDesign& d, const String& fileName, MemoryBlock data, var& json)
     if (! isImageExt (ext))
         return;
     for (int p = 0; p < SkinDesign::numParts; ++p)
-        if (base == SkinDesign::partKey (p) || (p == SkinDesign::fader && base == "slider") || (p == SkinDesign::buttonOn && base == "button_on"))
+        if (base == SkinDesign::partKey (p) || (p == SkinDesign::fader && base == "slider") || (p == SkinDesign::buttonOn && base == "button_on")
+            || (p == SkinDesign::faderKnob && (base == "fader_knob" || base == "fader-cap")))
             d.images[p] = { std::move (data), ext == "jpeg" ? String ("jpg") : ext };
 }
 } // namespace

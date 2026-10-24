@@ -3,6 +3,9 @@
 
 cmake_minimum_required(VERSION 3.22)
 project(EmulonX VERSION 1.1.2 LANGUAGES C CXX)
+# Release tag after the number: bf = bug fix, bv = beta, af = alpha, ff = final (empty for none).
+set(EMX_VERSION_TAG "bf1")
+set(EMX_FULL_VERSION "${PROJECT_VERSION}${EMX_VERSION_TAG}")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -95,7 +98,7 @@ set(EMX_DEFINITIONS
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_USE_XINPUT=0
-    EMX_VERSION_STRING="${PROJECT_VERSION}")
+    EMX_VERSION_STRING="${EMX_FULL_VERSION}")
 
 target_sources(EmulonX PRIVATE ${EMX_SOURCES})
 target_include_directories(EmulonX PRIVATE Source)
@@ -139,7 +142,7 @@ if(EMX_BUILD_TESTS)
         Source/fx/FxModel.cpp
         Source/fx/FxEngine.cpp)
     target_include_directories(EmulonXTests PRIVATE Source)
-    target_compile_definitions(EmulonXTests PRIVATE EMX_VERSION_STRING="${PROJECT_VERSION}" JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_STANDALONE_APPLICATION=1)
+    target_compile_definitions(EmulonXTests PRIVATE EMX_VERSION_STRING="${EMX_FULL_VERSION}" JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_STANDALONE_APPLICATION=1)
     target_link_libraries(EmulonXTests PRIVATE
         juce::juce_audio_formats juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 endif()
