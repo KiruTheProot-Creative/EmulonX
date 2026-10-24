@@ -1,156 +1,60 @@
-# Emulon X
+# EMULON X
 
-A free, open-source sampler plugin inspired by the E-mu Emulator X.
-Load whole sound banks, edit and loop samples, stack effects, and modulate
-everything with drawable envelopes and macros.
+a Vibecoded project to make a Sampler, inspired by Emulator X (by E-MU) and with the ease to use like Vital.
 
-> Status: **version 1.1** — advanced arpeggiator, sample start / end, seven reverb types.
+# Current Features in V.1.1.1
 
-## Using it
+- ### Sound engine
+- **Sampler with zones:** each sample is a zone with its own key range, velocity range and root note.
+- **Three interpolation modes:** *Sinc HQ* (cleanest), *Cubic* and *Linear* (lightest on the CPU).
+- **Keep speed:** change the pitch without changing the length, like the Emulator X (turn it off for drums). Adjustable grain size.
+- **Loops:** *Off*, *Loop* (keeps looping during the release) or *Until release* (plays on to the end after you let go), with a crossfade to smooth the loop seam.
+- **Sample start / end** and **random start:** every note can start at a different spot inside an area you choose, always on a zero crossing so it doesn't click.
+- **Per zone:** semitones, fine tune, gain, pan and an ADSR envelope.
+- **Voice modes:** *Poly* for chords, or *Mono* with *Legato* and *Glide*.
+- **Fits your setup:** MIDI channel, velocity curve (soft / linear / hard), pitch-bend range, master tuning (A4), up to 256 voices, a CPU limit and a choice of which notes get stolen.
 
-- **ARP tab:** switch **ARP ON** and hold a chord. Choose the order (Up, Down,
-  Up/Down, Down/Up, As played, Random, Chord), the step length (**BEATS** /
-  division, straight, dotted or triplet), **OCTAVES**, **GATE** and **SWING**.
-  **LATCH** keeps it playing after you let go.
-  - **Patterns A-H:** each has its own length and 16 steps. Drag the bars for
-    velocity, click a step number to make a rest, and set the bottom row to
-    transpose a step by semitones (drag, mouse wheel, click +1, right-click -1,
-    double-click resets). **COPY** / **PASTE** copy a pattern.
-  - **Arrange:** the bar above the pattern sets the order patterns play in
-    (for example A A B A), in a loop. Click a slot to choose its pattern, **+** to
-    add one, right-click to remove one.
-  - While your DAW plays, the steps follow its beat grid.
-- **Sample start / end (Editor tab):** drag the amber markers (flags at the
-  bottom of the waveform) or use the **SMP START** / **SMP END** sliders. The
-  sliders under the waveform also move the loop start / end and the crossfade;
-  hold shift for fine moves.
-- **Random start (Editor tab):** switch **RANDOM** on and every note starts at a
-  different spot between the sample start and the dashed amber **RND TO**
-  marker (drag it, or use the **RND TO** slider), so repeated notes sound less
-  alike. Starts land on zero crossings, so they don't click.
-- **Reverb types:** Room, Hall, Plate, Ambience, Cathedral, Spring and Shimmer,
-  each built differently (early reflections, density, size, movement, tone).
-- **Voice (Editor tab):** **POLY** plays chords; **MONO** plays one note at a
-  time and returns to a key you still hold. In mono, **LEGATO** makes
-  overlapping notes slide without restarting, and **GLIDE** sets how long the
-  pitch takes to get to the new note.
+### Main tab
+- **Presets (`.emxp`):** the samples are packed inside the file, so one file is all you need to share a sound.
+- **Banks (`.emxb`):** collect presets in the bank and export them as one file. The bank is a grid of presets (1–6 per row, set in Settings). Click to select, double-click or Enter to load, Delete to remove.
+- **16 macros** at the bottom: automatable in your DAW and renamable (double-click the name). Right-click a macro to link it to any knob.
+- **Explorer:** Base banks, Other banks (each bank shown as a folder of presets), your User presets and your sample folders. Click a sample to hear it, double-click to load it.
+- **Drag and drop** WAV, AIFF, FLAC, OGG or MP3 files, presets or banks anywhere onto the window. Root notes are read from loop markers or file names like `Piano_C4.wav`.
 
-### Milestone 5
+### Editor tab
+- **Waveform:** zoom with the mouse wheel, drag the markers for loop start / end, sample start / end and the random start area. Snap to zero crossings, or type exact positions.
+- **Keymap:** drag zones to move them, drag their ends to change the key range, click keys to play them, shift-click a key to set the root note.
+- **Envelope copy:** "Copy from…" takes the attack, decay, sustain and release of another zone, or gives every zone the current envelope.
+- **Undo / Redo** (Ctrl+Z / Ctrl+Shift+Z) for every zone change.
 
+### FX tab
+- **FX chains** on the whole preset and on each single zone. Effects run top to bottom; reorder them with the arrows and bypass them with ON.
+- **10 effects:**
+  - Filter (low pass, high pass, band, notch)
+  - Morph Filter (vowel, sweep)
+  - EQ
+  - Distortion (10 types, from soft clip to bitcrush)
+  - Compressor / Limiter / OTT
+  - Chorus / Flanger / Ensemble
+  - Phaser
+  - Delay (stereo, ping-pong, tape, diffuse; follows your DAW's tempo)
+  - Reverb (Room, Hall, Plate, Ambience, Cathedral, Spring, Shimmer)
+  - Utility
+- **Modulation:** right-click any FX knob, the SEMI knob or the master volume to connect an envelope, a macro or the mod wheel. Rings around the knob show how far each source moves it.
+- **Up to 16 envelopes:** draw your own shapes with curves or use AHDSR. They loop or play once, restart with each note or run freely, and follow your DAW's tempo or a rate in Hz.
 
-- **FX tab:** pick a **CHANNEL**: *Whole preset* (runs on everything) or a single
-  zone (runs only on that zone, before the whole-preset chain). **+ ADD EFFECT**
-  adds Filter, Morph Filter, EQ, Distortion (10 types), Compressor (with
-  Limiter and OTT), Chorus / Flanger / Ensemble, Phaser, Delay (Stereo,
-  Ping-Pong, Tape, Diffuse; synced to your DAW's tempo) and Reverb (Room, Hall,
-  Plate, Ambience), plus Utility. Effects run top to bottom; use the arrows to
-  reorder and **ON** to bypass.
-- **Modulation:** right-click any FX knob (or the master volume) and pick an
-  envelope, a macro or the mod wheel. Rings around the knob show how far each
-  source moves it; the list under the envelope editor sets the amounts
-  (negative = upside down). Right-click a macro on the Main tab to see its
-  connections, or choose **Link** and then click the knob it should move.
-- **Envelopes:** draw your own shape (drag points, drag the small circles to
-  bend curves, double-click to add or remove points) or switch to **AHDSR**.
-  Shapes loop or play once, restart with each note or run freely, and follow the
-  tempo (**SYNC**) or a rate in Hz. Up to 16 envelopes (**+**).
-- Effects, envelopes and connections are saved in presets, banks and your DAW
-  project, in the same format as the browser prototype.
+### Arp tab
+- **Advanced arpeggiator:** Up, Down, Up/Down, Down/Up, As played, Random and Chord, with rate (straight, dotted, triplet), octaves, gate, swing and latch.
+- **8 patterns (A–H)** with up to 16 steps each: velocity per step, rests, and a semitone shift per step.
+- **Arrangement bar:** chain patterns like A A B A. While your DAW plays, the steps follow its beat grid.
 
-### Earlier milestones
+### Everywhere
+- **Master volume** in the top bar, with the output meter built in.
+- **Type values in:** double-click any value display and type, units included (`300ms`, `1.5 s`, `50%`, `-6 dB`, `C4`, `L20`, `2.5k`).
+- **Skins:** *EMULON CLASSIC* (red metal, with a color shift and 8 quick picks) and *EMULON XP* in light and dark.
+- **Interface size** from 75 % to 200 %, adjustable knob sensitivity, help tips.
+- **Settings are shared** by every Emulon X in every project. Your DAW project can store the samples too, so it opens anywhere.
 
-
-- **Editor tab:** double-click a zone on the Main tab (or use **<** / **>**) to edit it.
-  - **Waveform:** mouse wheel zooms, dragging scrolls, double-click shows everything.
-    Drag the white **S** / **E** flags to move the loop points, or type exact
-    values (in sample frames). **ZERO-X** moves a point to the nearest zero
-    crossing; **SNAP** does that automatically while dragging.
-  - **Loop modes:** *Off*, *Loop* (keeps looping during the release) and
-    *Until release* (plays on to the end after you let go). **X-FADE** blends
-    the loop seam.
-  - **Mapping, Pitch, Amp, Envelope:** root note, key and velocity ranges,
-    **SEMI** (semitones, can be moved by envelopes / macros / mod wheel: right-click
-    it), fine tune, keep speed and grain size, gain, pan, and an ADSR envelope per zone.
-  - **Keymap:** each bar is a zone. Click it to edit, drag it to move, drag its
-    ends to change the key range. Click keys to play (lower on the key = louder),
-    shift-click a key to set the root note.
-  - **UNDO / REDO** (Ctrl+Z / Ctrl+Shift+Z) for every zone change.
-
-
-- **Add sounds:** drag WAV, AIFF, FLAC, OGG or MP3 files onto the window, press
-  **LOAD...**, or double-click them in the Explorer's **SAMPLES** tab (a single
-  click plays a preview). Root notes come from WAV loop markers or file names
-  such as `Piano_C4.wav`; several files at once are spread across the keyboard
-  (**AUTO MAP** does it again).
-- **Presets (`.emxp`):** name the preset at the top of the Preset panel and press
-  **SAVE**. The samples are packed inside the file, so one file is all you need
-  to share. Opening a preset replaces the current one.
-- **Banks (`.emxb`):** **ADD CURRENT** puts a copy of the current preset into the
-  Bank list; **EXPORT...** saves the whole list as one `.emxb` file. **OPEN...**
-  (or dropping a bank on the window) fills the list from a bank; double-click a
-  preset to load it.
-- **Explorer:** the **BANKS** tab shows *Base banks*, *Other banks* (each bank as
-  a folder of presets) and *User* folders. Add folders with the folder **+** button
-  or in the settings.
-- **Settings** (gear button): folders, voices, CPU limit, voice stealing, default
-  interpolation and keep speed, MIDI channel, velocity curve, pitch-bend range,
-  tuning (A4), interface size, knob sensitivity and help tips. They are shared by
-  every Emulon X in every project.
-- **Your DAW project stores the samples too** (setting *Samples in DAW projects*),
-  so a project still sounds right if the original files move or are deleted.
-- **Interpolation:** *Sinc HQ* sounds cleanest; *Linear* uses the least CPU.
-  **Keep speed** changes pitch without changing length (turn it off for drums).
-
-## Install (Windows, e.g. for Ableton Live)
-
-1. Download **EmulonX-Setup-x.y.z.exe** from the latest release (or the
-   `EmulonX-Windows-Installer` artifact of the latest run on the **Actions** tab).
-2. Run it. It puts the plugin into `C:\Program Files\Common Files\VST3` (you can
-   pick another folder), creates `Documents\Emulon X\Base Banks` and
-   `Documents\Emulon X\Presets`, installs the base banks and, if you like, the
-   standalone app.
-3. In Ableton: *Options → Preferences → Plug-Ins*, make sure
-   **Use VST3 Plug-In System Folders** is on, then click **Rescan**. Emulon X is
-   under *Plug-Ins → VST3*.
-
-Windows may show a "Windows protected your PC" notice because the installer is
-not code-signed: click **More info → Run anyway**. Uninstall it like any other
-app (Settings → Apps); your presets and banks in Documents are kept.
-
-Without the installer: copy the folder **`Emulon X.vst3`** from the
-`EmulonX-Windows` artifact to `C:\Program Files\Common Files\VST3\`.
-`Emulon X.exe` is a standalone version that runs without a DAW.
-
-## Roadmap
-
-| Milestone | What you get |
-|---|---|
-| 1 | Plugin window, your artwork, interface sizes 75–200 %, skins (EMULON CLASSIC with hue shift, EMULON XP light / dark), master volume, 16 macros |
-| 2 | Sampler engine: zones, sinc interpolation, crossfaded loops, keep-speed pitching, ADSR |
-| 3 | Explorer, `.emxp` / `.emxb` files, settings window with bank folders |
-| 4 | Editor tab: waveform, loop points, keymap |
-| 5 | FX chains (preset + per zone), envelopes, macro and mod-wheel modulation |
-| 6 | Polish, factory banks, installers |
-
-## Building it yourself
-
-You don't have to — GitHub builds every change automatically (see
-`.github/workflows/build.yml`). If you want to:
-
-```
-cmake -S . -B build
-cmake --build build --config Release
-```
-
-Requires CMake 3.22+ and a C++20 compiler (Visual Studio 2022 on Windows,
-Xcode on macOS). JUCE 9 is downloaded automatically.
-
-## License
-
-Emulon X is free software under the **GNU Affero General Public License v3**
-(see `LICENSE`). It is built with [JUCE](https://juce.com), used under its
-AGPLv3 option. The Saira font is under the SIL Open Font License
-(`Assets/fonts/OFL-Saira.txt`).
-
-"Emulator X" and "E-mu" are trademarks of their respective owners. Emulon X is
-an independent project and is not affiliated with them.
+### Installer (Windows)
+- You choose every folder: the plugin (VST3), base banks, your presets and the standalone app. The summary before installing lists every folder that will be used, and Emulon X finds the chosen folders by itself.
+- Optional standalone app, to play Emulon X without a DAW.
