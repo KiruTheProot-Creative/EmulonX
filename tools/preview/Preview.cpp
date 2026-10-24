@@ -565,14 +565,11 @@ int main (int argc, char** argv)
                 g.setColour (Colour (0xff3fae7c));
                 g.drawRoundedRectangle (1, 1, 94, 94, 18, 2);
             });
-            // a big, wide button picture like a real artist's (much larger than a button on screen)
-            d.images[emx::SkinDesign::button] = png (640, 96, [] (Graphics& g)
+            d.images[emx::SkinDesign::button] = png (64, 36, [] (Graphics& g)
             {
-                g.setColour (Colour (0xff3a0c0c)); g.fillRoundedRectangle (2, 2, 636, 92, 14);
-                g.setColour (Colour (0xff120606)); g.fillRect (18.0f, 18.0f, 604.0f, 60.0f);
-                g.setColour (Colour (0xff8a2020));
-                for (int x = 30; x < 620; x += 70) g.fillRect ((float) x, 6.0f, 6.0f, 10.0f), g.fillRect ((float) x, 80.0f, 6.0f, 10.0f);
-                g.setColour (Colour (0xffd04040)); g.drawRoundedRectangle (2, 2, 636, 92, 14, 3);
+                g.setGradientFill (ColourGradient::vertical (Colour (0xff3a4a44), 0, Colour (0xff1b2421), 36));
+                g.fillRoundedRectangle (1, 1, 62, 34, 10);
+                g.setColour (Colour (0xff5bd59a)); g.drawRoundedRectangle (1, 1, 62, 34, 10, 2);
             });
             d.images[emx::SkinDesign::buttonOn] = png (64, 36, [] (Graphics& g)
             {
@@ -590,12 +587,6 @@ int main (int argc, char** argv)
                 g.fillEllipse (24, 24, 208, 208);
                 g.setColour (Colour (0xff35d06b)); g.fillRoundedRectangle (122, 34, 12, 70, 6);   // marker pointing up
             });
-            d.images[emx::SkinDesign::faderKnob] = png (64, 40, [] (Graphics& g)
-            {
-                g.setGradientFill (ColourGradient::vertical (Colour (0xffe8f5ee), 0, Colour (0xff4f6b5d), 40));
-                g.fillRoundedRectangle (2, 2, 60, 36, 10);
-                g.setColour (Colour (0xff35d06b)); g.fillRect (8.0f, 18.0f, 48.0f, 4.0f);
-            });
             MemoryBlock fontData;
             File ("/usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf").loadFileAsData (fontData);
             if (! fontData.isEmpty())
@@ -607,7 +598,7 @@ int main (int argc, char** argv)
             const bool saved = d.save (skinFile, err), loaded = emx::SkinDesign::load (skinFile, back, err);
             auto same = [&] (const emx::SkinDesign& x)
             {
-                bool ok = x.name == d.name && x.author == d.author && x.knobRotates && x.shadows && x.colours.size() == 1
+                bool ok = x.name == d.name && x.author == d.author && x.knobRotates && x.colours.size() == 1
                        && x.colours.at ("accent") == d.colours.at ("accent") && x.font.data == d.font.data;
                 for (int p = 0; p < emx::SkinDesign::numParts; ++p)
                     ok = ok && x.images[p].data == d.images[p].data;

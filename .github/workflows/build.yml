@@ -70,12 +70,11 @@ jobs:
         shell: pwsh
         run: |
           $v = (Select-String -Path CMakeLists.txt -Pattern 'project\(EmulonX VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
-          $tag = (Select-String -Path CMakeLists.txt -Pattern 'set\(EMX_VERSION_TAG "([a-z0-9]*)"\)').Matches[0].Groups[1].Value
           $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
           if (-not (Test-Path $iscc)) { $iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source }
           Write-Output "Inno Setup: $iscc  version: $v"
-          & $iscc "/DAppVersion=$v$tag" "/DNumericVersion=$v" "/DSourceDir=$((Resolve-Path dist).Path)" installer\EmulonX.iss 2>&1 | Tee-Object -FilePath installer.log
+          & $iscc "/DAppVersion=$v" "/DSourceDir=$((Resolve-Path dist).Path)" installer\EmulonX.iss 2>&1 | Tee-Object -FilePath installer.log
           if ($LASTEXITCODE -ne 0) {
             $t = ((Get-Content installer.log -Tail 30) -join "`n").Replace('%','%25').Replace("`r",'').Replace("`n",'%0A')
             Write-Output "::error title=Installer failed::$t"; exit 1 }

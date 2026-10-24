@@ -62,7 +62,7 @@ juce::Colour rotateHue (juce::Colour, float degrees);
 juce::Font font (float height, int weight = 700, float kerning = 0.0f);
 
 //== Artwork (your PNGs, embedded at 2x so they stay sharp up to 200%) ==========
-enum class Img { background, frame, knob, slider, logo, panel, inset, display, button, buttonOn, faderCap };
+enum class Img { background, frame, knob, slider, logo, panel, inset, display, button, buttonOn };
 /** The EMULON CLASSIC picture of a part as a template for skin makers (PNG-ready, 2x size).
     For background / frame / knob / slider / logo it is the original artwork. */
 juce::Image defaultPartImage (Img);
@@ -70,14 +70,8 @@ juce::Image defaultPartImage (Img);
 juce::MemoryBlock defaultArtworkFile (Img, juce::String& extension);
 /** True if the current skin has its own picture for this (custom skins). */
 bool hasImage (Img) noexcept;
-/** Draws an image stretched to fill r with its corners kept (9-slice). Corners are a quarter of the
-    picture's smaller side and shrink by the same amount as the rest, so a big picture looks like a
-    smaller copy of itself (stretched only along its long side). */
-void drawSliced (juce::Graphics&, const juce::Image&, juce::Rectangle<float> r, int unusedHint = 0);
-/** An image (any transform) with the skin's slight drop shadow underneath, if the skin wants shadows. */
-void drawImageWithShadow (juce::Graphics&, const juce::Image&, juce::AffineTransform);
-/** Does the custom skin draw drop shadows under its pictures? */
-bool customShadows() noexcept;
+/** Draws an image stretched to fill r with its corners kept (9-slice), at half size for sharpness. */
+void drawSliced (juce::Graphics&, const juce::Image&, juce::Rectangle<float> r, int sourceBorder);
 
 /** The Emulon X logo, fitted into the area (keeps its shape), with a soft glow. */
 void drawLogo (juce::Graphics&, juce::Rectangle<float> area, juce::RectanglePlacement = juce::RectanglePlacement::xLeft | juce::RectanglePlacement::yMid);
@@ -105,5 +99,5 @@ juce::Rectangle<float> drawHeading (juce::Graphics&, juce::Rectangle<float> pane
                                     const juce::String& title, const juce::String& subtitle = {});
 
 /** Draws an image as a 9-slice (corners kept, edges stretched) — used for the frame. */
-void drawNineSlice (juce::Graphics&, const juce::Image&, juce::Rectangle<int> dest, int sourceBorder, int destBorder, bool fillWithCurrentColour = false);
+void drawNineSlice (juce::Graphics&, const juce::Image&, juce::Rectangle<int> dest, int sourceBorder, int destBorder);
 } // namespace emx::theme

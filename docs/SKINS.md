@@ -12,7 +12,6 @@ Open **Settings → Skin designer**. Everything you change shows up in the plugi
 |---|---|
 | **Name / By** | The skin's name and yours. |
 | **Colour shift: allowed / off** | Whether the colour bar in *Settings → Customization* may turn your skin's colours. |
-| **Shadows: on / off** | A slight drop shadow under your pictures (on by default). |
 | **Knob: pointer turns / picture turns** | *Pointer*: your knob picture stays still and a pointer turns on top of it. *Picture*: the picture itself turns. Its marker should point straight up. |
 | **Choose font…** | A `.ttf` or `.otf` file, packed into the skin. It is sized automatically so all text still fits. Only use fonts whose licence lets you share them. |
 | **Picture tiles** | **CHOOSE…** a PNG/JPG for that part, **X** to go back to the Classic look for it. |
@@ -43,14 +42,12 @@ Anything you leave out keeps the EMULON CLASSIC look, turned to your accent colo
 | `button.png` | Buttons | 9-slice | 64 × 36 |
 | `button-on.png` | Buttons that are on | 9-slice | 64 × 36 |
 | `logo.png` | Top-left logo | Fitted, keeps its shape | 871 × 200, transparent |
-| `fader-knob.png` | The knob that slides on faders | About 32 px wide on screen, keeps its shape | 64 × 32 |
 | any `.ttf` / `.otf` | Font | All text | — |
 
-**9-slice** means the corners keep their shape while the edges and middle stretch. The corner
-is a quarter of the picture's shorter side, and it shrinks by the same amount as the rest of
-the picture. So a big, detailed picture (for example a 640 × 96 button) looks like a smaller
-copy of itself, stretched only along its long side. Pictures are drawn at most at half their
-pixel size, so they stay sharp at 200 % interface size.
+**9-slice** means the corners stay as they are and the edges and middle stretch. These
+pictures are drawn at half their pixel size, so they stay sharp at 200 % interface size.
+The corner size is about a quarter of the picture's smaller side: 24 px for the panel,
+20 px for the knob area, 12 px for displays and buttons.
 
 ## The file format (for the curious)
 
@@ -64,7 +61,6 @@ A `.emxd` file is a normal **zip** file containing the part files above plus `sk
   "author": "Kiru",
   "hueShift": true,
   "knobRotates": false,
-  "shadows": true,
   "colours": {
     "accent": "#35d06b",
     "text": "#e8f0ea",

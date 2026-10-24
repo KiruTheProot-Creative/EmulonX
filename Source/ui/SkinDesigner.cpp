@@ -165,8 +165,6 @@ SkinDesigner::SkinDesigner (Settings& s) : settings (s)
     hueButton.onClick = [this] { design.hueShift = ! design.hueShift; changed(); };
     knobButton.setTooltip ("Pointer: your knob picture stays still and a pointer turns on it. Picture: the knob picture itself turns (point its marker straight up).");
     knobButton.onClick = [this] { design.knobRotates = ! design.knobRotates; changed(); };
-    shadowButton.setTooltip ("A slight drop shadow under your pictures (buttons, panels, displays, knobs)");
-    shadowButton.onClick = [this] { design.shadows = ! design.shadows; changed(); };
     fontButton.setTooltip ("Pick a font file (.ttf or .otf) - it is packed into the skin");
     fontButton.onClick = [this] { chooseFont(); };
     fontClear.setTooltip ("Back to the standard font");
@@ -180,7 +178,7 @@ SkinDesigner::SkinDesigner (Settings& s) : settings (s)
     exportButton.setTooltip ("Save the skin as one .emxd file to share - it is also added to your skins");
     exportButton.onClick = [this] { exportSkin(); };
 
-    for (auto* c : { (Component*) &nameField, (Component*) &authorField, (Component*) &hueButton, (Component*) &knobButton, (Component*) &shadowButton,
+    for (auto* c : { (Component*) &nameField, (Component*) &authorField, (Component*) &hueButton, (Component*) &knobButton,
                      (Component*) &fontButton, (Component*) &fontClear, (Component*) &startOver, (Component*) &loadFolderButton,
                      (Component*) &templateButton, (Component*) &exportButton })
         addAndMakeVisible (c);
@@ -204,8 +202,6 @@ void SkinDesigner::refreshControls()
     hueButton.setButtonText (design.hueShift ? "COLOUR SHIFT: ALLOWED" : "COLOUR SHIFT: OFF");
     hueButton.setToggleState (design.hueShift, dontSendNotification);
     knobButton.setButtonText (design.knobRotates ? "KNOB: PICTURE TURNS" : "KNOB: POINTER TURNS");
-    shadowButton.setButtonText (design.shadows ? "SHADOWS: ON" : "SHADOWS: OFF");
-    shadowButton.setToggleState (design.shadows, dontSendNotification);
     fontName = "STANDARD FONT";
     if (! design.font.isEmpty())
         if (auto tf = Typeface::createSystemTypefaceFor (design.font.data.getData(), design.font.data.getSize()))
@@ -312,7 +308,7 @@ void SkinDesigner::saveTemplate()
         SkinDesign t = design;
         static const theme::Img order[SkinDesign::numParts] { theme::Img::background, theme::Img::frame, theme::Img::knob, theme::Img::slider,
                                                               theme::Img::panel, theme::Img::inset, theme::Img::display, theme::Img::button,
-                                                              theme::Img::buttonOn, theme::Img::logo, theme::Img::faderCap };
+                                                              theme::Img::buttonOn, theme::Img::logo };
         for (int p = 0; p < SkinDesign::numParts; ++p)
         {
             if (! t.images[p].isEmpty())
@@ -395,19 +391,16 @@ void SkinDesigner::resized()
     rowFont = r.removeFromTop (26);
     {
         auto row = rowFont;
-        const int bw = (row.getWidth() - 26 - 4 * 6 - 4) / 4;
-        hueButton.setBounds (row.removeFromLeft (bw));
+        hueButton.setBounds (row.removeFromLeft (170));
         row.removeFromLeft (6);
-        knobButton.setBounds (row.removeFromLeft (bw));
-        row.removeFromLeft (6);
-        shadowButton.setBounds (row.removeFromLeft (bw));
-        row.removeFromLeft (6);
+        knobButton.setBounds (row.removeFromLeft (160));
+        row.removeFromLeft (10);
         fontClear.setBounds (row.removeFromRight (26));
         row.removeFromRight (4);
-        fontButton.setBounds (row);
+        fontButton.setBounds (row.removeFromRight (110));
     }
     r.removeFromTop (10);
-    const int cols = 6, gap = 8;
+    const int cols = 5, gap = 8;
     const int tw = (r.getWidth() - (cols - 1) * gap) / cols, th = 92;
     for (int i = 0; i < tiles.size(); ++i)
         tiles[i]->setBounds (r.getX() + (i % cols) * (tw + gap), r.getY() + (i / cols) * (th + gap), tw, th);
@@ -438,11 +431,10 @@ void SkinDesigner::paint (Graphics& g)
     g.drawText ("NAME", rowName.withWidth (44), Justification::centredLeft, false);
     g.drawText ("BY", rowName.withTrimmedLeft (46 + 210 + 8).withWidth (30), Justification::centredLeft, false);
     g.drawText ("COLOURS", colourRow.withWidth (58), Justification::centredLeft, false);
-    // the font in use, at the end of the name row
+    // the font in use, between the toggles and the font buttons
     {
-        auto a = rowName.withTrimmedLeft (46 + 210 + 40 + 170 + 10).toFloat();
-        if (a.getWidth() > 60.0f)
-            theme::drawLed (g, a, "FONT: " + fontName, 8.5f);
+        auto a = rowFont.withTrimmedLeft (170 + 6 + 160 + 10).withTrimmedRight (26 + 4 + 110 + 6).toFloat();
+        theme::drawLed (g, a, "FONT: " + fontName, 8.5f);
     }
     g.setColour (theme::textMuted);
     g.setFont (theme::font (8.0f, 500, 0.04f));
