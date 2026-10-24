@@ -97,7 +97,8 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void refresh();
     void edit (std::function<void (ZoneParams&)>);
-    void setLoopPoint (int which, int frame, bool exact);   // 0/1 loop start/end, 2/3 sample start/end
+    void setLoopPoint (int which, int frame, bool exact);
+    static constexpr int allZonesItem = 1000000;   // 0/1 loop start/end, 2/3 sample start/end
 
     EmulonXProcessor& proc;
     juce::SharedResourcePointer<Settings> settings;
@@ -127,6 +128,7 @@ private:
     ValueControl semi { "Semi", ValueControl::Style::knob }, tune { "Tune", ValueControl::Style::knob }, grain { "Grain", ValueControl::Style::knob };
     juce::TextButton keepSpeed { "KEEP SPEED" };
     ValueControl gain { "Gain", ValueControl::Style::knob }, pan { "Pan", ValueControl::Style::knob };
+    juce::ComboBox envCopyBox;   // copy the envelope from another zone (or to all zones)
     ValueControl attack { "Attack", ValueControl::Style::fader, 84 }, decay { "Decay", ValueControl::Style::fader, 84 },
                  sustain { "Sustain", ValueControl::Style::fader, 84 }, release { "Release", ValueControl::Style::fader, 84 };
 

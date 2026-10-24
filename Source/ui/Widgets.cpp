@@ -28,6 +28,161 @@ void ModSlider::mouseDown (const MouseEvent& e)
 void ModSlider::mouseDrag (const MouseEvent& e) { if (! swallowed) Slider::mouseDrag (e); }
 void ModSlider::mouseUp (const MouseEvent& e)   { if (! swallowed) Slider::mouseUp (e); swallowed = false; }
 
+//== Typing values in ===========================================================
+namespace
+{
+/** "2.5 K" -> 2500, "300 MS" -> 0.3, "C#4" -> 61, "L20" -> -20, "OFF" -> 0. Units: the letters after the number. */
+bool meaning (String text, double& value, String& unit)
+{
+    text = text.trim().toUpperCase().replaceCharacter (',', '.');
+    if (text == "OFF" || text == "C")   // glide off, pan centre
+    {
+        value = 0.0; unit = {};
+        return true;
+    }
+    // note names: C4 = 60
+    {
+        static const char* names = "C D EF G A B";
+        if (text.isNotEmpty() && text[0] >= 'A' && text[0] <= 'G')
+        {
+            int pc = String (names).indexOfChar (text[0]);
+            int i = 1;
+            if (text[i] == '#') { ++pc; ++i; }
+            else if (text[i] == 'B' && text.length() > 2) { --pc; ++i; }
+            const auto rest = text.substring (i).trim();
+            if (rest.isNotEmpty() && (rest.containsOnly ("-0123456789")))
+            {
+                value = (rest.getIntValue() + 1) * 12 + pc;
+                unit = "NOTE";
+                return true;
+            }
+        }
+    }
+    double sign = 1.0;
+    if (text.startsWithChar ('L')) { sign = -1.0; text = text.substring (1); }   // pan left
+    else if (text.startsWithChar ('R') && text.length() > 1 && CharacterFunctions::isDigit (text[1])) text = text.substring (1);
+    const int start = text.indexOfAnyOf ("-+.0123456789");
+    if (start < 0)
+        return false;
+    int end = start + 1;
+    while (end < text.length() && String ("0123456789.").containsChar (text[end]))
+        ++end;
+    value = sign * text.substring (start, end).getDoubleValue();
+    unit = text.substring (end).trim().removeCharacters (" ");
+    if (unit.startsWith ("MS")) { value *= 0.001; unit = "S"; }
+    else if (unit.startsWith ("KHZ") || unit == "K") { value *= 1000.0; unit = "HZ"; }
+    return true;
+}
+} // namespace
+
+bool valueFromTypedText (Slider& s, const std::function<String (double)>& format, const String& typed, double& result)
+{
+    double want = 0.0;
+    String unit;
+    if (! meaning (typed, want, unit))
+        return false;
+    auto fmt = [&] (double v) { return format ? format (v) : s.getTextFromValue (v); };
+    // A bare number counts in the units the display shows right now ("300" while it shows "250 MS" = 300 ms).
+    if (unit.isEmpty())
+    {
+        String shownUnit;
+        double shown = 0.0;
+        const auto now = fmt (s.getValue()).toUpperCase();
+        if (meaning (now, shown, shownUnit) && now.contains ("MS"))
+            want *= 0.001;
+        else if (now.contains ("K") && ! now.contains ("OCT") && shownUnit == "HZ")
+            want *= 1000.0;
+    }
+    // Search the range for the value whose display means the typed amount.
+    const int steps = 2000;
+    double best = s.getValue(), bestErr = std::numeric_limits<double>::max();
+    for (int i = 0; i <= steps; ++i)
+    {
+        const double v = s.proportionOfLengthToValue ((double) i / steps);
+        double m = 0.0;
+        String u;
+        if (! meaning (fmt (v), m, u))
+            continue;
+        const double err = std::abs (m - want);
+        if (err < bestErr) { bestErr = err; best = v; }
+    }
+    // refine between the neighbours (for smooth ranges)
+    const double p = s.valueToProportionOfLength (best);
+    double lo = jmax (0.0, p - 1.0 / steps), hi = jmin (1.0, p + 1.0 / steps);
+    for (int i = 0; i < 30; ++i)
+    {
+        const double mid = 0.5 * (lo + hi);
+        double m = 0.0;
+        String u;
+        meaning (fmt (s.proportionOfLengthToValue (mid)), m, u);
+        double mlo = 0.0;
+        meaning (fmt (s.proportionOfLengthToValue (lo)), mlo, u);
+        if ((m < want) == (mlo < want)) lo = mid; else hi = mid;
+    }
+    {
+        const double v = s.proportionOfLengthToValue (0.5 * (lo + hi));
+        double m = 0.0;
+        String u;
+        if (meaning (fmt (v), m, u) && std::abs (m - want) <= bestErr)
+            best = v;
+    }
+    // stepped controls (notes, semitones, 0.5 dB...): snap to a step, then take the neighbour if it fits better
+    const auto range = s.getNormalisableRange();
+    if (range.interval > 0.0)
+    {
+        double bestSnap = range.snapToLegalValue (best), snapErr = std::numeric_limits<double>::max();
+        for (double c : { best, best - range.interval, best + range.interval })
+        {
+            const double v = range.snapToLegalValue (jlimit (range.start, range.end, c));
+            double m = 0.0;
+            String u;
+            if (meaning (fmt (v), m, u) && std::abs (m - want) < snapErr - 1.0e-12)
+            {
+                snapErr = std::abs (m - want);
+                bestSnap = v;
+            }
+        }
+        best = bestSnap;
+    }
+    result = jlimit (range.start, range.end, best);
+    return true;
+}
+
+TypeInField::TypeInField (Component& owner, Rectangle<int> area, const String& current, std::function<void (const String&)> apply)
+    : applyFn (std::move (apply))
+{
+    setJustification (Justification::centred);
+    setFont (theme::font (9.0f, 500));
+    setIndents (2, 0);
+    setBorder ({ 1, 1, 1, 1 });
+    setColour (TextEditor::backgroundColourId, theme::ledBg);
+    setColour (TextEditor::textColourId, theme::ledText);
+    setColour (TextEditor::outlineColourId, theme::red);
+    setColour (TextEditor::focusedOutlineColourId, theme::red);
+    setText (current, false);
+    setBounds (area.expanded (2, 1));
+    owner.addAndMakeVisible (this);
+    selectAll();
+    grabKeyboardFocus();
+    onReturnKey = [this] { if (! done) { done = true; applyFn (getText()); } close(); };
+    onEscapeKey = [this] { done = true; close(); };
+    onFocusLost = [this] { done = true; close(); };
+}
+
+void TypeInField::close()
+{
+    setVisible (false);
+    // the owner deletes the field later (not while it is still inside its own callback)
+    MessageManager::callAsync ([safe = Component::SafePointer<Component> (getParentComponent())]
+    {
+        if (auto* p = safe.getComponent())
+        {
+            if (auto* k = dynamic_cast<EmxKnob*> (p)) k->repaint();
+            if (auto* v = dynamic_cast<ValueControl*> (p)) v->repaint();
+        }
+    });
+}
+
 void drawModRings (Graphics& g, Rectangle<float> knob, const ModRings& m)
 {
     if (m.rings.empty())
@@ -142,6 +297,19 @@ void EmxKnob::paintOverChildren (Graphics& g)
         drawModRings (g, slider.getBounds().toFloat(), modRings());
 }
 
+void EmxKnob::mouseDoubleClick (const MouseEvent& e)
+{
+    if (! ledArea.contains (e.position) || ! isEnabled())
+        return;
+    typeIn = std::make_unique<TypeInField> (*this, ledArea.toNearestInt(), slider.getTextFromValue (slider.getValue()),
+                                            [this] (const String& t)
+                                            {
+                                                double v;
+                                                if (valueFromTypedText (slider, {}, t, v))
+                                                    slider.setValue (v, sendNotificationSync);
+                                            });
+}
+
 void EmxKnob::paint (Graphics& g)
 {
     theme::drawLed (g, ledArea, slider.getTextFromValue (slider.getValue()), 9.0f);
@@ -212,6 +380,19 @@ void ValueControl::paintOverChildren (Graphics& g)
 {
     if (modRings && style == Style::knob)
         drawModRings (g, slider.getBounds().toFloat(), modRings());
+}
+
+void ValueControl::mouseDoubleClick (const MouseEvent& e)
+{
+    if (! ledArea.contains (e.position) || ! isEnabled())
+        return;
+    typeIn = std::make_unique<TypeInField> (*this, ledArea.toNearestInt(), format ? format (slider.getValue()) : String (slider.getValue(), 2),
+                                            [this] (const String& t)
+                                            {
+                                                double v;
+                                                if (valueFromTypedText (slider, format, t, v))
+                                                    slider.setValue (v, sendNotificationSync);
+                                            });
 }
 
 void ValueControl::paint (Graphics& g)

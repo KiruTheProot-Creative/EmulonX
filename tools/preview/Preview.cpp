@@ -166,6 +166,88 @@ int main (int argc, char** argv)
         proc.undo();   // back to the original loop
     }
 
+    // Typing values into value displays, and copying an envelope between zones.
+    {
+        using emx::ValueControl;
+        bool allOk = true;
+        String report;
+        auto check = [&] (ValueControl& c, const char* typed, double expect, double tol)
+        {
+            double v = -999.0;
+            const bool parsed = emx::valueFromTypedText (c.slider, c.format, typed, v);
+            const bool ok = parsed && std::abs (v - expect) <= tol;
+            allOk = allOk && ok;
+            if (! ok) report << " [" << typed << " -> " << String (v, 4) << ", wanted " << String (expect, 4) << "]";
+        };
+        auto timeText = [] (double t) { return t < 1.0 ? String (roundToInt (t * 1000.0)) + " MS" : String (t, 2) + " S"; };
+        NormalisableRange<double> timeRange { 0.001, 10.0,
+            [] (double, double, double n) { return 0.001 * std::pow (1.0e4, n); },
+            [] (double, double, double v) { return std::log (jmax (0.001, v) / 0.001) / std::log (1.0e4); } };
+        ValueControl attack ("Attack", ValueControl::Style::fader, 84);
+        attack.setRange (timeRange, 0.25); attack.format = timeText; attack.setValue (0.25);
+        check (attack, "300ms", 0.3, 0.002);
+        check (attack, "1.5 s", 1.5, 0.01);
+        check (attack, "300", 0.3, 0.002);          // bare number: shown in MS, so 300 ms
+        check (attack, "2,5s", 2.5, 0.02);           // comma as decimal point
+        ValueControl sustain ("Sustain", ValueControl::Style::fader, 84);
+        sustain.setRange (NormalisableRange<double> (0.0, 1.0, 0.001), 1.0);
+        sustain.format = [] (double v) { return String (roundToInt (v * 100.0)) + "%"; };
+        check (sustain, "50%", 0.5, 0.006);
+        check (sustain, "75", 0.75, 0.006);
+        ValueControl root ("Root", ValueControl::Style::knob);
+        root.setRange (NormalisableRange<double> (0, 127, 1), 60);
+        root.format = [] (double v) { return emx::noteName (roundToInt (v)); };
+        check (root, "C4", 60, 0.0);
+        check (root, "F#3", 54, 0.0);
+        check (root, "a#2", 46, 0.0);
+        ValueControl pan ("Pan", ValueControl::Style::knob);
+        pan.setRange (NormalisableRange<double> (-100, 100, 1), 0);
+        pan.format = [] (double v) { const int c = roundToInt (v); return c == 0 ? String ("C") : (c < 0 ? "L" + String (-c) : "R" + String (c)); };
+        check (pan, "L20", -20, 0.0);
+        check (pan, "R35", 35, 0.0);
+        check (pan, "C", 0, 0.0);
+        ValueControl gain ("Gain", ValueControl::Style::knob);
+        gain.setRange (NormalisableRange<double> (-24.0, 12.0, 0.5), 0.0);
+        gain.format = [] (double v) { return (v > 0 ? "+" : "") + String (v, 1) + " DB"; };
+        check (gain, "-6 dB", -6.0, 0.0);
+        check (gain, "+3.5", 3.5, 0.0);
+        ValueControl cutoff ("Cutoff", ValueControl::Style::knob);   // like the FX filter: 0..1 slider, Hz display
+        cutoff.setRange (NormalisableRange<double> (0.0, 1.0), 0.5);
+        cutoff.format = [] (double n) { const double hz = 20.0 * std::pow (1000.0, n); return hz < 1000.0 ? String (roundToInt (hz)) + " HZ" : String (hz / 1000.0, 2) + " K"; };
+        cutoff.setValue (0.8);
+        check (cutoff, "2.5k", std::log (2500.0 / 20.0) / std::log (1000.0), 0.002);
+        check (cutoff, "440 Hz", std::log (440.0 / 20.0) / std::log (1000.0), 0.002);
+        double dummy;
+        const bool rejects = ! emx::valueFromTypedText (attack.slider, attack.format, "hello", dummy);
+        allOk = allOk && rejects;
+
+        // envelope copy
+        bool copyOk = false, allZonesOk = false, undoOk = false;
+        if (proc.getZones().size() >= 2)
+        {
+            const auto& zs = proc.getZones();
+            const int a = zs[0].id, b = zs[1].id;
+            auto q = zs[0].params;
+            q.attack = 0.123f; q.decay = 0.456f; q.sustain = 0.5f; q.release = 1.25f;
+            proc.setZoneParams (a, q);
+            const auto before = proc.getZones()[1].params;
+            proc.copyEnvelope (a, b);
+            const auto& c = proc.getZones()[1].params;
+            copyOk = std::abs (c.attack - 0.123f) < 1e-6f && std::abs (c.decay - 0.456f) < 1e-6f && std::abs (c.sustain - 0.5f) < 1e-6f
+                  && std::abs (c.release - 1.25f) < 1e-6f && c.loopStart == before.loopStart && c.root == before.root;
+            proc.undo();
+            undoOk = std::abs (proc.getZones()[1].params.attack - before.attack) < 1e-6f;
+            proc.copyEnvelope (a, -1);
+            allZonesOk = true;
+            for (auto& z : proc.getZones())
+                allZonesOk = allZonesOk && std::abs (z.params.release - 1.25f) < 1e-6f;
+            proc.undo();
+            proc.undo();
+        }
+        std::printf ("typing values: %s%s; envelope copy %s, to all zones %s, undo %s\n", allOk ? "ok" : "FAIL", report.toRawUTF8(),
+                     copyOk ? "ok" : "FAIL", allZonesOk ? "ok" : "FAIL", undoOk ? "ok" : "FAIL");
+    }
+
     // FX: chains on the preset and on a zone, modulation, audio through it, preset + project round trips.
     {
         using namespace emx;

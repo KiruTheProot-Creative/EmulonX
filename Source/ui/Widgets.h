@@ -24,6 +24,22 @@ private:
     bool swallowed = false;
 };
 
+/** Turns typed text ("300ms", "1.5 s", "-6 dB", "50%", "C4", "L20", "2.5k") into a slider value,
+    using the same units the display shows: it searches the slider's range for the value whose
+    display means the typed amount. Returns false if no number was found. */
+bool valueFromTypedText (juce::Slider&, const std::function<juce::String (double)>& format, const juce::String& typed, double& result);
+
+/** A small text field over a value display: Enter applies, Esc or clicking elsewhere cancels. */
+class TypeInField final : public juce::TextEditor
+{
+public:
+    TypeInField (juce::Component& owner, juce::Rectangle<int> area, const juce::String& current, std::function<void (const juce::String&)> apply);
+private:
+    void close();
+    std::function<void (const juce::String&)> applyFn;
+    bool done = false;
+};
+
 /** Modulation shown around a knob: one arc per connection, plus a dot at the current value. */
 struct ModRings
 {
@@ -60,8 +76,10 @@ public:
     std::function<ModRings()> modRings;   // optional
 
     void paintOverChildren (juce::Graphics&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;   // on the value: type it in
 
 private:
+    std::unique_ptr<TypeInField> typeIn;
     class NameLabel;
     juce::String caption;
     int knobSize, ringMargin = 0;
@@ -96,12 +114,14 @@ public:
     void paintOverChildren (juce::Graphics&) override;
     void resized() override;
     void setCaption (const juce::String& c) { caption = c.toUpperCase(); repaint(); }
+    void mouseDoubleClick (const juce::MouseEvent&) override;   // on the value: type it in
 
     ModSlider slider;
     std::function<juce::String()> tooltipExtra;
     std::function<ModRings()> modRings;   // optional
 
 private:
+    std::unique_ptr<TypeInField> typeIn;
     juce::String caption;
     Style style;
     int controlSize, ringMargin = 0;

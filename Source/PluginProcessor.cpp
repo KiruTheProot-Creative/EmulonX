@@ -650,6 +650,31 @@ void EmulonXProcessor::setZoneParams (int id, ZoneParams p)
         }
 }
 
+void EmulonXProcessor::copyEnvelope (int fromId, int toId)
+{
+    const ModelZone* from = nullptr;
+    for (auto& z : zones)
+        if (z.id == fromId)
+            from = &z;
+    if (from == nullptr)
+        return;
+    const auto src = from->params;
+    bool any = false;
+    for (auto& z : zones)
+        if (z.id != fromId && (toId < 0 || z.id == toId))
+        {
+            if (! any)
+                pushUndo ("envcopy" + String (fromId) + ">" + String (toId) + String (Time::getMillisecondCounter()));
+            any = true;
+            z.params.attack = src.attack;
+            z.params.decay = src.decay;
+            z.params.sustain = src.sustain;
+            z.params.release = src.release;
+        }
+    if (any)
+        publish();
+}
+
 void EmulonXProcessor::duplicateZone (int id)
 {
     for (size_t i = 0; i < zones.size(); ++i)

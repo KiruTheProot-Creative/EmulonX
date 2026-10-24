@@ -133,6 +133,8 @@ public:
     void selectNextZone (int direction);
     /** Changes one zone's settings; takes effect immediately, even on sounding notes. */
     void setZoneParams (int id, ZoneParams);
+    /** Copies attack, decay, sustain and release from one zone to another (toId -1 = every other zone). One undo step. */
+    void copyEnvelope (int fromId, int toId);
     void duplicateZone (int id);
 
     //== Undo for zone edits ======================================================

@@ -893,6 +893,22 @@ EditorPage::EditorPage (EmulonXProcessor& p)
     sustain.setRange (NormalisableRange<double> (0.0, 1.0, 0.001), 1.0);
     sustain.format = [] (double v) { return String (roundToInt (v * 100.0)) + "%"; };
     sustain.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.sustain = (float) v; }); };
+    envCopyBox.setTextWhenNothingSelected ("COPY FROM...");
+    envCopyBox.setTextWhenNoChoicesAvailable ("ONLY ONE ZONE");
+    envCopyBox.setTooltip ("Copy attack, decay, sustain and release from another zone - or give every zone this envelope");
+    envCopyBox.onChange = [this]
+    {
+        const int id = envCopyBox.getSelectedId();
+        envCopyBox.setSelectedId (0, dontSendNotification);
+        const auto* z = proc.getSelectedZone();
+        if (id == 0 || z == nullptr)
+            return;
+        if (id == allZonesItem)
+            proc.copyEnvelope (z->id, -1);   // this envelope -> every zone
+        else
+            proc.copyEnvelope (id, z->id);   // that zone's envelope -> this one
+    };
+    addAndMakeVisible (envCopyBox);
     attack.slider.setTooltip ("Fade-in time when a key is pressed");
     decay.slider.setTooltip ("Time to fall to the sustain level");
     sustain.slider.setTooltip ("Level while the key is held");
@@ -973,6 +989,27 @@ void EditorPage::refresh()
 {
     const auto* z = proc.getSelectedZone();
     const bool has = z != nullptr, hasAudio = has && z->sample != nullptr;
+
+    // envelope copy list: every other zone, plus "to all zones"
+    envCopyBox.clear (dontSendNotification);
+    if (has && proc.getZones().size() > 1)
+    {
+        envCopyBox.addSectionHeading ("Copy the envelope from");
+        int n = 0;
+        for (auto& other : proc.getZones())
+        {
+            ++n;
+            if (other.id == z->id)
+                continue;
+            const auto& q = other.params;
+            envCopyBox.addItem ("ZONE " + String (n) + "  -  " + other.name + "    (" + timeText (q.attack) + " / " + timeText (q.decay)
+                                    + " / " + String (roundToInt (q.sustain * 100.0f)) + "% / " + timeText (q.release) + ")",
+                                other.id);
+        }
+        envCopyBox.addSeparator();
+        envCopyBox.addItem ("GIVE EVERY ZONE THIS ENVELOPE", allZonesItem);
+    }
+    envCopyBox.setEnabled (has && proc.getZones().size() > 1);
 
     zoneName.refresh();
     loopInfo.refresh();
@@ -1187,6 +1224,11 @@ void EditorPage::resized()
     keepSpeed.setBounds (keepSpeed.getBounds().withSizeKeepingCentre (keepSpeed.getWidth(), 30).translated (0, -8));
     layoutRow (ampArea, { &gain, &pan }, 62, kh);
     layoutRow (envArea, { &attack, &decay, &sustain, &release }, 54, attack.getPreferredHeight());
+    {
+        // in the panel's title row, on the right
+        auto head = envArea.reduced (10.0f, 9.0f).removeFromTop (16.0f).toNearestInt();
+        envCopyBox.setBounds (head.removeFromRight (jmin (104, head.getWidth() - 70)).expanded (0, 1));
+    }
     r.removeFromTop (8);
 
     //== Keymap ====================================================================
