@@ -526,7 +526,7 @@ int main (int argc, char** argv)
         editor.showPage (0);
 
         // Skins: EMULON XP light and dark on every page
-        for (auto [skin, sname] : { std::pair<int, const char*> { 1, "xp-light" }, { 2, "xp-dark" }, { 3, "emurum" }, { 4, "emutal" } })
+        for (auto [skin, sname] : { std::pair<int, const char*> { 1, "xp-light" }, { 2, "xp-dark" }, { 3, "emurum" }, { 4, "emutal" }, { 5, "emublox" } })
         {
             st->setSkin (skin);
             MessageManager::getInstance()->runDispatchLoopUntil (80);

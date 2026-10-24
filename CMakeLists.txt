@@ -60,6 +60,9 @@ juce_add_binary_data(EmulonXAssets
         Assets/images/knob.png
         Assets/images/slider.png
         Assets/images/logo.png
+        Assets/images/logo-blox.png
+        Assets/fonts/Fredoka-500.ttf
+        Assets/fonts/Fredoka-600.ttf
         Assets/fonts/Saira-500.ttf
         Assets/fonts/Saira-700.ttf
         Assets/fonts/Saira-900.ttf)

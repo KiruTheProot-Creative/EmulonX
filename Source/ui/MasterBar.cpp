@@ -99,9 +99,9 @@ void MasterBar::paint (Graphics& g)
     // volume thumb
     const float x = xAt (base);
     const auto thumb = Rectangle<float> (x - 2.5f, t.getY() - 3.0f, 5.0f, t.getHeight() + 6.0f);
-    if (theme::isXp())
+    if (theme::isXp() || theme::isLightSkin())
     {
-        g.setColour (theme::getSkin() == theme::Skin::xpLight ? Colour (0xff1c3f94) : Colours::white);
+        g.setColour (theme::isLightSkin() ? (theme::isXp() ? Colour (0xff1c3f94) : theme::textStrong) : Colours::white);
         g.fillRoundedRectangle (thumb, 2.0f);
         g.setColour (Colours::black.withAlpha (0.5f));
         g.drawRoundedRectangle (thumb, 2.0f, 1.0f);

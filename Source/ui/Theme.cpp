@@ -16,6 +16,27 @@ static juce::Typeface::Ptr typefaceFor (int weight)
 
 juce::Font font (float height, int weight, float kerning)
 {
+    if (getSkin() == Skin::emublox)
+    {
+        // Fredoka (SIL OFL): round and chunky, sized to the same capital height as Saira
+        static auto f500 = juce::Typeface::createSystemTypefaceFor (EmxAssets::Fredoka500_ttf, (size_t) EmxAssets::Fredoka500_ttfSize);
+        static auto f600 = juce::Typeface::createSystemTypefaceFor (EmxAssets::Fredoka600_ttf, (size_t) EmxAssets::Fredoka600_ttfSize);
+        static const float scale = []
+        {
+            auto cap = [] (juce::Typeface::Ptr t)
+            {
+                juce::GlyphArrangement ga;
+                ga.addLineOfText (juce::Font (juce::FontOptions (t).withHeight (100.0f)), "H", 0, 0);
+                juce::Path p;
+                ga.createPath (p);
+                return p.getBounds().getHeight();
+            };
+            const float c = cap (f600);
+            return c > 1.0f ? cap (typefaceFor (700)) * 1.3137f / c : 1.0f;
+        }();
+        juce::Font f { juce::FontOptions (weight >= 700 ? f600 : f500).withHeight (height * scale) };
+        return std::abs (kerning) > 1.0e-6f ? f.withExtraKerningFactor (kerning * 0.4f) : f;
+    }
     if (isXp())
     {
         // Tahoma, the classic desktop font, from the system (not shipped with the plugin);
@@ -144,6 +165,16 @@ const FlatStyle emutalStyle {
     juce::Colour (0xff42464e), juce::Colour (0xff24272c), juce::Colour (0xff2f3238), juce::Colour (0xff484c54),
     6.0f, 255.0f, 0.008f, 0.17f };
 
+const FlatStyle emubloxStyle {
+    juce::Colour (0xff7cc8ff), juce::Colour (0xffffffff), juce::Colour (0xffffffff), juce::Colour (0xffcdd5dc),
+    juce::Colour (0xffeef2f6), juce::Colour (0xffffffff), juce::Colour (0xff232527), juce::Colour (0xff1b1d1f),
+    juce::Colour (0xff59626c), juce::Colour (0xffe8261c), juce::Colour (0xff0b6fc4), juce::Colour (0xffffffff),
+    juce::Colour (0xffe6f4ff), juce::Colour (0xff232527), juce::Colour (0xffffffff), juce::Colour (0xffd3dbe2),
+    9.0f, 240.0f, 0.01f, 0.0f,
+    true, 2.5f, 4.0f, juce::Colour (0xff232527), juce::Colour (0xff00b06f), juce::Colour (0xff7d8994) };
+
+const FlatStyle& styleFor (Skin s) { return s == Skin::emurum ? emurumStyle : s == Skin::emublox ? emubloxStyle : emutalStyle; }
+
 float labHueOf (juce::Colour c)
 {
     const auto l = linearToLab (toLinear (c.getFloatRed()), toLinear (c.getFloatGreen()), toLinear (c.getFloatBlue()));
@@ -153,21 +184,23 @@ float labHueOf (juce::Colour c)
 /** How far the flat skin's accent (plus the colour shift) is from the classic red. */
 float flatOffset()
 {
-    const auto& st = currentSkin == Skin::emurum ? emurumStyle : emutalStyle;
-    return labHueOf (st.accent) - labHueOf (juce::Colour (0xffff2a2a)) + currentShift;
+    return labHueOf (styleFor (currentSkin).accent) - labHueOf (juce::Colour (0xffff2a2a)) + currentShift;
 }
 
 /** Translates a colour of the red design into a flat skin: reds become the accent colour,
     greys become the skin's cool greys; orange / yellow / green keep their hue (plus the shift). */
 juce::Colour flatMap (juce::Colour c)
 {
-    const auto& st = currentSkin == Skin::emurum ? emurumStyle : emutalStyle;
+    const auto& st = styleFor (currentSkin);
     auto lab = linearToLab (toLinear (c.getFloatRed()), toLinear (c.getFloatGreen()), toLinear (c.getFloatBlue()));
     const float chroma = std::hypot (lab.a, lab.b);
     float h = juce::radiansToDegrees (std::atan2 (lab.b, lab.a)), L = lab.L, C = chroma;
     if (chroma < 0.035f)
     {
-        L = st.neutralLift + L * (1.0f - st.neutralLift) * 0.97f;
+        if (st.light)   // dark backgrounds become light, light text becomes dark
+            L = L < 0.5f ? 0.985f - L * 0.32f : 0.10f + (1.0f - L) * 0.85f;
+        else
+            L = st.neutralLift + L * (1.0f - st.neutralLift) * 0.97f;
         h = st.neutralHue;
         C = st.neutralChroma;
     }
@@ -176,6 +209,10 @@ juce::Colour flatMap (juce::Colour c)
         const bool keep = h > 45.0f && h < 150.0f;
         h += keep ? currentShift : flatOffset();
         C = juce::jmin (0.22f, C);
+        if (st.light && L < 0.45f)   // dark red fills become light tints
+            L = 0.94f - L * 0.5f;
+        else if (st.light && L > 0.75f)   // pale tints were text on dark fills: make them dark
+            L = 0.28f + (1.0f - L) * 0.5f;
     }
     float rr, gg, bb;
     const float rad = juce::degreesToRadians (h);
@@ -292,7 +329,7 @@ juce::Colour hue (juce::uint32 argb)
 
 Skin getSkin() noexcept { return currentSkin; }
 
-const FlatStyle& flat() noexcept { return currentSkin == Skin::emurum ? emurumStyle : emutalStyle; }
+const FlatStyle& flat() noexcept { return styleFor (currentSkin); }
 
 void setSkin (Skin skin)
 {
@@ -318,6 +355,7 @@ void applyPalette()
             break;
         case Skin::emurum:
         case Skin::emutal:
+        case Skin::emublox:
         {
             const auto& st = flat();
             red = rotateHue (st.accent, currentShift);
@@ -325,7 +363,7 @@ void applyPalette()
             redDark = red.interpolatedWith (st.panel, 0.65f);
             textCol = st.text;  textMuted = st.muted;  listText = rotateHue (st.list, currentShift);
             ledBg = st.display;  edge = st.displayEdge;  highlight = st.panelEdge;
-            textStrong = st.text;  ledText = st.text;  windowBg = st.bg;
+            textStrong = st.text;  ledText = st.text;  windowBg = st.light ? st.panel : st.bg;
             break;
         }
         case Skin::xpLight:
@@ -365,17 +403,20 @@ juce::Image image (Img which)
         case Img::frame:      src = juce::ImageCache::getFromMemory (EmxAssets::frame_png, EmxAssets::frame_pngSize); break;
         case Img::knob:       src = juce::ImageCache::getFromMemory (EmxAssets::knob_png, EmxAssets::knob_pngSize); break;
         case Img::slider:     src = juce::ImageCache::getFromMemory (EmxAssets::slider_png, EmxAssets::slider_pngSize); break;
-        case Img::logo:       src = juce::ImageCache::getFromMemory (EmxAssets::logo_png, EmxAssets::logo_pngSize); break;
+        case Img::logo:
+            src = currentSkin == Skin::emublox ? juce::ImageCache::getFromMemory (EmxAssets::logoblox_png, EmxAssets::logoblox_pngSize)
+                                               : juce::ImageCache::getFromMemory (EmxAssets::logo_png, EmxAssets::logo_pngSize);
+            break;
     }
     if (isXp() || ! src.isValid())
         return src;
-    const float deg = isFlat() ? flatOffset() : currentShift;
+    const float deg = isFlat() && currentSkin != Skin::emublox ? flatOffset() : currentShift;   // EMUBLOX's logo is already red
     if (std::abs (deg) < 0.01f)
         return src;
 
     struct Tinted { float shift = 0.0f; juce::Image img; };
-    static Tinted tinted[5];
-    auto& t = tinted[(int) which];
+    static Tinted tinted[5], tintedBlox;   // the EMUBLOX logo is a different picture
+    auto& t = (currentSkin == Skin::emublox && which == Img::logo) ? tintedBlox : tinted[(int) which];
     if (! t.img.isValid() || std::abs (t.shift - deg) > 0.01f)
         t = { deg, recolour (src, deg) };
     return t.img;
@@ -428,6 +469,17 @@ void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, float radius)
     if (isFlat())
     {
         const auto& st = flat();
+        if (st.outline > 0.0f)
+        {
+            // a toy brick: cartoon shadow, white face, thick outline
+            g.setColour (juce::Colours::black.withAlpha (0.22f));
+            g.fillRoundedRectangle (r.translated (0.0f, st.shadow), st.radius);
+            g.setColour (st.panel);
+            g.fillRoundedRectangle (r, st.radius);
+            g.setColour (st.outlineColour);
+            g.drawRoundedRectangle (r.reduced (st.outline * 0.5f), st.radius, st.outline);
+            return;
+        }
         g.setColour (st.panel);
         g.fillRoundedRectangle (r, st.radius);
         g.setColour (st.panelEdge);
@@ -465,6 +517,11 @@ void drawInset (juce::Graphics& g, juce::Rectangle<float> r, float radius)
     {
         g.setColour (flat().inset);
         g.fillRoundedRectangle (r, juce::jmax (2.0f, flat().radius - 1.0f));
+        if (flat().light)
+        {
+            g.setColour (flat().panelEdge);
+            g.drawRoundedRectangle (r.reduced (1.0f), juce::jmax (2.0f, flat().radius - 1.0f), 2.0f);
+        }
         return;
     }
     if (isXp())
@@ -489,11 +546,12 @@ void drawLed (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& t
     {
         // a flat value field: dark, thin edge, plain text
         const auto& st = flat();
-        const float rad = juce::jmin (st.radius, 4.0f);
+        const float rad = juce::jmin (st.radius, st.light ? 6.0f : 4.0f);
+        const float edgeW = st.outline > 0.0f ? 2.0f : 1.0f;
         g.setColour (st.display);
         g.fillRoundedRectangle (r, rad);
         g.setColour (st.displayEdge);
-        g.drawRoundedRectangle (r.reduced (0.5f), rad, 1.0f);
+        g.drawRoundedRectangle (r.reduced (edgeW * 0.5f), rad, edgeW);
         if (text.isNotEmpty())
         {
             g.setColour (textColour == red ? ledText : textColour);
@@ -576,8 +634,27 @@ juce::Rectangle<float> drawHeading (juce::Graphics& g, juce::Rectangle<float> in
     auto row = inner.removeFromTop (16.0f);
     if (isFlat())
     {
-        // small caps title; EMURUM marks it with a little accent light
+        // small caps title; EMURUM marks it with a little accent light, EMUBLOX makes it big and bold
         const bool emurum = currentSkin == Skin::emurum;
+        if (currentSkin == Skin::emublox)
+        {
+            const auto f = font (11.5f, 700, 0.04f);
+            g.setColour (textStrong);
+            g.setFont (f);
+            const auto up = title.toUpperCase();
+            g.drawText (up, row, juce::Justification::centredLeft, false);
+            if (subtitle.isNotEmpty())
+            {
+                juce::GlyphArrangement ga;
+                ga.addLineOfText (f, up, 0, 0);
+                const auto w = ga.getBoundingBox (0, -1, true).getWidth();
+                g.setColour (textMuted);
+                g.setFont (font (8.5f, 500, 0.02f));
+                g.drawText (subtitle, row.withTrimmedLeft (w + 8.0f), juce::Justification::centredLeft, true);
+            }
+            inner.removeFromTop (6.0f);
+            return inner;
+        }
         auto t = row;
         if (emurum)
         {
@@ -649,6 +726,18 @@ void drawBackground (juce::Graphics& g, juce::Rectangle<int> bounds, float heade
     if (isFlat())
     {
         const auto& st = flat();
+        if (st.light)
+        {
+            // a bright sky, a white bar with a thick line under it
+            g.setGradientFill (juce::ColourGradient::vertical (juce::Colour (0xff5fb8ff), (float) bounds.getY(), juce::Colour (0xffc9ecff), (float) bounds.getBottom()));
+            g.fillRect (bounds);
+            const auto bar = bounds.toFloat().withHeight (headerBottom + 8.0f);
+            g.setColour (st.topBar);
+            g.fillRect (bar);
+            g.setColour (st.outlineColour);
+            g.fillRect (bar.getX(), bar.getBottom() - st.outline, bar.getWidth(), st.outline);
+            return;
+        }
         g.setColour (st.bg);
         g.fillRect (bounds);
         const auto bar = bounds.toFloat().withHeight (headerBottom + 8.0f);
@@ -687,8 +776,8 @@ void drawFrame (juce::Graphics& g, juce::Rectangle<int> bounds)
 {
     if (isFlat())
     {
-        g.setColour (flat().panelEdge);
-        g.drawRect (bounds.toFloat(), 1.0f);
+        g.setColour (flat().outline > 0.0f ? flat().outlineColour : flat().panelEdge);
+        g.drawRect (bounds.toFloat(), juce::jmax (1.0f, flat().outline + 0.5f));
         return;
     }
     if (! isXp())

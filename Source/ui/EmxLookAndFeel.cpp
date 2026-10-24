@@ -55,11 +55,11 @@ void EmxLookAndFeel::refreshColours()
     {
         const auto& st = theme::flat();
         const bool emutal = theme::getSkin() == theme::Skin::emutal;
-        setColour (TextButton::textColourOffId, st.text.withAlpha (0.85f));
-        setColour (TextButton::textColourOnId, emutal ? theme::textOn (theme::red) : theme::red.brighter (0.2f));
+        setColour (TextButton::textColourOffId, st.light ? st.text : st.text.withAlpha (0.85f));
+        setColour (TextButton::textColourOnId, st.light ? Colours::white : emutal ? theme::textOn (theme::red) : theme::red.brighter (0.2f));
         setColour (PopupMenu::backgroundColourId, st.panel);
         setColour (PopupMenu::textColourId, st.text);
-        setColour (PopupMenu::highlightedBackgroundColourId, theme::red.withAlpha (0.35f));
+        setColour (PopupMenu::highlightedBackgroundColourId, st.light ? theme::red : theme::red.withAlpha (0.35f));
         setColour (PopupMenu::highlightedTextColourId, Colours::white);
         for (auto id : { (int) Label::textColourId, (int) Label::textWhenEditingColourId, (int) TextEditor::textColourId,
                          (int) CaretComponent::caretColourId, (int) ComboBox::textColourId, (int) ListBox::textColourId })
@@ -504,6 +504,31 @@ void EmxLookAndFeel::flatButton (Graphics& g, Button& b, bool highlighted, bool 
     auto r = b.getLocalBounds().toFloat().reduced (0.5f, 1.0f);
     const float rad = jmin (st.radius, 5.0f);
 
+    if (st.outline > 0.0f)
+    {
+        // a chunky toy button: a darker edge underneath, the face sinks in when pressed
+        const bool tab = b.getProperties().contains ("emxTab");
+        const float lipH = down ? 1.5f : 3.5f;
+        auto face = r.withTrimmedBottom (3.5f).translated (0.0f, down ? 2.0f : 0.0f);
+        const auto faceCol = ! enabled ? Colour (0xffe9edf1)
+                           : on ? (tab ? theme::red : st.onFill)
+                           : highlighted ? st.buttonHover : st.button;
+        g.setColour (on && enabled ? faceCol.darker (0.45f) : st.lip);
+        g.fillRoundedRectangle (face.translated (0.0f, lipH), rad + 1.0f);
+        g.setColour (faceCol);
+        g.fillRoundedRectangle (face, rad + 1.0f);
+        if (! on)
+        {
+            g.setColour (Colours::white.withAlpha (0.7f));
+            g.fillRoundedRectangle (face.reduced (4.0f, 0.0f).withHeight (2.0f).translated (0.0f, 2.5f), 1.0f);
+        }
+        g.setColour (enabled ? st.outlineColour : st.outlineColour.withAlpha (0.35f));
+        g.drawRoundedRectangle (face.withBottom (face.getBottom() + lipH).reduced (1.0f), rad + 1.0f, 2.0f);
+        b.setColour (TextButton::textColourOffId, enabled ? st.text : st.muted);
+        b.setColour (TextButton::textColourOnId, Colours::white);
+        return;
+    }
+
     if (b.getProperties().contains ("emxTab"))
     {
         if (emutal)
@@ -563,6 +588,33 @@ void EmxLookAndFeel::flatKnob (Graphics& g, Rectangle<float> r, float startAngle
     const float rad = r.getWidth() * 0.5f;
     const float angle = startAngle + pos * (endAngle - startAngle);
 
+    if (st.outline > 0.0f)
+    {
+        // a toy knob: thick ring with an outline, white cap, dark rounded pointer
+        const float arcR = rad - 4.0f, arcW = jmax (3.0f, rad * 0.2f);
+        Path track, value;
+        track.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, startAngle, endAngle, true);
+        value.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, startAngle, angle, true);
+        g.setColour (st.outlineColour);
+        g.strokePath (track, PathStrokeType (arcW + 3.0f, PathStrokeType::curved, PathStrokeType::rounded));
+        g.setColour (st.knobTrack);
+        g.strokePath (track, PathStrokeType (arcW, PathStrokeType::curved, PathStrokeType::rounded));
+        g.setColour (theme::red);
+        g.strokePath (value, PathStrokeType (arcW, PathStrokeType::curved, PathStrokeType::rounded));
+        const auto body = r.reduced (rad * 0.38f);
+        g.setColour (Colours::black.withAlpha (0.2f));
+        g.fillEllipse (body.translated (0.0f, 2.0f));
+        g.setColour (st.knobBody);
+        g.fillEllipse (body);
+        g.setColour (st.outlineColour);
+        g.drawEllipse (body.reduced (1.0f), 2.0f);
+        Path pointer;
+        pointer.addLineSegment (Line<float> (c.x, c.y - body.getWidth() * 0.08f, c.x, c.y - body.getWidth() * 0.36f), jmax (2.5f, rad * 0.11f));
+        pointer.applyTransform (AffineTransform::rotation (angle, c.x, c.y));
+        g.fillPath (pointer);
+        return;
+    }
+
     // ring: grey track, accent value
     const float arcR = rad - 2.5f, arcW = jmax (2.0f, rad * (emutal ? 0.13f : 0.10f));
     Path track, value;
@@ -601,6 +653,24 @@ void EmxLookAndFeel::flatKnob (Graphics& g, Rectangle<float> r, float startAngle
 void EmxLookAndFeel::flatFader (Graphics& g, Rectangle<float> track, float pos)
 {
     const auto& st = theme::flat();
+    if (st.outline > 0.0f)
+    {
+        auto groove = track.withSizeKeepingCentre (8.0f, track.getHeight() - 8.0f);
+        g.setColour (st.knobTrack);
+        g.fillRoundedRectangle (groove, 4.0f);
+        g.setColour (theme::red);
+        g.fillRoundedRectangle (groove.withTop (jlimit (groove.getY(), groove.getBottom(), pos)), 4.0f);
+        g.setColour (st.outlineColour);
+        g.drawRoundedRectangle (groove, 4.0f, 2.0f);
+        const auto thumb = Rectangle<float> (track.getCentreX() - 12.0f, pos - 7.0f, 24.0f, 14.0f);
+        g.setColour (Colours::black.withAlpha (0.2f));
+        g.fillRoundedRectangle (thumb.translated (0.0f, 2.0f), 4.0f);
+        g.setColour (Colours::white);
+        g.fillRoundedRectangle (thumb, 4.0f);
+        g.setColour (st.outlineColour);
+        g.drawRoundedRectangle (thumb.reduced (1.0f), 4.0f, 2.0f);
+        return;
+    }
     auto groove = track.withSizeKeepingCentre (4.0f, track.getHeight() - 6.0f);
     g.setColour (st.knobTrack);
     g.fillRoundedRectangle (groove, 2.0f);

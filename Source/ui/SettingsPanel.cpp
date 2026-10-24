@@ -318,6 +318,7 @@ SettingsPanel::SettingsPanel (EmulonXProcessor& p) : proc (p)
     skinBox.addItem ("EMULON XP - DARK  -  EARLY-2000S DESKTOP", 3);
     skinBox.addItem ("EMURUM  -  FLAT, DEEP BLUE, CYAN LIGHTS", 4);
     skinBox.addItem ("EMUTAL  -  FLAT, SLATE GREY, PURPLE", 5);
+    skinBox.addItem ("EMUBLOX  -  CHUNKY TOY BRICKS, BRIGHT", 6);
     skinBox.setTooltip ("The whole look of Emulon X - the colour can be shifted below (not for the XP skins)");
     skinBox.onChange = [this]
     {
@@ -530,7 +531,7 @@ void SettingsPanel::paint (Graphics& g)
         g.setColour (theme::textCol);
         g.setFont (theme::font (9.0f, 500, 0.04f));
         g.drawFittedText ("A free and open-source sampler - a spiritual successor to E-mu's Emulator X.\n"
-                          "Licensed under the GNU AGPL v3. Built with JUCE. Saira font: SIL Open Font License.",
+                          "Licensed under the GNU AGPL v3. Built with JUCE. Saira and Fredoka fonts: SIL Open Font License.",
                           a.removeFromTop (40.0f).toNearestInt(), Justification::topLeft, 3, 1.0f);
         a.removeFromTop (40.0f);   // link sits here
         g.setColour (theme::textMuted);

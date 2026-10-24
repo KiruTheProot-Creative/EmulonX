@@ -42,9 +42,9 @@ public:
     void  setBankColumns (int v)     { set ("bankColumns", juce::jlimit (1, maxBankColumns, v)); }
 
     //== Customization =========================================================
-    /** 0 EMULON CLASSIC, 1 EMULON XP (light), 2 EMULON XP (dark), 3 EMURUM, 4 EMUTAL. */
-    int   getSkin() const             { return juce::jlimit (0, 4, get ("skin", 0)); }
-    void  setSkin (int v)             { set ("skin", juce::jlimit (0, 4, v)); }
+    /** 0 EMULON CLASSIC, 1 EMULON XP (light), 2 EMULON XP (dark), 3 EMURUM, 4 EMUTAL, 5 EMUBLOX. */
+    int   getSkin() const             { return juce::jlimit (0, 5, get ("skin", 0)); }
+    void  setSkin (int v)             { set ("skin", juce::jlimit (0, 5, v)); }
     /** Colour scheme rotation in degrees, -180..180 (0 = the original red). */
     float getHueShift() const         { return (float) juce::jlimit (-180.0, 180.0, props->getDoubleValue ("hueShift", 0.0)); }
     void  setHueShift (float deg)     { props->setValue ("hueShift", (double) juce::jlimit (-180.0f, 180.0f, deg)); sendChangeMessage(); }   // saved by the file's own timer (cheap while dragging)

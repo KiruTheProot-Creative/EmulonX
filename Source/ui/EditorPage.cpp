@@ -493,7 +493,7 @@ void KeymapView::paint (Graphics& g)
             }
             if (laneH >= 11.0f)
             {
-                g.setColour (theme::isXp() ? theme::textOn (on ? theme::hue (0xffff4a4a) : theme::hue (0xff7a1414)) : (on ? Colours::white : theme::hue (0xffffb0b0)));
+                g.setColour (theme::isXp() || theme::isLightSkin() ? theme::textOn (on ? theme::hue (0xffff4a4a) : theme::hue (0xff7a1414)) : (on ? Colours::white : theme::hue (0xffffb0b0)));
                 g.setFont (theme::font (jmin (8.0f, laneH * 0.5f), 700, 0.06f));
                 g.drawText (zs[i].name, r.reduced (8.0f, 0.0f), Justification::centredLeft, true);
             }

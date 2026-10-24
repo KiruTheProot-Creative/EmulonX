@@ -24,12 +24,14 @@ inline juce::Colour highlight  { 0xff4a444f };
 // EMULON CLASSIC is the red metal design; EMULON XP is a light or dark homage to early-2000s
 // desktops; EMURUM and EMUTAL are flat, modern synth styles. Every helper below draws in the
 // current skin. The colour shift works on Classic, EMURUM and EMUTAL.
-enum class Skin { classic, xpLight, xpDark, emurum, emutal };
+enum class Skin { classic, xpLight, xpDark, emurum, emutal, emublox };
 void setSkin (Skin);   // message thread only
 Skin getSkin() noexcept;
 inline bool isXp() noexcept   { const auto s = getSkin(); return s == Skin::xpLight || s == Skin::xpDark; }
-inline bool isFlat() noexcept { const auto s = getSkin(); return s == Skin::emurum || s == Skin::emutal; }
-inline bool skinAllowsColourShift (Skin s) noexcept { return s == Skin::classic || s == Skin::emurum || s == Skin::emutal; }
+inline bool isFlat() noexcept { const auto s = getSkin(); return s == Skin::emurum || s == Skin::emutal || s == Skin::emublox; }
+inline bool skinAllowsColourShift (Skin s) noexcept { return s == Skin::classic || s == Skin::emurum || s == Skin::emutal || s == Skin::emublox; }
+/** Light backgrounds with dark text (XP light, EMUBLOX). */
+inline bool isLightSkin() noexcept { const auto s = getSkin(); return s == Skin::xpLight || s == Skin::emublox; }
 
 /** The flat skins' surfaces (valid while isFlat()). */
 struct FlatStyle
@@ -38,6 +40,11 @@ struct FlatStyle
                  button, buttonHover, buttonEdge, knobBody, knobTrack;
     float radius;
     float neutralHue, neutralChroma, neutralLift;   // how the red design's greys are translated
+    // chunky toy style (EMUBLOX)
+    bool light = false;                 // light surfaces, dark text
+    float outline = 0.0f;               // thick outlines around panels and controls
+    float shadow = 0.0f;                // offset cartoon shadow below panels
+    juce::Colour outlineColour {}, onFill {}, lip {};
 };
 const FlatStyle& flat() noexcept;
 /** The colour the colour shift starts from: Classic red, or a flat skin's accent. */

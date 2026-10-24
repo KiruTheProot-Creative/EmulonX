@@ -183,7 +183,7 @@ public:
         const float lx = (float) pat.length * colW;
         if (pat.length < 16)
         {
-            g.setColour (theme::isXp() ? theme::windowBg.withAlpha (0.6f) : Colours::black.withAlpha (0.45f));
+            g.setColour (theme::isXp() || theme::isLightSkin() ? theme::windowBg.withAlpha (0.6f) : Colours::black.withAlpha (0.45f));
             g.fillRect (Rectangle<float> (lx, bars.getY(), (float) getWidth() - lx, bars.getHeight()).reduced (0.0f, 2.0f));
             g.setColour (theme::red);
             g.fillRect (lx - 1.0f, bars.getY() + 2.0f, 2.0f, bars.getHeight() - 4.0f);
