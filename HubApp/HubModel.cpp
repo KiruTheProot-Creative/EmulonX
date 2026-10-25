@@ -891,7 +891,13 @@ void Model::endJob()
 {
     currentJob = {};
     download = nullptr;
-    installerWatch = nullptr;
+    if (installerWatch != nullptr)
+    {
+        // this often runs inside the watch timer's own callback: stop it now, delete it a moment later
+        installerWatch->stopTimer();
+        auto* t = installerWatch.release();
+        MessageManager::callAsync ([t] { delete t; });
+    }
     sendChangeMessage();
 }
 
@@ -976,31 +982,47 @@ void Model::runInstaller (const String& key, const File& setup, const String& pa
     const auto log = setup.getSiblingFile ("install-" + key + ".log");
     log.deleteFile();
     const auto params = paramsIn + " /LOG=\"" + log.getFullPathName() + "\"";
+    setJob (key, "WAITING FOR WINDOWS...", 0.82f);
+    // Windows asks for permission before the installer starts, and starting it waits for that answer:
+    // do it in the background so the Hub doesn't freeze meanwhile
+    Thread::launch ([this, key, setup, params, log, version, done]
+    {
+        const bool started = setup.startAsProcess (params);
+        MessageManager::callAsync ([this, key, started, log, version, done]
+        {
+            if (! started)
+            {
+                endJob();
+                done (false, "The installer didn't start. If Windows asked for permission, please click Yes next time.");
+                return;
+            }
+            if (key == "hub")
+            {
+                // the installer closes the Hub and opens the new one when it's done
+                endJob();
+                done (true, "hub-restart");
+                return;
+            }
+            watchInstaller (key, log, version, done);
+        });
+    });
+}
+
+void Model::watchInstaller (const String& key, const File& log, const String& version, Done done)
+{
     setJob (key, "INSTALLING...", 0.85f);
-    if (! setup.startAsProcess (params))
-    {
-        endJob();
-        done (false, "The installer couldn't be started.");
-        return;
-    }
-    if (key == "hub")
-    {
-        // the installer closes the Hub and opens the new one when it's done
-        endJob();
-        done (true, "hub-restart");
-        return;
-    }
     auto timer = std::make_unique<LambdaTimer>();
     const auto started = Time::getMillisecondCounter();
     timer->f = [this, key, log, started, version, done]
     {
+        auto finish = done;   // endJob() deletes this timer (a moment later); keep what we still need
         const auto waited = Time::getMillisecondCounter() - started;
         if (! log.existsAsFile())
         {
             if (waited > 120000)
             {
                 endJob();
-                done (false, "The installer didn't start. If Windows asked for permission, please click Yes next time.");
+                finish (false, "The installer didn't start. If Windows asked for permission, please click Yes next time.");
             }
             return;
         }
@@ -1010,14 +1032,15 @@ void Model::runInstaller (const String& key, const File& setup, const String& pa
         {
             if (! closed && waited < 30 * 60 * 1000)
                 return;
+            const auto v = version;
             endJob();
-            done (true, version);
+            finish (true, v);
             return;
         }
         if (closed || waited > 30 * 60 * 1000)
         {
             endJob();
-            done (false, "The installer stopped before it was done.");
+            finish (false, "The installer stopped before it was done.");
             return;
         }
         setJob (key, "INSTALLING...", jmin (0.98f, currentJob.progress + 0.004f));

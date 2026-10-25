@@ -180,6 +180,7 @@ private:
     void endJob();
     void record (const juce::String& key, const juce::String& version, const juce::File& where);
     void runInstaller (const juce::String& key, const juce::File& setup, const juce::String& params, const juce::String& version, Done);
+    void watchInstaller (const juce::String& key, const juce::File& log, const juce::String& version, Done);
     void downloadApp (const juce::String& key, const Release&, const juce::String& url, const juce::Array<juce::File>& folders, Done);
 
     std::map<juce::String, juce::String> baseline;

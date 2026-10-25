@@ -117,6 +117,26 @@ int selfTest (const File& dir)
         std::printf ("wrote %s\n", f.getFullPathName().toRawUTF8());
     };
     shot ("hub-emulon-x");
+
+    // clicking buttons that rebuild the page they're on (these crashed before 0.1af's fix)
+    std::function<Button* (Component*, const String&)> findButton = [&] (Component* c, const String& t) -> Button*
+    {
+        if (auto* b = dynamic_cast<Button*> (c); b != nullptr && b->getButtonText() == t && b->isVisible())
+            return b;
+        for (int i = 0; i < c->getNumChildComponents(); ++i)
+            if (auto* f = findButton (c->getChildComponent (i), t))
+                return f;
+        return nullptr;
+    };
+    for (auto label : { "What's new", "Hide", "Check for updates" })
+    {
+        auto* b = findButton (&hub, label);
+        check (b != nullptr, String ("finds the \"") + label + "\" link");
+        if (b != nullptr) b->triggerClick();
+        for (int i = 0; i < 10; ++i) pump (50);
+    }
+    for (int i = 0; i < 40; ++i) pump (50);
+    check (true, "clicking links that rebuild the page doesn't crash");
     hub.showTab (HubComponent::Tab::sd);
     shot ("hub-sd");
     hub.showTab (HubComponent::Tab::skins);

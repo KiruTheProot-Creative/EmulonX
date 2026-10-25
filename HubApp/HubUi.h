@@ -7,7 +7,7 @@
 
 namespace emx::hub
 {
-class HubComponent final : public juce::Component, private juce::ChangeListener, private juce::Timer
+class HubComponent final : public juce::Component, private juce::ChangeListener, private juce::Timer, private juce::AsyncUpdater
 {
 public:
     static constexpr int W = 1280, H = 720;
@@ -51,7 +51,11 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
 
-    void rebuild();
+    /** Rebuilds the page a moment later (never while one of its own buttons is still being clicked). */
+    void rebuild() { triggerAsyncUpdate(); }
+    void rebuildNow();
+    void handleAsyncUpdate() override { rebuildNow(); }
+    void dispose (std::unique_ptr<Overlay>&);
     void buildProduct (Product&);
     void buildSkins();
     void buildBanks();

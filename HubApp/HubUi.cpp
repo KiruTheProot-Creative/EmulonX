@@ -935,7 +935,7 @@ void HubComponent::timerCallback()
     }
     if (toastBox != nullptr && toastUntil > 0 && t > toastUntil)
     {
-        toastBox = nullptr;
+        dispose (toastBox);
         toastUntil = 0;
     }
     if (flashUntil > 0)
@@ -1192,7 +1192,7 @@ void HubComponent::updateInstallBox()
     }
 }
 
-void HubComponent::rebuild()
+void HubComponent::rebuildNow()
 {
     if (introStage == 1 || introStage == 2)
         return;
@@ -2043,11 +2043,21 @@ void HubComponent::openNote (const Model::Note& n)
 }
 
 //== Overlays =======================================================================
+void HubComponent::dispose (std::unique_ptr<Overlay>& o)
+{
+    // an overlay is often closed by one of its own buttons: hide it now, delete it a moment later
+    if (o == nullptr)
+        return;
+    auto* old = o.release();
+    old->setVisible (false);
+    MessageManager::callAsync ([old] { delete old; });
+}
+
 void HubComponent::closeOverlays()
 {
-    menu = nullptr;
-    toastBox = nullptr;
-    modal = nullptr;
+    dispose (menu);
+    dispose (toastBox);
+    dispose (modal);
     signInFlow = nullptr;
 }
 
@@ -2098,10 +2108,11 @@ void HubComponent::toast (const Model::Note& n)
     auto t = std::make_unique<Toast>();
     t->note = n;
     t->logo = kiruLogo;
-    t->x.onClick = [this] { toastBox = nullptr; };
-    t->go.onClick = [this, n] { toastBox = nullptr; openNote (n); };
+    t->x.onClick = [this] { dispose (toastBox); };
+    t->go.onClick = [this, n] { dispose (toastBox); openNote (n); };
     t->setBounds (W - 91 - 351, 630 - 92, 351, 92);
     addAndMakeVisible (*t);
+    dispose (toastBox);
     toastBox = std::move (t);
     toastUntil = now() + 9.0;
 }
@@ -2110,10 +2121,10 @@ void HubComponent::toggleMenu()
 {
     if (menu != nullptr)
     {
-        menu = nullptr;
+        dispose (menu);
         return;
     }
-    toastBox = nullptr;
+    dispose (toastBox);
     struct Menu final : Overlay
     {
         Viewport view;
@@ -2167,7 +2178,7 @@ void HubComponent::toggleMenu()
             {
                 if (idx >= (int) model.news.size()) return;
                 model.news.erase (model.news.begin() + idx);
-                MessageManager::callAsync ([this] { menu = nullptr; edited(); toggleMenu(); });
+                MessageManager::callAsync ([this] { dispose (menu); edited(); toggleMenu(); });
             };
             row->add (lab.get(), 44, 22); row->add (combo.get(), 120, 22); row->add (date.get(), 70, 22); row->add (rm.get(), 70, 22);
             m->owned.push_back (std::move (lab)); m->owned.push_back (std::move (combo)); m->owned.push_back (std::move (date)); m->owned.push_back (std::move (rm));
@@ -2204,7 +2215,7 @@ void HubComponent::toggleMenu()
         add->onClick = [this]
         {
             model.news.push_back ({ "New announcement", "One short line", today(), "emulon-x" });
-            MessageManager::callAsync ([this] { menu = nullptr; edited(); toggleMenu(); });
+            MessageManager::callAsync ([this] { dispose (menu); edited(); toggleMenu(); });
         };
         auto row = std::make_unique<RowItem>();
         row->add (add.get(), 160, 26);
@@ -2252,7 +2263,7 @@ void HubComponent::showDialog (std::unique_ptr<Dialog> d)
         MessageManager::callAsync ([old] { delete old; });
     }
     modal = std::move (m);
-    menu = nullptr;
+    dispose (menu);
 }
 
 void HubComponent::closeDialog()
