@@ -4,7 +4,7 @@ a Vibecoded project to make a Sampler, inspired by Emulator X (by E-MU) and made
 
 all Code has been written by CLAUDE. visuals have been made by me. all Sounds in the base presets / base bank that will be shipped are also made by me.
 
-# Current Features in V.1.1.1
+# Current Features in V.1.2.0
 
 - ### Sound engine
 - **Sampler with zones:** each sample is a zone with its own key range, velocity range and root note.
@@ -53,13 +53,22 @@ all Code has been written by CLAUDE. visuals have been made by me. all Sounds in
 ### Everywhere
 - **Master volume** in the top bar, with the output meter built in.
 - **Type values in:** double-click any value display and type, units included (`300ms`, `1.5 s`, `50%`, `-6 dB`, `C4`, `L20`, `2.5k`).
-- **Skins:** *EMULON CLASSIC* (red metal, with a color shift and 8 quick picks) and *EMULON XP* in light and dark.
+- **Skins:** *EMULON CLASSIC* (red metal, with a color shift and 8 quick picks) and *EMULON XP* in light and dark, and even more!
 - **Interface size** from 75 % to 200 %, adjustable knob sensitivity, help tips.
 - **Settings are shared** by every Emulon X in every project. Your DAW project can store the samples too, so it opens anywhere.
 
-### Installer (Windows)
-- You choose every folder: the plugin (VST3), base banks, your presets and the standalone app. The summary before installing lists every folder that will be used, and Emulon X finds the chosen folders by itself.
-- Optional standalone app, to play Emulon X without a DAW.
+# How to install (Windows)
+
+currently, Emulon is only available for windows machines.
+
+there are 2 options to install the VST.
+
+1 - use the launcher.
+use the Emulon Hub Launcher to install the VST, the SD app (Skin Designer), Community skins, and Sound banks.
+
+2 - directly from the releases
+Download the Setups directly from the releases. run it, choose the folder, and done.
+
 <img width="2031" height="1300" alt="Screenshot 2026-10-24 123249" src="https://github.com/user-attachments/assets/677bc3f1-98c8-44dd-b454-573ee0a735fc" />
 <img width="1522" height="982" alt="Screenshot 2026-10-24 123301" src="https://github.com/user-attachments/assets/b6fa3b4d-ca6d-4c0a-86cb-35dce2563376" />
 <img width="2016" height="1298" alt="Screenshot 2026-10-24 123219" src="https://github.com/user-attachments/assets/ec520115-c1ee-439e-a556-572671f21380" />
