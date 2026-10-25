@@ -164,7 +164,7 @@ jobs:
       # people who can change the repository; the Hub shows them in dev mode as "Install test build".
       # Publishing the draft on GitHub creates the tag and makes it the real release.
       - name: Test builds (draft releases, main branch only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
