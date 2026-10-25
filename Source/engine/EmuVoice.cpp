@@ -81,9 +81,11 @@ String destName (int d)
 
 double rateSeconds (double rate) noexcept
 {
-    // measured in Emulator X (Orbit-3 "amb:Galactic End"), joined on a log scale
-    static const double pts[][2] { { 0.0, 0.0 }, { 4.0, 0.072 }, { 23.5, 0.995 }, { 28.5, 1.763 }, { 32.0, 2.622 },
-                                   { 38.0, 5.138 }, { 43.0, 8.997 }, { 50.0, 20.12 } };
+    // measured in Emulator X (Orbit-3 "amb:Galactic End", Planet Earth "wnd:East Winds"), joined on a log scale;
+    // E-mu's longest time is 163.6 s
+    static const double pts[][2] { { 0.0, 0.0 }, { 4.0, 0.072 }, { 9.5, 0.175 }, { 10.0, 0.192 }, { 20.0, 0.661 }, { 23.5, 0.995 },
+                                   { 28.5, 1.763 }, { 32.0, 2.622 }, { 38.0, 5.138 }, { 43.0, 8.997 }, { 50.0, 20.12 }, { 51.79, 24.9 },
+                                   { 59.5, 73.6 }, { 61.23, 100.3 }, { 62.0, 118.71 }, { 63.6, 163.6 } };
     rate = jlimit (0.0, 127.0, rate);
     if (rate <= 0.0) return 0.0;
     if (rate <= 4.0) return 0.072 * rate / 4.0;   // (the log curve starts at the first measured point)
@@ -93,7 +95,7 @@ double rateSeconds (double rate) noexcept
             const double t = (rate - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0]);
             return std::exp (std::log (pts[i - 1][1]) + t * (std::log (pts[i][1]) - std::log (pts[i - 1][1])));
         }
-    return jmin (163.0, 20.12 * std::exp ((rate - 50.0) * std::log (20.12 / 8.997) / 7.0));
+    return 163.6;
 }
 
 //== Saving ==============================================================================
@@ -352,7 +354,10 @@ bool control (VoiceState& s, const Design& d, const Inputs& in, int note, int ve
     {
         const auto& l = d.lfo[(size_t) i];
         const float rateMod = dest[i == 0 ? 96 : 104];
-        const double hz = jlimit (0.0, 50.0, (double) l.hz * s.lfoRateScale[(size_t) i] * std::exp2 (3.0 * rateMod));
+        double baseHz = l.hz;
+        if (l.sync && l.division == 25)
+            baseHz = in.bpm / 60.0 / 32.0;   // "8/1": eight bars (other tempo divisions use the stored rate until checked)
+        const double hz = jlimit (0.0, 50.0, baseHz * s.lfoRateScale[(size_t) i] * std::exp2 (3.0 * rateMod));
         const double before = s.lfoPhase[(size_t) i];
         s.lfoPhase[(size_t) i] += hz * n / sr;
         if ((juce::int64) std::floor (s.lfoPhase[(size_t) i]) != (juce::int64) std::floor (before))
@@ -369,7 +374,7 @@ bool control (VoiceState& s, const Design& d, const Inputs& in, int note, int ve
     const float ampEnv = jmax (0.0f, s.env[0].level);
     const float volDb = jlimit (-96.0f, 10.0f, 48.0f * dest[64]);   // E-mu's amp volume range tops out at +10 dB
     s.ampGain = ampEnv * Decibels::decibelsToGain (volDb, -100.0f);
-    s.pitchSemis = dest[47] + 12.0f * dest[48];
+    s.pitchSemis = dest[47] + (12.0f / 0.3721f) * dest[48];   // fine pitch: 100 % = 1 semitone; pitch: 37.21 % = 1 octave
     s.pan = 100.0f * dest[65];
     // filter frequency cords: 100 % moves half of the 57 Hz - 20 kHz range (so a full Tone knob plus a full
     // filter envelope doesn't shut a high pass or overshoot); to be checked by ear against Emulator X

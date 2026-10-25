@@ -44,6 +44,8 @@ struct Design
     std::vector<Cord> cords;         // up to 36
     float chorusAmount = 0.0f, chorusWidth = 100.0f;   // %
     int bendUp = 2, bendDown = 2;    // semitones
+    int transpose = 0, coarse = 0;   // semitones (the zone's SEMI knob gets their sum)
+    float fine = 0.0f;               // cents (the zone's TUNE knob)
     float ampEnvRange = 96.0f;       // dB
 
     juce::var toJson() const;

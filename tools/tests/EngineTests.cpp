@@ -9,6 +9,7 @@
 #include "engine/Arpeggiator.h"
 #include "engine/SampleEdit.h"
 #include "engine/ExbImport.h"
+#include "engine/EmuVoice.h"
 #include "NaturalSort.h"
 #include "ui/SkinFile.h"
 #include "ui/SkinDraw.h"
@@ -1573,6 +1574,23 @@ int main (int argc, char** argv)
                          z.params.loopStart, z.params.loopEnd);
         check (keys.presetName == "apo:PlusDXep" && keys.zones.size() >= 20 && minKey == 21 && maxKey == 108 && looped > 0,
                "exb: keyboard preset = zones across the keys, with loops");
+        // Planet Earth "wnd:East Winds", voice 1, compared with Emulator X's screens (slow times, tuning, LFOs)
+        {
+            const File pe = File (dir).getChildFile ("Planet Earth.exb");
+            if (exb::isExb (pe))
+            {
+                auto ew = exb::loadPreset (pe, 156);
+                const auto* z = ew.zones.empty() ? nullptr : &ew.zones.front();
+                const auto* d = z != nullptr ? z->params.design.get() : nullptr;
+                check (d != nullptr && std::abs (z->params.decay - 2.871f) < 0.05f && std::abs (z->params.release - 0.661f) < 0.02f
+                           && std::abs (z->params.sustain - 0.961f) < 0.01f && z->params.semitones == -1 && std::abs (z->params.tuneCents - 16.0f) < 0.01f
+                           && std::abs (z->params.gainDb + 10.0f) < 0.01f && d->lfo[0].shape == 0 && d->lfo[1].shape == 1
+                           && std::abs (d->lfo[0].hz - 3.0f) < 0.01f && std::abs (d->lfo[1].hz - 0.39f) < 0.01f
+                           && std::abs (emu::rateSeconds (d->env[1].rate[4]) - 118.71) < 0.5 && std::abs (emu::rateSeconds (d->env[2].rate[2]) - 0.175) < 0.01,
+                       "exb: East Winds' envelopes, tuning, volume and LFOs match Emulator X", ew.errors.joinIntoString ("; "));
+            }
+        }
+
         // EMX_EXB_RENDER=<folder>: play a little phrase with imported presets, to listen to them
         auto renderPhrase = [] (const LoadResult& preset, const String& name, bool slowChord)
         {

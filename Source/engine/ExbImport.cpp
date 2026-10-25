@@ -130,22 +130,7 @@ namespace
 {
 /** E-mu envelope rate (0..127, stored as rate / 127) -> seconds for a full 0..100 % move.
     Measured points from Emulator X, joined smoothly (log scale) in between. */
-double rateSeconds (double rate)
-{
-    static const double pts[][2] { { 0.0, 0.0 }, { 4.0, 0.072 }, { 23.5, 0.995 }, { 28.5, 1.763 }, { 32.0, 2.622 },
-                                   { 38.0, 5.138 }, { 43.0, 8.997 }, { 50.0, 20.12 } };
-    rate = jlimit (0.0, 127.0, rate);
-    if (rate <= 0.0) return 0.0;
-    if (rate <= 4.0) return 0.072 * rate / 4.0;
-    for (size_t i = 2; i < std::size (pts); ++i)
-        if (rate <= pts[i][0])
-        {
-            const double t = (rate - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0]);
-            return std::exp (std::log (pts[i - 1][1]) + t * (std::log (pts[i][1]) - std::log (pts[i - 1][1])));
-        }
-    // beyond the measured range: keep the last growth rate, up to E-mu's longest times
-    return jmin (163.0, 20.12 * std::exp ((rate - 50.0) * std::log (20.12 / 8.997) / 7.0));
-}
+double rateSeconds (double rate) { return emu::rateSeconds (rate); }
 
 struct Env { float time[6] {}, level[6] {}; bool valid = false; };
 
@@ -256,9 +241,12 @@ std::shared_ptr<const emu::Design> readDesign (const Chunk& v, const MemoryBlock
                     // 4-byte version, shape, 3 more bytes, rate (Hz, float), tempo division, ?, variation (%, float), ?, key sync
                     const auto* q = d + l.data;
                     auto& f = des->lfo[(size_t) i++];
-                    f.shape = q[4];
+                    // shape byte (Emulator X: 0 triangle, 1 sine, then saw, square, random...) -> Emulon X's LFO codes
+                    static const int shapes[] { 1, 0, 3, 2, 4 };
+                    f.shape = q[13] < 5 ? shapes[q[13]] : 0;
                     f.hz = jlimit (0.0f, 50.0f, beFloat (q + 8));
                     f.division = q[12];
+                    f.sync = q[18] == 0;          // 0 = BPM on
                     f.variation = jlimit (0.0f, 100.0f, beFloat (q + 14));
                     f.keySync = q[19] != 0;
                 }
@@ -273,12 +261,85 @@ std::shared_ptr<const emu::Design> readDesign (const Chunk& v, const MemoryBlock
         }
         else if (c.id == "E5Oc" && c.size >= 35)
         {
+            des->transpose = (int8) d[c.data + 14];
+            des->coarse = (int8) d[c.data + 15];
+            des->fine = jlimit (-100.0f, 100.0f, beFloat (d + c.data + 16));
             des->chorusWidth = jlimit (0.0f, 100.0f, beFloat (d + c.data + 27));
             des->chorusAmount = jlimit (0.0f, 100.0f, beFloat (d + c.data + 31));
         }
     }
     return des;
 }
+
+//== Effects ==========================================================================
+namespace
+{
+var fxModule (const char* type, int mode, std::initializer_list<std::pair<const char*, double>> params)
+{
+    auto* st = new DynamicObject();
+    st->setProperty ("mode", mode);
+    auto* pr = new DynamicObject();
+    for (auto& p : params)
+        pr->setProperty (p.first, p.second);
+    auto* m = new DynamicObject();
+    m->setProperty ("type", type);
+    m->setProperty ("on", true);
+    m->setProperty ("settings", var (st));
+    m->setProperty ("params", var (pr));
+    return var (m);
+}
+
+/** FX B (E-mu's chorus / flanger / delay / distortion list): type, feedback, LFO rate, delay. */
+void addFxB (Array<var>& chain, int t, int feedback, int lfoRate, int delay)
+{
+    const double rate = 0.05 * std::pow (2.0, lfoRate / 127.0 * 7.0);   // ~0.05 .. 6 Hz
+    const double fb = feedback / 127.0;
+    if ((t >= 1 && t <= 5) || t == 15 || t == 16 || t == 17)
+        chain.add (fxModule ("chorus", t == 17 ? 2 : 0, { { "rate", rate }, { "depth", t == 15 || t == 16 ? 0.7 : 0.5 }, { "a", 12.0 + t }, { "b", 1.0 }, { "mix", 0.45 } }));
+    else if (t == 6 || t == 7)
+        chain.add (fxModule ("delay", 0, { { "time", t == 6 ? 35.0 : 110.0 }, { "fb", 0.0 }, { "a", 0.6 }, { "b", 0.0 }, { "lo", 80.0 }, { "hi", 9000.0 }, { "mix", 0.35 } }));
+    else if (t >= 8 && t <= 14)
+        chain.add (fxModule ("chorus", 1, { { "rate", rate }, { "depth", 0.6 }, { "a", 1.0 + (t - 8) * 0.6 }, { "b", 0.2 + fb * 0.7 }, { "mix", 0.5 } }));
+    else if (t >= 18 && t <= 26)
+        chain.add (fxModule ("delay", t == 21 || t == 23 || t == 24 ? 1 : 0,
+                             { { "time", jlimit (20.0, 2000.0, delay > 0 ? delay * 5.0 : 300.0) }, { "fb", fb * 0.85 }, { "a", 0.6 }, { "b", 0.0 },
+                               { "lo", 80.0 }, { "hi", 8000.0 }, { "mix", 0.3 } }));
+    else if (t == 27)
+        chain.add (fxModule ("chorus", 0, { { "rate", rate }, { "depth", 0.4 }, { "a", 8.0 }, { "b", 1.0 }, { "mix", 1.0 } }));
+    else if (t >= 28 && t <= 32)
+    {
+        chain.add (fxModule ("dist", 2, { { "drive", 18.0 }, { "a", 0.5 }, { "b", 0.0 }, { "tone", 9000.0 }, { "out", -8.0 }, { "mix", 1.0 } }));
+        if (t >= 30)
+            chain.add (fxModule ("chorus", t == 30 ? 1 : 0, { { "rate", rate }, { "depth", 0.5 }, { "a", t == 30 ? 2.0 : 15.0 }, { "b", t == 30 ? 0.5 : 1.0 }, { "mix", 0.5 } }));
+    }
+}
+
+/** FX A (E-mu's reverb / delay list): type, decay (0..90), high damping (0..127). */
+void addFxA (Array<var>& chain, int t, int decay, int damping)
+{
+    const double damp = 20000.0 * std::pow (2.0, -damping / 127.0 * 4.0);
+    const double d = decay / 90.0;
+    auto reverb = [&] (int mode, double size, double seconds)
+    {
+        chain.add (fxModule ("reverb", mode, { { "size", size }, { "decay", jlimit (0.2, 15.0, seconds) }, { "pre", 12.0 }, { "damp", jlimit (1000.0, 20000.0, damp) },
+                                               { "lo", 100.0 }, { "width", 1.0 }, { "mix", 0.25 } }));
+    };
+    if (t == 1 || t == 2 || t == 3 || (t >= 13 && t <= 16))   reverb (0, 0.3 + 0.05 * (t % 4), 0.3 + d * 2.0);       // rooms
+    else if (t == 6 || t == 17 || t == 22)                      reverb (2, 0.5, 0.6 + d * 3.5);                      // plates
+    else if (t == 23 || t == 24)                                reverb (3, 0.6, 0.6 + d * 3.0);                      // court, gym
+    else if (t == 25 || t == 35)                                reverb (4, 0.95, 2.0 + d * 10.0);                    // cavern, canyon
+    else if (t >= 28 && t <= 30)                                reverb (0, 0.4, 0.3 + d * 0.6);                      // gated
+    else if (t >= 7 && t <= 12)
+        chain.add (fxModule ("delay", t % 2 == 0 ? 1 : 0, { { "time", 350.0 }, { "fb", d * 0.75 }, { "a", 0.6 }, { "b", 0.0 }, { "lo", 80.0 },
+                                                            { "hi", jlimit (1000.0, 20000.0, damp) }, { "mix", 0.25 } }));
+    else if (t >= 36 && t <= 44)
+    {
+        chain.add (fxModule ("delay", t % 2 == 1 ? 0 : 1, { { "time", 300.0 }, { "fb", 0.35 }, { "a", 0.6 }, { "b", 0.0 }, { "lo", 80.0 }, { "hi", 7000.0 }, { "mix", 0.2 } }));
+        reverb (1, 0.7, 1.0 + d * 4.0);
+    }
+    else if (t > 0)                                             reverb (1, 0.75, 1.0 + d * 6.0);                     // halls and concerts
+}
+} // namespace
 
 //== Files ===========================================================================
 File bankFile (const File& f)
@@ -545,6 +606,8 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
             p.gainDb = gainDb;
             p.pan = pan;
             p.design = design;   // envelopes, filter, LFOs and cords run per note in Emulon X's E-mu voice layer
+            p.semitones = jlimit (-24, 24, design->transpose + design->coarse);
+            p.tuneCents = design->fine;
             lz.fx = var();       // (so no separate filter effect)
             (void) fx;
             if (entry.second)
@@ -557,6 +620,40 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
                 p.loopMode = LoopMode::off;
             p.clampTo (lz.sample->length());
             r.zones.push_back (std::move (lz));
+        }
+    }
+    // the preset's effects: the voices' chorus, then FX B (chorus / flanger / delay), then FX A (reverb / delay)
+    {
+        Array<var> chain;
+        float chorus = 0.0f;
+        for (auto& z : r.zones)
+            if (z.params.design != nullptr)
+                chorus = jmax (chorus, z.params.design->chorusAmount);
+        if (chorus > 0.5f)
+            chain.add (fxModule ("chorus", 2, { { "rate", 0.6 }, { "depth", jlimit (0.1, 0.9, chorus / 25.0) }, { "a", 12.0 }, { "b", 0.9 },
+                                                { "mix", jlimit (0.1, 0.5, chorus / 30.0) } }));
+        if (const auto* ael = list (chunks, "AEL"))
+        {
+            std::vector<const Chunk*> slots;
+            for (auto& c : ael->kids)
+                if (c.id == "E5E1" && c.size >= 9)
+                    slots.push_back (&c);
+            if (slots.size() >= 2)
+            {
+                const auto* b = d + slots[1]->data;
+                addFxB (chain, b[4], b[5], b[6], b[7]);
+            }
+            if (! slots.empty())
+            {
+                const auto* a = d + slots[0]->data;
+                addFxA (chain, a[4], a[5], a[6]);
+            }
+        }
+        if (! chain.isEmpty())
+        {
+            auto* fxo = new DynamicObject();
+            fxo->setProperty ("chain", chain);
+            r.fx = var (fxo);
         }
     }
     if (r.zones.empty() && r.errors.isEmpty())
