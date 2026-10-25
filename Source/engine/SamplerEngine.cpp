@@ -3,7 +3,17 @@
 
 namespace emx
 {
-SamplerEngine::SamplerEngine() { SincTables::get(); }
+SamplerEngine::SamplerEngine()
+{
+    SincTables::get();
+    constexpr int combSize = 1024;
+    combMemory.assign ((size_t) maxVoiceSlots * 2 * combSize, 0.0f);
+    for (size_t i = 0; i < voices.size(); ++i)
+    {
+        voices[i].emu.comb = combMemory.data() + i * 2 * combSize;
+        voices[i].emu.combSize = combSize;
+    }
+}
 
 void SamplerEngine::prepare (double sr)
 {
@@ -38,6 +48,12 @@ void SamplerEngine::handleMidi (const juce::MidiMessage& m) noexcept
         setSustain (false);
     else if (m.isControllerOfType (1))
         modWheel = (float) m.getControllerValue() / 127.0f;
+    else if (m.isControllerOfType (4))
+        emuIn.pedal = (float) m.getControllerValue() / 127.0f;
+    else if (m.isControllerOfType (65))
+        emuIn.footswitch2 = m.getControllerValue() >= 64;
+    else if (m.isChannelPressure())
+        emuIn.pressure = (float) m.getChannelPressureValue() / 127.0f;
     else if (m.isAllNotesOff() || m.isAllSoundOff())
         allNotesOff();
 }
@@ -288,6 +304,12 @@ void SamplerEngine::startVoicesFor (int note, int velocity, float glideFrom, con
         v.released = v.stolen = v.inLoop = false;
         v.keepSpeed = p.keepSpeed;
         v.age = ++ageCounter;
+        if (p.design != nullptr)
+        {
+            emu::startNote (v.emu, *p.design, random);
+            v.level = 1.0f;          // E-mu voices: `level` is only the quick fade when a voice is stolen
+            v.emuGain = 0.0f;
+        }
     }
 }
 
@@ -315,13 +337,54 @@ void SamplerEngine::render (float* L, float* R, int numSamples, const Bus* buses
                 outR = buses[b].right;
                 break;
             }
-        renderVoice (v, v.params, outL, outR, numSamples);
+        if (v.params.design != nullptr)
+        {
+            // E-mu voices: envelopes, LFOs and cords run every 32 samples
+            for (int done = 0; done < numSamples && v.active; done += 32)
+                renderEmuVoice (v, v.params, outL + done, outR + done, juce::jmin (32, numSamples - done));
+        }
+        else
+            renderVoice (v, v.params, outL, outR, numSamples);
         if (! v.active)
             v.sample.reset();
     }
 }
 
-void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float* R, int N) noexcept
+void SamplerEngine::renderEmuVoice (Voice& v, const ZoneParams& z, float* L, float* R, int N) noexcept
+{
+    const auto& d = *z.design;
+    emuIn.modWheel = modWheel;
+    emuIn.pitchWheel = bend;
+    emuIn.footswitch1 = sustainDown;
+    if (v.released && ! v.emu.released)
+        emu::releaseNote (v.emu);
+    const float g0 = v.emuGain;
+    const bool sounding = emu::control (v.emu, d, emuIn, v.note, v.velocity, sampleRate, N);
+    const float g1 = v.emu.ampGain;
+    v.emuGain = g1;
+
+    float a[32], b[32];
+    std::fill (a, a + N, 0.0f);
+    std::fill (b, b + N, 0.0f);
+    renderVoice (v, z, a, b, N, true);   // the sample at the modulated pitch (stops at its end)
+
+    const float vol = juce::Decibels::decibelsToGain (z.gainDb, -100.0f);
+    const float panAngle = (juce::jlimit (-100.0f, 100.0f, z.pan + v.emu.pan) / 100.0f + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+    const float gl = vol * std::cos (panAngle) * juce::MathConstants<float>::sqrt2 * 0.5f;   // 0.5 = headroom, as for other zones
+    const float gr = vol * std::sin (panAngle) * juce::MathConstants<float>::sqrt2 * 0.5f;
+    for (int i = 0; i < N; ++i)
+    {
+        const float g = g0 + (g1 - g0) * (float) (i + 1) / (float) N;
+        float l = a[i], r = b[i];
+        emu::filter (v.emu, d, sampleRate, l, r);
+        L[i] += l * g * gl;
+        R[i] += r * g * gr;
+    }
+    if (! sounding)
+        v.active = false;   // the amp envelope has finished
+}
+
+void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float* R, int N, bool rawForEmu) noexcept
 {
     const auto& S = *v.sample;
     const int n = S.length();
@@ -335,7 +398,13 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
     for (int m = 0; m < numPitchMods; ++m)
         if (pitchMods[(size_t) m].zoneId == v.zoneId)
             semis = pitchMods[(size_t) m].semitones;   // already includes the knob position
-    const double ratio = std::pow (2.0, (v.note + v.glide + semis - z.root + (z.tuneCents + globalTuneCents) / 100.0 + bend * bendRange) / 12.0);
+    double bendSemis = bend * bendRange, emuSemis = 0.0;
+    if (rawForEmu && z.design != nullptr)
+    {
+        bendSemis = bend * (bend >= 0.0f ? z.design->bendUp : z.design->bendDown);
+        emuSemis = v.emu.pitchSemis;
+    }
+    const double ratio = std::pow (2.0, (v.note + v.glide + semis - z.root + (z.tuneCents + globalTuneCents) / 100.0 + bendSemis + emuSemis) / 12.0);
     if (std::abs (v.glide) > 0.0f)
     {
         // Glide: slide the remaining distance toward the note at a steady speed.
@@ -401,13 +470,17 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
     const float releaseCoef = v.stolen ? (float) std::exp (-4.6 / (0.006 * sr))
                                        : (float) std::exp (-4.6 / juce::jmax (1.0, z.release * sr));
 
-    const float gain = juce::Decibels::decibelsToGain (z.gainDb, -100.0f) * (float) v.velocity / 127.0f;
+    const float gain = rawForEmu ? juce::MathConstants<float>::sqrt2 : juce::Decibels::decibelsToGain (z.gainDb, -100.0f) * (float) v.velocity / 127.0f;
     const float panAngle = (juce::jlimit (-100.0f, 100.0f, z.pan) / 100.0f + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
-    const float gl = gain * std::cos (panAngle) * juce::MathConstants<float>::sqrt2 * 0.5f;   // 0.5 = headroom, as in the prototype
-    const float gr = gain * std::sin (panAngle) * juce::MathConstants<float>::sqrt2 * 0.5f;
+    float gl = gain * std::cos (panAngle) * juce::MathConstants<float>::sqrt2 * 0.5f;   // 0.5 = headroom, as in the prototype
+    float gr = gain * std::sin (panAngle) * juce::MathConstants<float>::sqrt2 * 0.5f;
+    if (rawForEmu)
+        gl = gr = 1.0f;   // the E-mu layer adds gain and pan
 
-    if (v.released)
+    if (v.released && ! rawForEmu)
         v.stage = 3;
+    if (rawForEmu)
+        v.stage = v.stolen ? 3 : 4;   // 4: no envelope here; 3 with the steal fade
 
     for (int i = 0; i < N; ++i)
     {
@@ -420,7 +493,7 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
         {
             v.level = z.sustain + (v.level - z.sustain) * decayCoef;
         }
-        else
+        else if (v.stage == 3)
         {
             v.level *= releaseCoef;
             if (v.level < 1.0e-4f) { v.active = false; return; }

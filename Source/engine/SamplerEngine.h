@@ -8,6 +8,7 @@
 #include <bitset>
 #include "Zone.h"
 #include "Interpolator.h"
+#include "EmuVoice.h"
 
 namespace emx
 {
@@ -42,6 +43,9 @@ public:
     void noteOff (int note) noexcept;
     void setSustain (bool down) noexcept;
     void setPitchBend (float minusOneToOne) noexcept { bend = minusOneToOne; }
+    /** For E-mu voices: MIDI A..P (Emulon X's macros, 0..1) and the tempo. */
+    void setControllers (const float* sixteen) noexcept { for (int i = 0; i < 16; ++i) emuIn.midi[(size_t) i] = juce::jlimit (0.0f, 1.0f, sixteen[i]); }
+    void setTempo (double bpm) noexcept { emuIn.bpm = bpm; }
     void allNotesOff() noexcept;   // quick fade
     void reset() noexcept;         // silence immediately
 
@@ -90,9 +94,13 @@ private:
         int stage = 0;                        // 0 attack, 1 decay/sustain, 3 release
         bool released = false, stolen = false, keepSpeed = true, inLoop = false;
         juce::uint64 age = 0;
+        emu::VoiceState emu;                  // used when the zone has an E-mu design
+        float emuGain = 0.0f;                 // gain at the end of the last control step (ramped from here)
     };
 
-    void renderVoice (Voice&, const ZoneParams&, float* L, float* R, int n) noexcept;
+    /** rawForEmu: no envelope, gain or pan (the E-mu layer adds them), pitch includes its modulation. */
+    void renderVoice (Voice&, const ZoneParams&, float* L, float* R, int n, bool rawForEmu = false) noexcept;
+    void renderEmuVoice (Voice&, const ZoneParams&, float* L, float* R, int n) noexcept;
     Voice* freeSlot() noexcept;
     void startVoicesFor (int note, int velocity, float glideFrom = 0.0f, const std::bitset<1024>* skipZones = nullptr) noexcept;
     void monoNoteOn (int note, int velocity, int previous) noexcept;
@@ -114,5 +122,7 @@ private:
     juce::Random random;
     std::array<PitchMod, 64> pitchMods {};
     int numPitchMods = 0;
+    emu::Inputs emuIn;
+    std::vector<float> combMemory;            // flanger delay lines for the E-mu voices
 };
 } // namespace emx

@@ -83,6 +83,7 @@ set(EMX_SOURCES
     Source/engine/Arpeggiator.cpp
     Source/engine/SampleEdit.cpp
     Source/engine/ExbImport.cpp
+    Source/engine/EmuVoice.cpp
     Source/ui/PresetPanel.cpp
     Source/ui/BankPanel.cpp
     Source/ui/Explorer.cpp
@@ -231,6 +232,7 @@ if(EMX_BUILD_TESTS)
         Source/engine/Arpeggiator.cpp
         Source/engine/SampleEdit.cpp
         Source/engine/ExbImport.cpp
+        Source/engine/EmuVoice.cpp
         Source/fx/FxDefs.cpp
         Source/fx/FxDsp.cpp
         Source/fx/FxModel.cpp

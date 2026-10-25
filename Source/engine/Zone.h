@@ -8,6 +8,8 @@
 
 namespace emx
 {
+namespace emu { struct Design; }
+
 /** One decoded sample, kept at its original sample rate. Never modified after loading. */
 struct SampleData
 {
@@ -43,6 +45,9 @@ struct ZoneParams
     int semitones = 0;                               // coarse pitch, -24 .. +24 (can be modulated)
     bool keepSpeed = true;                           // pitch without changing length
     float grainMs = 60.0f;
+    /** Optional E-mu style voice (envelopes, filter, LFOs, cords per note), e.g. from an Emulator X bank.
+        When set, it replaces the simple envelope above and velocity works through its cords. */
+    std::shared_ptr<const emu::Design> design;
 
     /** Sensible starting values for a freshly loaded sample (uses file hints when present). */
     static ZoneParams defaultsFor (const SampleData&);
