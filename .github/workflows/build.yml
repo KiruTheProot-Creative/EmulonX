@@ -9,10 +9,11 @@ on:
     branches: [ main ]
     # v1.2.0ea = Emulon X, sd-v0.1af = Emulon X SD, hub-v0.1af = Emulon X Hub (each publishes its own release)
     tags: [ "v*", "sd-v*", "hub-v*" ]
-    # Editing the launcher's texts and pictures (the hub folder) doesn't need a new build.
-    paths-ignore: [ "hub/**" ]
+    # Text-only changes don't need a new build: the Hub's texts and pictures (hub folder), the docs folder
+    # and any .md file (README, notes...). A commit that also changes code still builds. Tags always build.
+    paths-ignore: [ "hub/**", "docs/**", "**.md" ]
   pull_request:
-    paths-ignore: [ "hub/**" ]
+    paths-ignore: [ "hub/**", "docs/**", "**.md" ]
   workflow_dispatch:
 
 permissions:
