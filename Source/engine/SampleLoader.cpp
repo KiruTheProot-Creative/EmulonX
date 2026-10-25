@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SampleLoader.h"
+#include "ExbImport.h"
 
 namespace emx::loader
 {
@@ -15,11 +16,11 @@ static AudioFormatManager& formats()
 
 static constexpr int maxSeconds = 600;   // refuse absurdly long files (10 minutes)
 
-String supportedWildcards() { return "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3;*.emxp;*.emxb;*.zip"; }
+String supportedWildcards() { return "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3;*.emxp;*.emxb;*.zip;*.exb"; }
 
 bool isAudioFile (const File& f)  { return f.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"); }
 bool isPresetFile (const File& f) { return f.hasFileExtension ("emxp") || f.getFileName().endsWithIgnoreCase (".emxp.zip"); }
-bool isBankFile (const File& f)   { return f.hasFileExtension ("emxb") || f.getFileName().endsWithIgnoreCase (".emxb.zip"); }
+bool isBankFile (const File& f)   { return f.hasFileExtension ("emxb") || f.getFileName().endsWithIgnoreCase (".emxb.zip") || exb::isExb (f); }
 bool isSupported (const File& f)  { return isAudioFile (f) || isPresetFile (f) || isBankFile (f) || f.hasFileExtension ("zip"); }
 
 String safeFileName (const String& name)
@@ -278,6 +279,8 @@ LoadResult load (const File& file)
 //== Banks =====================================================================
 BankInfo readBankInfo (const File& file)
 {
+    if (exb::isExb (file))
+        return exb::readInfo (file);   // an Emulator X bank (experimental)
     BankInfo b;
     ZipFile zip (file);
     const auto* entry = zip.getEntry ("bank.json");
@@ -341,6 +344,8 @@ std::shared_ptr<const SampleData> loadSource (const String& sourceIn, String& er
         }
         return decode (f.createInputStream(), f.getFileNameWithoutExtension(), source, error);
     }
+    if (parts.size() >= 2 && parts[0] == "ebl")   // a sample from an Emulator X bank's SamplePool
+        return exb::loadSample (File (parts[1]), error);
     if (parts.size() >= 3 && parts[0] == "emxp")
     {
         const File f (parts[1]);

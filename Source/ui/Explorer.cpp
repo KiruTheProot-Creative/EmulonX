@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "Explorer.h"
 #include "../NaturalSort.h"
+#include "../engine/ExbImport.h"
 #include "Theme.h"
 #include "../PluginProcessor.h"
 
@@ -160,7 +161,10 @@ public:
                 explorer.proc.loadFiles ({ file });
                 break;
             case Kind::bank:
-                explorer.proc.openBank (file);
+                if (exb::isExb (file))
+                    setOpen (! isOpen());   // Emulator X bank: just unfold it
+                else
+                    explorer.proc.openBank (file);
                 break;
             case Kind::bankPreset:
                 explorer.proc.loadPresetFromBankFile (file, bankEntry, label);
@@ -184,7 +188,7 @@ public:
                 if (++count > maxEntriesPerFolder)
                     break;
                 const auto& f = entry.getFile();
-                if (entry.isDirectory())
+                if (entry.isDirectory() && ! (show != Show::samples && exb::isExb (f)))   // an Emulator X bank folder is shown as a bank
                     dirs.add (f);
                 else if (accepts (f))
                     files.add (f);
@@ -193,7 +197,7 @@ public:
             auto shownName = [] (const File& f)
             {
                 auto name = f.getFileName();
-                for (auto ext : { ".emxp.zip", ".emxb.zip", ".emxp", ".emxb" })
+                for (auto ext : { ".emxp.zip", ".emxb.zip", ".emxp", ".emxb", ".exb" })
                     if (name.endsWithIgnoreCase (ext))
                         return name.dropLastCharacters ((int) strlen (ext));
                 return name;

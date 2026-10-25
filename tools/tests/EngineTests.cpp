@@ -8,6 +8,7 @@
 #include "fx/FxEngine.h"
 #include "engine/Arpeggiator.h"
 #include "engine/SampleEdit.h"
+#include "engine/ExbImport.h"
 #include "NaturalSort.h"
 #include "ui/SkinFile.h"
 #include "ui/SkinDraw.h"
@@ -1387,6 +1388,70 @@ int main (int argc, char** argv)
         check (placed, "the splicer finds each drum hit", where.trim());
         const auto even = edit::splitEvenly (48000, 8);
         check (even.size() == 8 && even[0] == 0 && even[1] == 6000 && even[7] == 42000, "split evenly into 8");
+    }
+
+    //== Emulator X banks (experimental; only when EMX_EXB_DIR points at a folder of them) ==
+    if (const auto dir = SystemStats::getEnvironmentVariable ("EMX_EXB_DIR", {}); dir.isNotEmpty())
+    {
+        const File sp = File (dir).getChildFile ("SP-1200.exb"), vk = File (dir).getChildFile ("Vintage Keys.exb");
+        const auto info = exb::readInfo (sp);
+        check (exb::isExb (sp) && info.presetNames.size() == 346 && info.presetNames[8] == "SP Kick 1",
+               "exb: bank lists its presets", String (info.presetNames.size()) + ", " + info.presetNames[8]);
+        auto kick = exb::loadPreset (sp, info.presetEntries[8].getIntValue());
+        check (kick.zones.size() == 1 && kick.zones[0].sample != nullptr && kick.zones[0].sample->name == "SP Kick 1"
+                   && kick.zones[0].params.loopMode == LoopMode::off && kick.zones[0].sample->sampleRate == 48000.0,
+               "exb: drum preset = one one-shot zone with its sample",
+               String ((int) kick.zones.size()) + " zones " + kick.errors.joinIntoString ("; "));
+        auto keys = exb::loadPreset (vk, 0);
+        int looped = 0, minKey = 127, maxKey = 0;
+        for (auto& z : keys.zones)
+        {
+            looped += z.params.loopMode == LoopMode::loop;
+            minKey = jmin (minKey, z.params.loKey);
+            maxKey = jmax (maxKey, z.params.hiKey);
+        }
+        std::printf ("  vintage keys preset 0: %s, %d zones, keys %d..%d, %d looped, errors: %s\n", keys.presetName.toRawUTF8(),
+                     (int) keys.zones.size(), minKey, maxKey, looped, keys.errors.joinIntoString ("; ").toRawUTF8());
+        for (auto& z : keys.zones)
+            std::printf ("    %-14s keys %3d-%3d root %3d vel %3d-%3d  %6.0f Hz  %d ch  loop %d %d-%d\n", z.sample->name.toRawUTF8(), z.params.loKey, z.params.hiKey,
+                         z.params.root, z.params.loVel, z.params.hiVel, z.sample->sampleRate, z.sample->audio.getNumChannels(), (int) z.params.loopMode,
+                         z.params.loopStart, z.params.loopEnd);
+        check (keys.presetName == "apo:PlusDXep" && keys.zones.size() >= 20 && minKey == 21 && maxKey == 108 && looped > 0,
+               "exb: keyboard preset = zones across the keys, with loops");
+        // EMX_EXB_RENDER=<file.wav>: play a little phrase with the imported preset, to listen to it
+        if (const auto out = SystemStats::getEnvironmentVariable ("EMX_EXB_RENDER", {}); out.isNotEmpty())
+        {
+            auto set = std::make_shared<ZoneSet>();
+            int id = 1;
+            for (auto& z : keys.zones)
+                set->zones.push_back ({ id++, z.sample, z.params });
+            SamplerEngine e;
+            e.prepare (48000.0);
+            e.setZoneSet (set);
+            AudioBuffer<float> buf (2, 48000 * 9);
+            buf.clear();
+            const int notes[][3] { { 48, 0, 60 }, { 55, 0, 60 }, { 60, 0, 60 }, { 64, 0, 60 },   // C major, then up the keyboard
+                                   { 36, 66, 90 }, { 72, 66, 90 }, { 84, 96, 120 }, { 96, 126, 150 }, { 60, 156, 210 }, { 67, 156, 210 }, { 76, 156, 210 } };
+            const int N = 128;
+            for (int b = 0; b * N < buf.getNumSamples() - N; ++b)
+            {
+                const int tick = b * N / 2400;   // 50 ms steps
+                for (auto& n : notes)
+                {
+                    if (b * N / 2400 != (b - 1) * N / 2400 || b == 0)
+                    {
+                        if (tick == n[1]) e.noteOn (n[0], 100);
+                        if (tick == n[2]) e.noteOff (n[0]);
+                    }
+                }
+                e.render (buf.getWritePointer (0, b * N), buf.getWritePointer (1, b * N), N);
+            }
+            buf.applyGain (0.6f);
+            File (out).deleteFile();
+            if (auto w = std::unique_ptr<AudioFormatWriter> (WavAudioFormat().createWriterFor (new FileOutputStream (File (out)), 48000.0, 2, 16, {}, 0)))
+                w->writeFromAudioSampleBuffer (buf, 0, buf.getNumSamples());
+            std::printf ("  rendered %s\n", out.toRawUTF8());
+        }
     }
 
     std::printf ("\n%d passed, %d failed\n", passes, failures);

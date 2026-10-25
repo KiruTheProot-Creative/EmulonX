@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "PluginProcessor.h"
 #include "NaturalSort.h"
+#include "engine/ExbImport.h"
 #include "PluginEditor.h"
 
 namespace emx
@@ -1039,6 +1040,12 @@ void EmulonXProcessor::loadFiles (const Array<File>& files)
 
 void EmulonXProcessor::loadPresetFromBankFile (const File& bankFile, const String& entry, const String& name)
 {
+    if (exb::isExb (bankFile))   // Emulator X bank (experimental): the entry is the preset's number
+    {
+        runInBackground<LoadResult> ([bankFile, entry] { return exb::loadPreset (bankFile, entry.getIntValue()); },
+                                     [this] (LoadResult& r) { addLoaded (std::move (r), false); });
+        return;
+    }
     runInBackground<LoadResult> ([bankFile, entry, name]
                                  {
                                      const auto bytes = loader::readBankEntry (bankFile, entry);
@@ -1192,6 +1199,11 @@ void EmulonXProcessor::loadBankEntry (int index)
 
 void EmulonXProcessor::openBank (const File& file)
 {
+    if (exb::isExb (file))
+    {
+        message ("Emulator X banks open in the explorer: unfold the bank and double-click a preset");
+        return;
+    }
     using Loaded = std::pair<BankInfo, std::vector<BankEntry>>;
     runInBackground<Loaded> ([file]
                              {
