@@ -158,6 +158,38 @@ jobs:
           name: EmulonX-Hub-Windows-Installer
           path: installer-out/EmulonX-Hub-Setup-*.exe
 
+      # Test builds: every push to main keeps a DRAFT release up to date for each program whose version
+      # isn't released yet (e.g. hub-v0.2af after the version number went up). Drafts are only visible to
+      # people who can change the repository; the Hub shows them in dev mode as "Install test build".
+      # Publishing the draft on GitHub creates the tag and makes it the real release.
+      - name: Test builds (draft releases, main branch only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          function Version($pattern) { (Select-String -Path CMakeLists.txt -Pattern $pattern).Matches[0].Groups[1].Value }
+          $emx = (Version 'project\(EmulonX VERSION (\d+\.\d+\.\d+)') + (Version 'set\(EMX_VERSION_TAG "([a-z0-9]*)"\)')
+          $sd = Version 'set\(EMX_SD_VERSION "([^"]+)"\)'
+          $hub = Version 'set\(EMX_HUB_VERSION "([^"]+)"\)'
+          $list = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          foreach ($t in @(@{ tag = "v$emx"; title = "Emulon X $emx"; file = "installer-out/EmulonX-Setup-$emx.exe" },
+                           @{ tag = "sd-v$sd"; title = "Emulon X SD $sd"; file = "installer-out/EmulonX-SD-Setup-$sd.exe" },
+                           @{ tag = "hub-v$hub"; title = "Emulon X Hub $hub"; file = "installer-out/EmulonX-Hub-Setup-$hub.exe" })) {
+            $rel = $list | Where-Object { $_.tag_name -eq $t.tag } | Select-Object -First 1
+            if ($rel -and -not $rel.draft) { Write-Output "$($t.tag) is already released - no test build"; continue }
+            if (-not (Test-Path $t.file)) { Write-Output "missing $($t.file)"; continue }
+            $notes = "Test build from $env:GITHUB_SHA. Only people who can change this repository see it (the Emulon X Hub shows it in dev mode). Publish this release when it's ready - that creates the tag and everyone gets it."
+            if ($rel) {
+              gh api -X PATCH "repos/$env:GITHUB_REPOSITORY/releases/$($rel.id)" -f target_commitish=$env:GITHUB_SHA -f body="$notes" | Out-Null
+              gh release upload $t.tag $t.file --clobber --repo $env:GITHUB_REPOSITORY
+            } else {
+              gh release create $t.tag $t.file --draft --prerelease --title $t.title --notes $notes --target $env:GITHUB_SHA --repo $env:GITHUB_REPOSITORY
+            }
+            Write-Output "test build: $($t.tag)"
+          }
+          exit 0
+
       - name: Publish release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2

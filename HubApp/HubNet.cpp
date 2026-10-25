@@ -24,7 +24,7 @@ void Net::shutdown() { pool.removeAllJobs (true, 4000); }
 
 namespace
 {
-Response perform (const String& method, const String& address, const String& body, const String& headers)
+Response perform (const String& method, const String& address, const String& body, const String& headers, int redirects = 8)
 {
     Response r;
     URL url (address);
@@ -39,13 +39,12 @@ Response perform (const String& method, const String& address, const String& bod
     }
     if (body.isNotEmpty())
         url = url.withPOSTData (body);
-    StringPairArray responseHeaders;
     auto options = URL::InputStreamOptions (URL::ParameterHandling::inAddress)
                        .withConnectionTimeoutMs (20000)
                        .withExtraHeaders ("User-Agent: EmulonX-Hub\r\n" + headers)
                        .withStatusCode (&r.status)
-                       .withResponseHeaders (&responseHeaders)
-                       .withNumRedirectsToFollow (8)
+                       .withResponseHeaders (&r.headers)
+                       .withNumRedirectsToFollow (redirects)
                        .withHttpRequestCmd (method);
     if (auto in = url.createInputStream (options))
         in->readIntoMemoryBlock (r.data);
@@ -79,6 +78,26 @@ void Net::api (const String& method, const String& path, const var& body, Callba
         headers << "Content-Type: application/json\r\n";
     }
     request (method, "https://api.github.com" + path, text, headers, std::move (cb));
+}
+
+void Net::privateAssetLink (const String& assetApiUrl, std::function<void (String, String)> done)
+{
+    const auto t = getToken();
+    pool.addJob ([assetApiUrl, t, done]
+    {
+        String headers = "Accept: application/octet-stream\r\n";
+        if (t.isNotEmpty())
+            headers << "Authorization: Bearer " << t << "\r\n";
+        auto r = perform ("GET", assetApiUrl, {}, headers, 0);
+        String link;
+        for (auto& k : r.headers.getAllKeys())
+            if (k.equalsIgnoreCase ("location"))
+                link = r.headers[k];
+        if (URL (assetApiUrl).isLocalFile())
+            link = assetApiUrl;
+        const auto error = link.isNotEmpty() ? String() : "GitHub didn't hand out the test build (" + (r.error.isNotEmpty() ? r.error : String (r.status)) + ")";
+        MessageManager::callAsync ([done, link, error] { done (link, error); });
+    });
 }
 
 std::shared_ptr<Net::Download> Net::download (const String& address, const File& dest, std::function<void (float)> progress,

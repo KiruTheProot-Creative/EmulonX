@@ -49,7 +49,9 @@ struct NewsItem
 struct Release
 {
     juce::String tag, version, name, notes, page, assetUrl, assetName;
+    juce::String assetApi;     // drafts: the file is only reachable through the API, with a sign-in
     juce::int64 assetSize = 0;
+    bool draft = false;
     bool found = false;
 };
 
@@ -117,6 +119,12 @@ public:
     std::vector<BankItem> banks;
     std::vector<NewsItem> news;
     Release relEmx, relSd, relHub;
+    /** Test builds: draft releases, which GitHub only shows to accounts that can change the repository (dev mode). */
+    Release testEmx, testSd, testHub;
+    const Release& release (const juce::String& key, bool test) const
+    {
+        return key == "emx" ? (test ? testEmx : relEmx) : key == "sd" ? (test ? testSd : relSd) : (test ? testHub : relHub);
+    }
     bool textsLive = false;       // came from GitHub just now (otherwise the last copy or the built-in one)
     bool releasesLive = false;
     juce::String clientId;        // the Hub's GitHub sign-in app (hub/hub.json)
@@ -148,7 +156,7 @@ public:
     struct Job { juce::String key, label; float progress = 0.0f; bool active = false; };
     const Job& job() const { return currentJob; }
     using Done = std::function<void (bool ok, const juce::String& message)>;
-    void installApp (const juce::String& key, const juce::Array<juce::File>& folders, Done);
+    void installApp (const juce::String& key, const juce::Array<juce::File>& folders, Done, bool testBuild = false);
     void installSkin (const SkinItem&, const juce::File& folder, Done);
     void installBank (const BankItem&, const juce::File& folder, Done);
     void cancelJob();
@@ -172,6 +180,7 @@ private:
     void endJob();
     void record (const juce::String& key, const juce::String& version, const juce::File& where);
     void runInstaller (const juce::String& key, const juce::File& setup, const juce::String& params, const juce::String& version, Done);
+    void downloadApp (const juce::String& key, const Release&, const juce::String& url, const juce::Array<juce::File>& folders, Done);
 
     std::map<juce::String, juce::String> baseline;
     std::map<juce::String, juce::String> baseText;   // the texts as loaded, to undo dev edits

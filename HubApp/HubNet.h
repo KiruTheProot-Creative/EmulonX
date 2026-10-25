@@ -21,6 +21,7 @@ struct Response
     int status = 0;
     juce::MemoryBlock data;
     juce::String error;
+    juce::StringPairArray headers;
     bool ok() const { return status >= 200 && status < 300; }
     juce::String text() const { return data.toString(); }
     juce::var json() const { return juce::JSON::parse (text()); }
@@ -50,6 +51,10 @@ public:
     };
     std::shared_ptr<Download> download (const juce::String& url, const juce::File& dest,
                                         std::function<void (float)> progress, std::function<void (bool ok, juce::String error)> done);
+
+    /** The real download address of a draft release's file (only with a sign-in that can see drafts):
+        asks GitHub's API for it without following the redirect. done gets an empty string if it can't. */
+    void privateAssetLink (const juce::String& assetApiUrl, std::function<void (juce::String link, juce::String error)> done);
 
     void shutdown();   // stop background work (app exit)
 

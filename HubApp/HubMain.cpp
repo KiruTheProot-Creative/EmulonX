@@ -54,6 +54,14 @@ int selfTest (const File& dir)
         check (model.relEmx.found && model.relEmx.version == "1.2.0ea", "the newest Emulon X release is found (" + model.relEmx.version + ")");
         check (model.relSd.found && model.relSd.version == "0.1af", "Emulon X SD releases have their own tags (" + model.relSd.version + ")");
         check (model.relHub.found && model.relHub.version == "0.2af", "Hub releases have their own tags (" + model.relHub.version + ")");
+        check (model.testSd.found && model.testSd.version == "0.2af" && ! model.testEmx.found, "a draft release is a test build (" + model.testSd.version + ")");
+        {
+            String link;
+            bool got = false;
+            Net::get().privateAssetLink (model.testSd.assetApi, [&] (String l, String) { link = l; got = true; });
+            for (int i = 0; i < 100 && ! got; ++i) pump (30);
+            check (link.isNotEmpty(), "a test build's private file can be reached");
+        }
         bool community = false, released = false;
         for (auto& s : model.skins) community = community || (s.community && s.preview.isNotEmpty());
         for (auto& b : model.banks) released = released || (! b.isSoon() && b.link().isNotEmpty());
@@ -140,6 +148,11 @@ int selfTest (const File& dir)
     pump (200);
     hub.openSave();
     shot ("hub-dev-save");
+    hub.closeOverlays();
+    hub.showTab (HubComponent::Tab::sd);
+    shot ("hub-dev-sd-test-build");
+    hub.openWhere ("test:sd");
+    shot ("hub-dev-test-where");
     hub.closeOverlays();
     hub.showTab (HubComponent::Tab::banks);
     shot ("hub-dev-banks");

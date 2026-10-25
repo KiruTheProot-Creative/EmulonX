@@ -37,5 +37,9 @@ json.dump([
     {"tag_name": "v1.1.1ea", "draft": False, "assets": []},
     {"tag_name": "sd-v0.1af", "draft": False, "assets": asset("EmulonX-SD-Setup-0.1af.exe", 9000000)},
     {"tag_name": "hub-v0.2af", "draft": False, "assets": asset("EmulonX-Hub-Setup-0.2af.exe", 8000000)},
-    {"tag_name": "v9.0.0", "draft": True, "assets": []}], open(out / "releases.json", "w"))
+    {"tag_name": "v9.0.0", "draft": True, "assets": []},
+    # a test build: a draft release (only dev mode sees it); its file comes through the API address ("url")
+    {"tag_name": "sd-v0.2af", "draft": True, "assets": [{"name": "EmulonX-SD-Setup-0.2af.exe", "size": 5000,
+     "browser_download_url": "https://example.invalid/private", "url": (b / "Tape Choirs.emxb").as_uri()}]}],
+    open(out / "releases.json", "w"))
 print("made", out)

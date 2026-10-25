@@ -310,9 +310,21 @@ struct InstallBox final : Component
         tl.createLayout (s, (float) w - 24 - 18);
         return tl;
     }
+    /** The links wrap onto more lines when they don't fit. */
+    int linkRows (int w) const
+    {
+        int rows = links.isEmpty() ? 0 : 1, x = 12;
+        for (auto* l : links)
+        {
+            const int lw = l->idealWidth() + 4;
+            if (x > 12 && x + lw > w - 12) { ++rows; x = 12; }
+            x += lw + 14;
+        }
+        return rows;
+    }
     int preferredHeight (int w) const
     {
-        return 12 + jmax (16, roundToInt (statusLayout (w).getHeight())) + 8 + (folder.isNotEmpty() ? 22 : 0) + 40 + (links.isEmpty() ? 0 : 8 + 18) + 12;
+        return 12 + jmax (16, roundToInt (statusLayout (w).getHeight())) + 8 + (folder.isNotEmpty() ? 22 : 0) + 40 + linkRows (w) * 24 + (links.isEmpty() ? 0 : 2) + 12;
     }
     void paint (Graphics& g) override
     {
@@ -340,6 +352,7 @@ struct InstallBox final : Component
         for (auto* l : links)
         {
             const int w = l->idealWidth() + 4;
+            if (x > 12 && x + w > getWidth() - 12) { x = 12; y += 24; }
             l->setBounds (x, y, w, 20);
             x += w + 14;
         }
@@ -693,7 +706,7 @@ struct DevBar final : Component
         String t = n == 0 ? String ("No changes") : String (files) + " file" + (files == 1 ? "" : "s");
         if (pictures > 0) t << " + " << pictures << " picture" << (pictures == 1 ? "" : "s");
         if (n > 0) t << " changed";
-        g.drawText (t, getWidth() - 470, 0, 160, getHeight(), Justification::centredRight, true);
+        g.drawText (t, getWidth() - 340 - 170, 0, 170, getHeight(), Justification::centredRight, true);
     }
     void resized() override
     {
@@ -1142,7 +1155,7 @@ String HubComponent::signature() const
     s << (int) tab << "|" << skinSel << "|" << bankSel << "|" << shotIndex[0] << shotIndex[1] << "|" << (int) showLog << (int) dev << "|" << checkStatus;
     for (auto& f : Model::textFiles())
         s << model.fileText (f).hashCode64();
-    s << "|" << (int) model.job().active << model.job().key << "|" << model.relEmx.version << model.relSd.version << model.relHub.version;
+    s << "|" << (int) model.job().active << model.job().key << "|" << model.relEmx.version << model.relSd.version << model.relHub.version << model.testEmx.version << model.testSd.version << model.testHub.version;
     s << "|" << model.installedVersion ("emx") << model.installedVersion ("sd") << (int) model.newPictures.size() << (int) model.skins.size() << (int) model.banks.size();
     for (auto& sk : model.skins) s << model.installedVersion ("skin:" + sk.id);
     for (auto& b : model.banks) s << model.installedVersion ("bank:" + b.id) << (int) model.notifyWhenOut (b.id) << (int) b.released;
@@ -1331,6 +1344,9 @@ void HubComponent::buildProduct (Product& p)
     else if (p.extra["version"].isNotEmpty()) ver = p.extra["version"];
     if (ver.isNotEmpty())
         chips->chips.push_back ({ ver + (dev ? "  AUTO" : ""), look::red });
+    const auto& test = model.release (p.key, true);
+    if (dev && test.found)
+        chips->chips.push_back ({ "Test build " + test.version, look::warm });
     col.add (std::move (chips));
 
     TextItem::Options d = opts (13.0f, 500, look::body);
@@ -1455,6 +1471,8 @@ void HubComponent::buildProduct (Product& p)
         ib->addLink ("Reinstall", [this, key = p.key] { install (key); });
     if (busy)
         ib->addLink ("Cancel", [this] { model.cancelJob(); });
+    if (dev && test.found && ! busy)
+        ib->addLink ("Install test build", [this, key = p.key] { install ("test:" + key); });
     installBox = std::move (ib);
 
     // screenshots
@@ -2270,6 +2288,25 @@ void HubComponent::install (const String& key)
         flash ("Please wait until the current download is done.");
         return;
     }
+    if (key == "test:hub")
+    {
+        auto d = std::make_unique<Dialog> ("HUB TEST BUILD", "draft release - only you can see it");
+        d->width = 540;
+        d->para ("Install the test build of the Hub (" + model.testHub.version + ")? The Hub closes, installs it and opens again. "
+                 "When you're happy with it, publish the draft release on GitHub and everyone gets it.");
+        d->action ("CANCEL", Style::grey, [this] { closeDialog(); });
+        d->action ("INSTALL TEST BUILD", Style::hot, [this]
+        {
+            closeDialog();
+            model.installApp ("hub", {}, [this] (bool ok, const String& msg)
+            {
+                if (ok && msg == "hub-restart") { if (onQuitForUpdate) onQuitForUpdate(); }
+                else if (! ok) message ("THE TEST BUILD DIDN'T INSTALL", msg);
+            }, true);
+        });
+        showDialog (std::move (d));
+        return;
+    }
     if (key == "hub")
     {
         if (! model.relHub.found || ! isNewer (model.relHub.version, hubVersion))
@@ -2296,8 +2333,10 @@ void HubComponent::install (const String& key)
     openWhere (key);
 }
 
-void HubComponent::openWhere (const String& key)
+void HubComponent::openWhere (const String& keyIn)
 {
+    const bool test = keyIn.startsWith ("test:");
+    const auto key = test ? keyIn.substring (5) : keyIn;
     String title;
     String size;
     if (key == "emx") { title = "Install Emulon X " + model.relEmx.version; size = formatBytes (model.relEmx.assetSize); }
@@ -2306,6 +2345,13 @@ void HubComponent::openWhere (const String& key)
     else if (key.startsWith ("bank:")) { for (auto& b : model.banks) if ("bank:" + b.id == key) { title = "Download the bank " + b.name; size = b.sizeText(); } }
     if (key == "emx" && model.installedVersion ("emx").isNotEmpty() && isNewer (model.relEmx.version, model.installedVersion ("emx")))
         title = "Update Emulon X to " + model.relEmx.version;
+    if (test)
+    {
+        const auto& rel = model.release (key, true);
+        title = "Install the TEST build " + rel.version + " of " + (key == "emx" ? String ("Emulon X") : String ("Emulon X SD"))
+                + " (a draft release - only you can see it)";
+        size = formatBytes (rel.assetSize);
+    }
 
     auto d = std::make_unique<Dialog> ("WHERE SHOULD IT GO?");
     d->para (title + (size.isNotEmpty() ? " " + middot + " " + size : String()));
@@ -2332,7 +2378,7 @@ void HubComponent::openWhere (const String& key)
         d->para ("Windows asks for permission to install (the installer needs to write to Program Files). The installer runs quietly in the background.", true);
    #endif
     d->action ("CANCEL", Style::grey, [this] { closeDialog(); });
-    d->action ("INSTALL HERE", Style::hot, [this, key, rows]
+    d->action (test ? "INSTALL TEST BUILD" : "INSTALL HERE", Style::hot, [this, key, rows, test]
     {
         Array<File> folders;
         for (auto* r : rows)
@@ -2367,7 +2413,7 @@ void HubComponent::openWhere (const String& key)
             rebuild();
         };
         if (key == "emx" || key == "sd")
-            model.installApp (key, folders, done);
+            model.installApp (key, folders, done, test);
         else if (key.startsWith ("skin:"))
         {
             for (auto& s : model.skins) if ("skin:" + s.id == key) { model.installSkin (s, folders[0], done); break; }
@@ -2411,6 +2457,8 @@ void HubComponent::openSettings()
             closeDialog();
             flash ("Signed out of GitHub.");
         });
+    if (dev && model.testHub.found)
+        d->action ("HUB TEST BUILD " + model.testHub.version, Style::grey, [this] { closeDialog(); install ("test:hub"); });
     d->action ("CHECK FOR HUB UPDATES", Style::grey, [this] { closeDialog(); install ("hub"); });
     d->action ("DONE", Style::hot, [this] { closeDialog(); });
     showDialog (std::move (d));
@@ -2519,6 +2567,7 @@ void HubComponent::devLogin()
                         return;
                     }
                     setDevMode (true, login);
+                    refreshNow (false);   // now the test builds (draft releases) show up too
                     flash ("Signed in - dev mode on");
                 });
             });

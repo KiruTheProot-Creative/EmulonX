@@ -652,13 +652,13 @@ void Model::applyIndexes (const var& si, const var& biIn)
 
 void Model::applyReleases (const var& list)
 {
-    auto pick = [&list] (const String& prefix)
+    auto pick = [&list] (const String& prefix, bool drafts)
     {
         Release best;
         if (auto* a = list.getArray())
             for (auto& r : *a)
             {
-                if ((bool) r.getProperty ("draft", false))
+                if ((bool) r.getProperty ("draft", false) != drafts)
                     continue;
                 const auto tag = r.getProperty ("tag_name", "").toString();
                 if (! tag.startsWithIgnoreCase (prefix) || ! CharacterFunctions::isDigit (tag[prefix.length()]))
@@ -668,6 +668,7 @@ void Model::applyReleases (const var& list)
                     continue;
                 Release rel;
                 rel.found = true;
+                rel.draft = drafts;
                 rel.tag = tag;
                 rel.version = version;
                 rel.name = r.getProperty ("name", tag).toString();
@@ -689,15 +690,21 @@ void Model::applyReleases (const var& list)
                             rel.assetName = n;
                             rel.assetUrl = asset.getProperty ("browser_download_url", "").toString();
                             rel.assetSize = (int64) asset.getProperty ("size", 0);
+                            rel.assetApi = asset.getProperty ("url", "").toString();
                         }
                     }
+                if (drafts && rel.assetApi.isEmpty())
+                    continue;   // a draft without its installer yet
                 best = rel;
             }
         return best;
     };
-    relEmx = pick ("v");
-    relSd = pick ("sd-v");
-    relHub = pick ("hub-v");
+    relEmx = pick ("v", false);
+    relSd = pick ("sd-v", false);
+    relHub = pick ("hub-v", false);
+    testEmx = pick ("v", true);
+    testSd = pick ("sd-v", true);
+    testHub = pick ("hub-v", true);
 }
 
 //== Dev mode =======================================================================
@@ -889,19 +896,40 @@ void Model::cancelJob()
         download->cancelled = true;
 }
 
-void Model::installApp (const String& key, const Array<File>& folders, Done done)
+void Model::installApp (const String& key, const Array<File>& folders, Done done, bool testBuild)
 {
     if (currentJob.active)
         return;
-    const auto& rel = key == "emx" ? relEmx : key == "sd" ? relSd : relHub;
-    if (! rel.found || rel.assetUrl.isEmpty())
+    const auto rel = release (key, testBuild);
+    if (! rel.found || (testBuild ? rel.assetApi.isEmpty() : rel.assetUrl.isEmpty()))
     {
-        done (false, "There's no download for this yet. It appears here as soon as it's released on GitHub.");
+        done (false, testBuild ? String ("There's no test build with an installer right now.")
+                               : String ("There's no download for this yet. It appears here as soon as it's released on GitHub."));
         return;
     }
     for (int i = 0; i < folders.size(); ++i)
         settings.set ("where." + key + "." + String (i), folders[i].getFullPathName());
+    if (! testBuild)
+    {
+        downloadApp (key, rel, rel.assetUrl, folders, done);
+        return;
+    }
+    // a draft's file is private: ask GitHub (with your sign-in) for a short-lived link first
+    setJob (key, "ASKING GITHUB...", 0.0f);
+    Net::get().privateAssetLink (rel.assetApi, [this, key, rel, folders, done] (String link, String error)
+    {
+        if (link.isEmpty())
+        {
+            endJob();
+            done (false, error);
+            return;
+        }
+        downloadApp (key, rel, link, folders, done);
+    });
+}
 
+void Model::downloadApp (const String& key, const Release& rel, const String& url, const Array<File>& folders, Done done)
+{
    #if JUCE_WINDOWS
     const auto setup = File::getSpecialLocation (File::tempDirectory).getChildFile ("Emulon X Hub").getChildFile (rel.assetName);
    #else
@@ -909,7 +937,7 @@ void Model::installApp (const String& key, const Array<File>& folders, Done done
    #endif
     setJob (key, "DOWNLOADING 0%", 0.0f);
     const auto version = rel.version;
-    download = Net::get().download (rel.assetUrl, setup, [this, key] (float p)
+    download = Net::get().download (url, setup, [this, key] (float p)
     {
         setJob (key, p < 0 ? String ("DOWNLOADING...") : "DOWNLOADING " + String (roundToInt (p * 100.0f)) + "%", jmax (0.0f, p) * 0.8f);
     }, [this, key, folders, setup, version, done] (bool ok, String error)
