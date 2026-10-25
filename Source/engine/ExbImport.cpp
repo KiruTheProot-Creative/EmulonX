@@ -718,16 +718,10 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
             r.zones.push_back (std::move (lz));
         }
     }
-    // the preset's effects: the voices' chorus, then FX B (chorus / flanger / delay), then FX A (reverb / delay)
+    // the preset's effects: FX B (chorus / flanger / delay), then FX A (reverb / delay), then the bank's aux effects
     {
         Array<var> chain;
-        float chorus = 0.0f;
-        for (auto& z : r.zones)
-            if (z.params.design != nullptr)
-                chorus = jmax (chorus, z.params.design->chorusAmount);
-        if (chorus > 0.5f)
-            chain.add (fxModule ("chorus", 2, { { "rate", 0.6 }, { "depth", jlimit (0.1, 0.9, chorus / 25.0) }, { "a", 12.0 }, { "b", 0.9 },
-                                                { "mix", jlimit (0.1, 0.5, chorus / 30.0) } }));
+        // (the voices' chorus is played by the E-mu voice itself: two detuned copies)
         if (const auto* ael = list (chunks, "AEL"))
         {
             std::vector<const Chunk*> slots;

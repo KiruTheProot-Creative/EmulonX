@@ -295,6 +295,8 @@ void SamplerEngine::startVoicesFor (int note, int velocity, float glideFrom, con
             startAt = juce::jlimit (startAt, juce::jmax (startAt, p.randomEnd), r);
         }
         v.pos = startAt;
+        v.chorusPos = startAt;
+        v.chorusInLoop = false;
         v.read0 = startAt;
         v.read1 = startAt;   // the second grain is fully audible at the start, so the attack is intact
         v.glide = glideFrom;
@@ -352,6 +354,7 @@ void SamplerEngine::render (float* L, float* R, int numSamples, const Bus* buses
 
 void SamplerEngine::renderEmuVoice (Voice& v, const ZoneParams& z, float* L, float* R, int N) noexcept
 {
+    constexpr float chorusSpread = 0.6f;   // measured against Emulator X (how strongly the copies beat on one side)
     const auto& d = *z.design;
     emuIn.modWheel = modWheel;
     emuIn.pitchWheel = bend;
@@ -366,7 +369,46 @@ void SamplerEngine::renderEmuVoice (Voice& v, const ZoneParams& z, float* L, flo
     float a[32], b[32];
     std::fill (a, a + N, 0.0f);
     std::fill (b, b + N, 0.0f);
+    // E-mu's voice chorus plays the sample twice, detuned against each other and spread left / right
+    // (measured: 100 % = 50 cents between the copies; Galactic End's 11.8 % beats at 5.9 cents)
+    const bool chorus = d.chorusAmount > 0.05f;
+    const float pitch = v.emu.pitchSemis, detune = d.chorusAmount / 100.0f * 0.5f;
+    if (chorus)
+        v.emu.pitchSemis = pitch - detune * 0.5f;
+    const float glideBefore = v.glide;
     renderVoice (v, z, a, b, N, true);   // the sample at the modulated pitch (stops at its end)
+    if (chorus)
+    {
+        float c[32], e[32];
+        std::fill (c, c + N, 0.0f);
+        std::fill (e, e + N, 0.0f);
+        const double pos = v.pos;
+        const bool inLoop = v.inLoop, active = v.active;
+        const float glideAfter = v.glide;
+        v.pos = v.chorusPos;
+        v.inLoop = v.chorusInLoop;
+        v.glide = glideBefore;
+        v.emu.pitchSemis = pitch + detune * 0.5f;
+        renderVoice (v, z, c, e, N, true);
+        v.chorusPos = v.pos;
+        v.chorusInLoop = v.inLoop;
+        v.pos = pos;
+        v.inLoop = inLoop;
+        v.active = active;
+        v.glide = glideAfter;
+        v.emu.pitchSemis = pitch;
+        // width spreads the copies apart (measured: at 100 % both copies are still heard on both sides, the
+        // far one about 8 dB down); scaled so the level stays the same
+        const float w = juce::jlimit (0.0f, 1.0f, d.chorusWidth / 100.0f);
+        const float k = 1.0f - chorusSpread * w, norm = 1.0f / std::sqrt (1.0f + k * k);
+        const float near = norm, far = k * norm;
+        for (int i = 0; i < N; ++i)
+        {
+            const float l1 = a[i], r1 = b[i], l2 = c[i], r2 = e[i];
+            a[i] = near * l1 + far * l2;
+            b[i] = far * r1 + near * r2;
+        }
+    }
 
     const float vol = juce::Decibels::decibelsToGain (z.gainDb, -100.0f);
     const float panAngle = (juce::jlimit (-100.0f, 100.0f, z.pan + v.emu.pan) / 100.0f + 1.0f) * juce::MathConstants<float>::pi * 0.25f;

@@ -483,6 +483,9 @@ static int exbDebug (const File& bank, int preset, int zoneIndex)
         for (int i = 0; i < 6; ++i) std::printf (" %.1f/%.1f", d.env[(size_t) e].rate[(size_t) i], d.env[(size_t) e].level[(size_t) i]);
         std::printf ("\n");
     }
+    std::printf ("  sample %d frames @ %.0f Hz, root %d, loop %d-%d (%s)\n", z.sample->length(), z.sample->sampleRate, z.params.root,
+                 z.params.loopStart, z.params.loopEnd, z.params.loopMode == LoopMode::off ? "off" : "on");
+    for (auto& l : d.lfo) std::printf ("  lfo shape %d hz %.3f sync %d div %d delay %.2f var %.0f keysync %d\n", l.shape, l.hz, (int) l.sync, l.division, l.delay, l.variation, (int) l.keySync);
     for (auto& c : d.cords) std::printf ("  cord %s -> %s %.1f\n", emu::sourceName (c.source).toRawUTF8(), emu::destName (c.dest).toRawUTF8(), c.amount);
     emu::Inputs in;
     for (size_t k = 0; k < r.macros.size() && k < 16; ++k) in.midi[k] = r.macros[k].second / 100.0f;
@@ -493,13 +496,14 @@ static int exbDebug (const File& bank, int preset, int zoneIndex)
     Random rnd (1);
     emu::startNote (st, d, rnd);
     const int note = (z.params.loKey + z.params.hiKey) / 2, vel = (z.params.loVel + z.params.hiVel) / 2;
-    for (int step = 0; step < 48000 / 32 * 2; ++step)
+    const int holdSteps = (int) (48000 / 32 * jmax (0.1, SystemStats::getEnvironmentVariable ("EMX_HOLD", "1").getDoubleValue()));
+    for (int step = 0; step < holdSteps + 48000 / 32; ++step)
     {
-        if (step == 48000 / 32) emu::releaseNote (st);
+        if (step == holdSteps) emu::releaseNote (st);
         emu::control (st, d, in, note, vel, 48000.0, 32);
         if (step % 150 == 0)
-            std::printf ("  %.2fs amp env st%d %.3f  flt env %.3f  gain %.4f  cutoff %.3f res %.3f pitch %+.2f\n", step * 32 / 48000.0, st.env[0].stage, st.env[0].level,
-                         st.env[1].level, st.ampGain, st.cutoff, st.resonance, st.pitchSemis);
+            std::printf ("  %.2fs amp env st%d %.3f  flt env %.3f  gain %.4f  cutoff %.3f res %.3f pitch %+.2f pan %+.0f\n", step * 32 / 48000.0, st.env[0].stage, st.env[0].level,
+                         st.env[1].level, st.ampGain, st.cutoff, st.resonance, st.pitchSemis, st.pan);
     }
     return 0;
 }
@@ -510,8 +514,13 @@ static int exbRender (const File& bank, int preset, int note, double hold, doubl
     auto r = exb::loadPreset (bank, preset);
     auto set = std::make_shared<ZoneSet>();
     int id = 1;
+    const auto only = SystemStats::getEnvironmentVariable ("EMX_ZONE", "-1").getIntValue();   // render one zone only
     for (auto& z : r.zones)
-        set->zones.push_back ({ id++, z.sample, z.params });
+    {
+        if (only < 0 || only == id - 1)
+            set->zones.push_back ({ id, z.sample, z.params });
+        ++id;
+    }
     SamplerEngine e;
     e.prepare (48000.0);
     e.setZoneSet (set);
@@ -527,10 +536,13 @@ static int exbRender (const File& bank, int preset, int note, double hold, doubl
     int nextId = 1;
     if (r.fx.isObject() && SystemStats::getEnvironmentVariable ("EMX_NOFX", {}).isEmpty())
         fxs.master = fx::chainFromJson (r.fx["chain"], idMap, nextId, 48000.0);
+    if (SystemStats::getEnvironmentVariable ("EMX_NOAUX", {}).isNotEmpty())   // keep the chorus, leave out the bank's aux effects
+        fxs.master.erase (std::remove_if (fxs.master.begin(), fxs.master.end(), [] (const fx::Module& m)
+                              { return m.type == fx::Type::delay || m.type == fx::Type::reverb || m.type == fx::Type::util; }), fxs.master.end());
     auto snap = fx::Snapshot::build (fxs, {});
     fx::Engine fe;
     fe.setSnapshot (snap.get());
-    e.noteOn (note, 100);
+    e.noteOn (note, SystemStats::getEnvironmentVariable ("EMX_VEL", "100").getIntValue());
     const int N = 128, offAt = (int) (hold * 48000.0);
     for (int pos = 0; pos + N <= buf.getNumSamples(); pos += N)
     {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "EmuVoice.h"
+#include <cstdlib>
 #include <cmath>
 #include <iterator>
 
@@ -133,7 +134,7 @@ var Design::toJson() const
     o->setProperty ("cords", cs);
     o->setProperty ("chorus", Array<var> { chorusAmount, chorusWidth });
     o->setProperty ("bend", Array<var> { bendUp, bendDown });
-    o->setProperty ("ampRange", ampEnvRange);
+    o->setProperty ("ampDb", ampEnvRange);
     return var (o);
 }
 
@@ -171,15 +172,20 @@ std::shared_ptr<const Design> Design::fromJson (const var& j)
     d->chorusWidth = num (j["chorus"][1], 100.0f);
     d->bendUp = (int) num (j["bend"][0], 2.0f);
     d->bendDown = (int) num (j["bend"][1], 2.0f);
-    d->ampEnvRange = num (j["ampRange"], 96.0f);
+    d->ampEnvRange = num (j["ampDb"], 60.0f);
     return d;
 }
 
 //== Envelopes ===========================================================================
 namespace
 {
+/** Rate offsets from cords for the attack, decay and release stages (E-mu rate units; measured against
+    Emulator X: a cord at 100 % moves the rate by about 56.5, positive amounts make the stage faster). */
+struct RateMod { float phase[3] {}; float forStage (int stage) const noexcept { return phase[stage < 2 ? 0 : stage < 4 ? 1 : 2]; } };
+constexpr float rateUnitsPerCord = 56.5f;
+
 /** Sets up a stage. Attack and decay times depend on how far the level moves; release times don't. */
-void beginStage (EnvState& e, const Envelope& d, int stage, float timeScale, double sr)
+void beginStage (EnvState& e, const Envelope& d, int stage, const RateMod& mod, double sr)
 {
     e.stage = stage;
     if (stage >= 6)
@@ -196,12 +202,14 @@ void beginStage (EnvState& e, const Envelope& d, int stage, float timeScale, dou
     }
     e.skip = false;
     const float target = d.level[(size_t) stage] / 100.0f;
-    const double full = rateSeconds (d.rate[(size_t) stage]) * timeScale;
+    // cords add to the rate (an instant stage can be slowed down by them, as in Emulator X)
+    const float base = d.rate[(size_t) stage];
+    const double full = rateSeconds (jlimit (0.0f, 127.0f, base + mod.forStage (stage)));
     const double t = stage >= 4 ? (std::abs (target - e.from) > 1.0e-4f ? full : 0.0) : full * std::abs (target - e.from);
     e.len = (float) (t * sr);
 }
 
-void runEnv (EnvState& e, const Envelope& d, float timeScale, double sr, int n, float sustainMod)
+void runEnv (EnvState& e, const Envelope& d, const RateMod& mod, double sr, int n, float sustainMod)
 {
     while (e.stage < 6 && n > 0)
     {
@@ -214,7 +222,7 @@ void runEnv (EnvState& e, const Envelope& d, float timeScale, double sr, int n, 
             e.level = target;
             if (e.stage == 3)
                 return;                                 // decay 2 holds its level until the key is let go
-            beginStage (e, d, e.stage + 1, timeScale, sr);
+            beginStage (e, d, e.stage + 1, mod, sr);
             continue;
         }
         e.pos += (float) n;
@@ -249,7 +257,7 @@ void startNote (VoiceState& s, const Design& d, Random& rnd)
     for (int i = 0; i < 3; ++i)
     {
         s.env[(size_t) i].level = 0.0f;
-        beginStage (s.env[(size_t) i], d.env[(size_t) i], 0, 1.0f, 48000.0);   // real length set on the first control call
+        beginStage (s.env[(size_t) i], d.env[(size_t) i], 0, RateMod {}, 48000.0);   // real length set on the first control call
         s.env[(size_t) i].len = -1.0f;
     }
     for (int i = 0; i < 2; ++i)
@@ -336,17 +344,17 @@ bool control (VoiceState& s, const Design& d, const Inputs& in, int note, int ve
             dest[c.dest] += source (c.source) * jlimit (-100.0f, 100.0f, amount[i]) / 100.0f;
     }
 
-    // envelopes (positive rate changes make them faster)
-    auto scale = [&] (int rates, int stageDest) { return (float) std::exp2 (-4.0f * (dest[rates] + dest[stageDest])); };
+    // envelopes (positive rate cords make them faster)
     for (int e = 0; e < 3; ++e)
     {
         auto& st = s.env[(size_t) e];
         const int base = e == 0 ? 72 : e == 1 ? 80 : 88;
-        const int phaseDest = st.stage < 2 ? base + 1 : st.stage < 4 ? base + 2 : base + 3;
-        const float ts = scale (base, phaseDest);
+        RateMod mod;
+        for (int ph = 0; ph < 3; ++ph)
+            mod.phase[ph] = -rateUnitsPerCord * (dest[base] + dest[base + 1 + ph]);
         if (st.len < 0.0f)
-            beginStage (st, d.env[(size_t) e], st.stage, ts, sr);
-        runEnv (st, d.env[(size_t) e], ts, sr, n, dest[base + 4]);
+            beginStage (st, d.env[(size_t) e], st.stage, mod, sr);
+        runEnv (st, d.env[(size_t) e], mod, sr, n, dest[base + 4]);
     }
 
     // LFOs, noise, lags
@@ -355,8 +363,14 @@ bool control (VoiceState& s, const Design& d, const Inputs& in, int note, int ve
         const auto& l = d.lfo[(size_t) i];
         const float rateMod = dest[i == 0 ? 96 : 104];
         double baseHz = l.hz;
-        if (l.sync && l.division == 25)
-            baseHz = in.bpm / 60.0 / 32.0;   // "8/1": eight bars (other tempo divisions use the stored rate until checked)
+        if (l.sync)
+        {
+            // tempo divisions in beats, longest last (25 = "8/1", eight bars: checked against Emulator X,
+            // the rest follow E-mu's list of whole, dotted and triplet notes)
+            static const double beats[26] { 1.0 / 24, 1.0 / 16, 1.0 / 12, 0.09375, 0.1111, 1.0 / 16 * 1.0, 1.0 / 12, 0.125, 1.0 / 6, 0.1875,
+                                            0.25, 1.0 / 3, 0.375, 0.5, 2.0 / 3, 0.75, 1.0, 4.0 / 3, 1.5, 2.0, 8.0 / 3, 3.0, 4.0, 8.0, 16.0, 32.0 };
+            baseHz = in.bpm / 60.0 / beats[jlimit (0, 25, l.division)];
+        }
         const double hz = jlimit (0.0, 50.0, baseHz * s.lfoRateScale[(size_t) i] * std::exp2 (3.0 * rateMod));
         const double before = s.lfoPhase[(size_t) i];
         s.lfoPhase[(size_t) i] += hz * n / sr;
@@ -371,13 +385,39 @@ bool control (VoiceState& s, const Design& d, const Inputs& in, int note, int ve
     s.pink += (s.noise - s.pink) * 0.05f;
 
     // results
-    const float ampEnv = jmax (0.0f, s.env[0].level);
+    // the amp envelope works in decibels (measured: its attack and release are straight lines in dB,
+    // spanning about 60 dB), so fades sound like Emulator X's instead of dropping away early
+    // (levels are amplitudes; each stage moves in a straight line in dB between them, silence counting as
+    // -range dB. Measured: fades from and to silence are straight lines in dB; a pad holding at 30 % is
+    // still clearly heard in Emulator X, so levels themselves stay amplitudes)
+    float envDb = -200.0f;
+    {
+        const auto& e0 = s.env[0];
+        auto toDb = [&d] (float level) { return level <= 0.0f ? -d.ampEnvRange : jmax (-d.ampEnvRange, Decibels::gainToDecibels (level)); };
+        if (e0.stage != s.ampStage)
+        {
+            // a new stage fades from wherever the sound is now (in dB), not from the stage's nominal level
+            s.ampStage = e0.stage;
+            s.ampFromDb = s.ampDb <= -150.0f ? toDb (jmax (0.0f, e0.from)) : s.ampDb;
+        }
+        const float level = jmax (0.0f, e0.level);
+        if (e0.stage < 6 && e0.len > 0.5f && ! e0.skip && e0.pos < e0.len)
+        {
+            const float target = jmax (0.0f, d.env[0].level[(size_t) e0.stage] / 100.0f);
+            const float from = jmax (0.0f, e0.from);
+            const float u = std::abs (target - from) > 1.0e-6f ? jlimit (0.0f, 1.0f, (level - from) / (target - from)) : jlimit (0.0f, 1.0f, e0.pos / e0.len);
+            envDb = s.ampFromDb + (toDb (target) - s.ampFromDb) * u;
+        }
+        else if (level > 0.0f && e0.stage < 6)
+            envDb = toDb (level);
+        s.ampDb = envDb;
+    }
     const float volDb = jlimit (-96.0f, 10.0f, 48.0f * dest[64]);   // E-mu's amp volume range tops out at +10 dB
-    s.ampGain = ampEnv * Decibels::decibelsToGain (volDb, -100.0f);
+    s.ampGain = envDb <= -150.0f ? 0.0f : Decibels::decibelsToGain (envDb + volDb, -150.0f);
     s.pitchSemis = dest[47] + (12.0f / 0.3721f) * dest[48];   // fine pitch: 100 % = 1 semitone; pitch: 37.21 % = 1 octave
     s.pan = 100.0f * dest[65];
-    // filter frequency cords: 100 % moves half of the 57 Hz - 20 kHz range (so a full Tone knob plus a full
-    // filter envelope doesn't shut a high pass or overshoot); to be checked by ear against Emulator X
+    // filter frequency cords: 100 % moves half of the range (a preset with the frequency at 0 plus a full
+    // knob and a full envelope opens up completely)
     s.cutoff = jlimit (0.0f, 1.0f, d.cutoff + 0.5f * dest[56]);
     s.resonance = jlimit (0.0f, 1.0f, d.resonance + dest[57]);
     prepareFilter (s, d, sr);
@@ -447,8 +487,32 @@ static void prepareFilter (VoiceState& s, const Design& d, double sr) noexcept
     }
     else if (t >= 64 && t <= 66)
     {
-        const double w = std::tan (MathConstants<double>::pi * jlimit (20.0, sr * 0.45, hz) / sr);
-        s.aux = (float) ((w - 1.0) / (w + 1.0));
+        // E-mu's phasers: resonant peaks, each with a notch just above it (pole / zero pairs), moving together.
+        // Phaser 1 measured from Emulator X: peaks at 0.68x and 2.7x the frequency, notches 1.66x above them.
+        struct Pair { float at, notch, q, qz; };
+        static const Pair p1[3] { { 0.59f, 1.45f, 5.5f, 3.7f }, { 2.36f, 1.43f, 22.0f, 6.0f }, { 0, 0, 0, 0 } };
+        static const Pair p2[3] { { 0.5f, 1.5f, 2.8f, 4.0f }, { 1.4f, 1.5f, 4.0f, 8.0f }, { 4.0f, 1.5f, 5.0f, 16.0f } };
+        static const Pair bat[3] { { 0.6f, 1.8f, 5.0f, 6.0f }, { 2.0f, 1.8f, 7.0f, 12.0f }, { 6.0f, 1.8f, 8.0f, 20.0f } };
+        const Pair* set = t == 64 ? p1 : t == 65 ? p2 : bat;
+        // the phasers sweep a narrower range than the low / high passes: measured, their frequency covers
+        // half as many octaves (about 100 Hz - 1.9 kHz for Phaser 1's first peak)
+        const double phz = 57.0 * std::pow (20000.0 / 57.0, 0.188 + 0.5 * (double) s.cutoff);
+        const double qScale = (0.4 + 0.65 * res) / (0.4 + 0.65 * 0.924);   // (measured at resonance 0.924)
+        const double k = 2.0 * sr;
+        for (int i = 0; i < 3; ++i)
+        {
+            float* c = s.coef[i];
+            if (set[i].at <= 0.0f) { c[0] = 1.0f; c[1] = c[2] = c[3] = c[4] = 0.0f; continue; }
+            auto warp = [&] (double f) { return k * std::tan (MathConstants<double>::pi * jlimit (10.0, sr * 0.47, f) / sr); };
+            const double wp = warp (phz * set[i].at), wz = warp (phz * set[i].at * set[i].notch);
+            const double qp = jmax (0.5, set[i].q * qScale), qz = set[i].qz;
+            // level: each pair lifts the lows by 1.5 dB (measured: lows about +3 dB, the shelf between the
+            // pairs about -4 dB); set from the low end so a frequency pushed against the top stays put
+            const double g = 1.19 * (wp * wp) / (wz * wz);
+            const double n0 = g * (k * k + k * wz / qz + wz * wz), n1 = g * 2.0 * (wz * wz - k * k), n2 = g * (k * k - k * wz / qz + wz * wz);
+            const double d0 = k * k + k * wp / qp + wp * wp, d1 = 2.0 * (wp * wp - k * k), d2 = k * k - k * wp / qp + wp * wp;
+            c[0] = (float) (n0 / d0); c[1] = (float) (n1 / d0); c[2] = (float) (n2 / d0); c[3] = (float) (d1 / d0); c[4] = (float) (d2 / d0);
+        }
     }
     else if (t == 72)
         s.aux = (float) jlimit (2.0, (double) s.combSize - 2.0, sr / jmax (20.0, hz));
@@ -485,6 +549,8 @@ void filter (VoiceState& s, const Design& d, double sr, float& L, float& R) noex
     (void) sr;
     if (d.filterType == 127)
         return;
+    static const bool noFilter = std::getenv ("EMX_NOFILTER") != nullptr;   // for measurements: hear the voices unfiltered
+    if (noFilter) return;
     // like E-mu's filters, more resonance makes the rest of the sound quieter (so the peak doesn't explode);
     // phasers and the flanger only cut notches, so they keep their level
     const bool notches = d.filterType >= 64 && d.filterType <= 72;
@@ -549,25 +615,20 @@ static void filterRaw (VoiceState& s, const Design& d, float& L, float& R) noexc
     }
     else if (t >= 64 && t <= 66)
     {
-        // phaser: first-order allpass stages around the frequency added to the dry sound. That cuts notches
-        // (two for Phaser 1) without taking the highs or lows away; resonance makes the notches deeper and
-        // adds a little feedback for the peaks between them. Scaled so the average level stays the same.
-        const int stages = t == 64 ? 4 : t == 65 ? 6 : 8;
-        const float a = s.aux;
-        const float depth = 0.55f + 0.45f * res, fbAmt = 0.35f * res;
-        const float norm = 1.0f / std::sqrt (1.0f + depth * depth);
+        // phaser: up to three pole / zero sections (biquads, transposed direct form II)
         for (int ch = 0; ch < 2; ++ch)
         {
-            const float dry = *io[ch];
-            float x = dry + s.fb[ch] * fbAmt;
-            for (int st = 0; st < stages; ++st)
+            float x = *io[ch];
+            for (int i = 0; i < 3; ++i)
             {
-                const float y = a * x + s.z[ch][st];
-                s.z[ch][st] = x - a * y;
+                const float* c = s.coef[i];
+                float* z = s.z[ch] + i * 2;
+                const float y = c[0] * x + z[0];
+                z[0] = c[1] * x - c[3] * y + z[1];
+                z[1] = c[2] * x - c[4] * y;
                 x = y;
             }
-            s.fb[ch] = x;
-            *io[ch] = (dry + depth * x) * norm * (1.0f - 0.5f * fbAmt);
+            *io[ch] = x;
         }
     }
     else if (t == 72)

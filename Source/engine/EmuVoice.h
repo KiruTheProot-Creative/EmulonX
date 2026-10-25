@@ -46,7 +46,7 @@ struct Design
     int bendUp = 2, bendDown = 2;    // semitones
     int transpose = 0, coarse = 0;   // semitones (the zone's SEMI knob gets their sum)
     float fine = 0.0f;               // cents (the zone's TUNE knob)
-    float ampEnvRange = 96.0f;       // dB
+    float ampEnvRange = 60.0f;       // dB the amp envelope spans (measured)
 
     juce::var toJson() const;
     static std::shared_ptr<const Design> fromJson (const juce::var&);
@@ -76,6 +76,8 @@ struct VoiceState
     std::array<float, 2> random {};  // per-note random values (kRandom 1, 2)
     float noise = 0.0f, pink = 0.0f;
     bool released = false;
+    int ampStage = -1;               // amp envelope stage the dB fade below belongs to
+    float ampDb = -200.0f, ampFromDb = -200.0f;   // the amp envelope in dB: now, and where this stage began
 
     // results of the last control update
     float ampGain = 1.0f;            // linear, includes the amp envelope and volume cords

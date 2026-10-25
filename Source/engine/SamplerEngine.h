@@ -96,6 +96,8 @@ private:
         juce::uint64 age = 0;
         emu::VoiceState emu;                  // used when the zone has an E-mu design
         float emuGain = 0.0f;                 // gain at the end of the last control step (ramped from here)
+        double chorusPos = 0.0;               // E-mu chorus: play position of the detuned second copy
+        bool chorusInLoop = false;
     };
 
     /** rawForEmu: no envelope, gain or pan (the E-mu layer adds them), pitch includes its modulation. */
