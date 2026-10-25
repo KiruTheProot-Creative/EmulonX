@@ -485,8 +485,10 @@ void filter (VoiceState& s, const Design& d, double sr, float& L, float& R) noex
     (void) sr;
     if (d.filterType == 127)
         return;
-    // like E-mu's filters, more resonance makes the rest of the sound quieter (so the peak doesn't explode)
-    const float comp = 1.0f / (1.0f + s.resonance * s.resonance * 2.0f);
+    // like E-mu's filters, more resonance makes the rest of the sound quieter (so the peak doesn't explode);
+    // phasers and the flanger only cut notches, so they keep their level
+    const bool notches = d.filterType >= 64 && d.filterType <= 72;
+    const float comp = notches ? 1.0f : 1.0f / (1.0f + s.resonance * s.resonance * 2.0f);
     L *= comp;
     R *= comp;
     filterRaw (s, d, L, R);
@@ -547,13 +549,17 @@ static void filterRaw (VoiceState& s, const Design& d, float& L, float& R) noexc
     }
     else if (t >= 64 && t <= 66)
     {
-        // phaser: first-order allpass stages around the frequency, mixed with the dry sound (notches)
+        // phaser: first-order allpass stages around the frequency added to the dry sound. That cuts notches
+        // (two for Phaser 1) without taking the highs or lows away; resonance makes the notches deeper and
+        // adds a little feedback for the peaks between them. Scaled so the average level stays the same.
         const int stages = t == 64 ? 4 : t == 65 ? 6 : 8;
         const float a = s.aux;
+        const float depth = 0.55f + 0.45f * res, fbAmt = 0.35f * res;
+        const float norm = 1.0f / std::sqrt (1.0f + depth * depth);
         for (int ch = 0; ch < 2; ++ch)
         {
             const float dry = *io[ch];
-            float x = dry + s.fb[ch] * res * 0.85f;
+            float x = dry + s.fb[ch] * fbAmt;
             for (int st = 0; st < stages; ++st)
             {
                 const float y = a * x + s.z[ch][st];
@@ -561,7 +567,7 @@ static void filterRaw (VoiceState& s, const Design& d, float& L, float& R) noexc
                 x = y;
             }
             s.fb[ch] = x;
-            *io[ch] = (dry + x) * 0.5f;
+            *io[ch] = (dry + depth * x) * norm * (1.0f - 0.5f * fbAmt);
         }
     }
     else if (t == 72)

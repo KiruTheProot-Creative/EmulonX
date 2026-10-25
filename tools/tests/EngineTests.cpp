@@ -486,6 +486,9 @@ static int exbDebug (const File& bank, int preset, int zoneIndex)
     for (auto& c : d.cords) std::printf ("  cord %s -> %s %.1f\n", emu::sourceName (c.source).toRawUTF8(), emu::destName (c.dest).toRawUTF8(), c.amount);
     emu::Inputs in;
     for (size_t k = 0; k < r.macros.size() && k < 16; ++k) in.midi[k] = r.macros[k].second / 100.0f;
+    std::printf ("  knobs:");
+    for (auto& m : r.macros) std::printf (" %s=%.0f", m.first.toRawUTF8(), m.second);
+    std::printf ("\n  fx: %s\n", JSON::toString (z.fx, true).toRawUTF8());
     emu::VoiceState st;
     Random rnd (1);
     emu::startNote (st, d, rnd);
@@ -501,8 +504,55 @@ static int exbDebug (const File& bank, int preset, int zoneIndex)
     return 0;
 }
 
+/** --exb-render <bank> <preset> <note> <hold seconds> <total seconds> <out.wav>: one note of a whole preset (engine only, no effects). */
+static int exbRender (const File& bank, int preset, int note, double hold, double total, const File& out)
+{
+    auto r = exb::loadPreset (bank, preset);
+    auto set = std::make_shared<ZoneSet>();
+    int id = 1;
+    for (auto& z : r.zones)
+        set->zones.push_back ({ id++, z.sample, z.params });
+    SamplerEngine e;
+    e.prepare (48000.0);
+    e.setZoneSet (set);
+    float knobs[16] {};
+    for (size_t k = 0; k < r.macros.size() && k < 16; ++k)
+        knobs[k] = r.macros[k].second / 100.0f;
+    e.setControllers (knobs);
+    AudioBuffer<float> buf (2, (int) (total * 48000.0));
+    buf.clear();
+    // the preset's effects (EMX_NOFX=1 leaves them out)
+    fx::Setup fxs;
+    std::map<String, int> idMap;
+    int nextId = 1;
+    if (r.fx.isObject() && SystemStats::getEnvironmentVariable ("EMX_NOFX", {}).isEmpty())
+        fxs.master = fx::chainFromJson (r.fx["chain"], idMap, nextId, 48000.0);
+    auto snap = fx::Snapshot::build (fxs, {});
+    fx::Engine fe;
+    fe.setSnapshot (snap.get());
+    e.noteOn (note, 100);
+    const int N = 128, offAt = (int) (hold * 48000.0);
+    for (int pos = 0; pos + N <= buf.getNumSamples(); pos += N)
+    {
+        if (pos <= offAt && pos + N > offAt)
+            e.noteOff (note);
+        e.render (buf.getWritePointer (0, pos), buf.getWritePointer (1, pos), N);
+        fe.beginBlock (N, 48000.0, 120.0, 1, pos < offAt, knobs, 16, 0.0f);
+        fe.processChain (snap->master, buf.getWritePointer (0, pos), buf.getWritePointer (1, pos), N);
+    }
+    std::printf ("  fx: %s\n", JSON::toString (r.fx, true).toRawUTF8());
+    out.deleteFile();
+    if (auto w = std::unique_ptr<AudioFormatWriter> (WavAudioFormat().createWriterFor (new FileOutputStream (out), 48000.0, 2, 24, {}, 0)))
+        w->writeFromAudioSampleBuffer (buf, 0, buf.getNumSamples());
+    std::printf ("%s: %d zones, peak %.3f\n", r.presetName.toRawUTF8(), (int) r.zones.size(), buf.getMagnitude (0, buf.getNumSamples()));
+    return 0;
+}
+
 int main (int argc, char** argv)
 {
+    if (argc > 7 && String (argv[1]) == "--exb-render")
+        return exbRender (File (String (argv[2])), String (argv[3]).getIntValue(), String (argv[4]).getIntValue(),
+                          String (argv[5]).getDoubleValue(), String (argv[6]).getDoubleValue(), File (String (argv[7])));
     if (argc > 4 && String (argv[1]) == "--exb-debug")
         return exbDebug (File (String (argv[2])), String (argv[3]).getIntValue(), String (argv[4]).getIntValue());
     if (argc > 2 && String (argv[1]) == "--exb-scan")

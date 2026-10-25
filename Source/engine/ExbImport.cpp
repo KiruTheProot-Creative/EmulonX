@@ -339,6 +339,102 @@ void addFxA (Array<var>& chain, int t, int decay, int damping)
     }
     else if (t > 0)                                             reverb (1, 0.75, 1.0 + d * 6.0);                     // halls and concerts
 }
+
+/** The bank's aux effects (its first multisetup's "EXE1" blocks; Emulator X's default when the bank has none). */
+struct AuxFx
+{
+    // reverb: ?, wet %, decay 0..1, diffusion 0..1, room 0..1, early reflections 0..1, pre-delay ms, HF damping %
+    float reverb[10] { 0.1f, 100.0f, 0.374f, 0.55f, 0.335f, 0.304f, 55.0f, 27.924f, 0.0f, 0.0f };
+    // tempo delay: sync, wet %, -, -, -, feedback %, HF (1 = open)
+    float delay[7] { 1.0f, 100.0f, 0.0f, 0.0f, 0.0f, 29.415f, 1.0f };
+    bool hasReverb = true, hasDelay = true;
+};
+
+AuxFx readAuxFx (const MemoryBlock& mb, const std::vector<TocEntry>& toc)
+{
+    AuxFx a;
+    const auto* d = static_cast<const uint8*> (mb.getData());
+    for (auto& e : toc)
+    {
+        if (e.id != "EMS1" || e.offset + 8 > mb.getSize())
+            continue;
+        // like presets, the chunk's own size can be a little larger than the table says
+        const size_t size = jmax ((size_t) e.size, (size_t) be32 (d + e.offset + 4));
+        if (e.offset + 8 + size > mb.getSize())
+            continue;
+        static const uint8 reverbId[4] { 0x3c, 0x19, 0xc2, 0x5c }, delayId[4] { 0x28, 0xd2, 0xb7, 0xe4 };
+        bool any = false, rv = false, dl = false;
+        const size_t end = e.offset + 8 + size;
+        for (size_t p = e.offset + 8; p + 36 <= end; ++p)
+        {
+            if (memcmp (d + p, "EXE1", 4) != 0)
+                continue;
+            const size_t n = be32 (d + p + 4), body = p + 8;
+            if (body + n > end || n < 28)
+                break;
+            const size_t pn = be32 (d + body + 24) / 4;
+            auto read = [&] (float* out, size_t count)
+            {
+                for (size_t i = 0; i < count && i < pn && body + 28 + i * 4 + 4 <= body + n; ++i)
+                {
+                    const uint32 u = le32 (d + body + 28 + i * 4);
+                    float f; memcpy (&f, &u, 4);
+                    out[i] = std::isfinite (f) ? f : 0.0f;
+                }
+            };
+            any = true;
+            if (memcmp (d + body + 8, reverbId, 4) == 0) { read (a.reverb, 10); rv = true; }
+            if (memcmp (d + body + 8, delayId, 4) == 0)  { read (a.delay, 7); dl = true; }
+            p = body + n - 1;
+        }
+        if (any)
+        {
+            a.hasReverb = rv;
+            a.hasDelay = dl;
+        }
+        break;   // the first multisetup is the one Emulator X opens with the bank
+    }
+    return a;
+}
+
+/** Adds the aux effects as sends: `send` = how much of the dry sound reaches aux 1 (reverb) and aux 2 (delay). */
+void addAux (Array<var>& chain, const AuxFx& a, const float send[2], double bpm)
+{
+    double dryGain = 1.0;
+    auto mixFor = [&dryGain] (double s)
+    {
+        const double m = s / (1.0 + s);   // our effects cross-fade; this keeps the dry level and adds `s` of wet
+        dryGain *= 1.0 - m;
+        return m;
+    };
+    if (a.hasDelay && send[1] > 0.005f)
+    {
+        const double beat = 60000.0 / bpm;
+        const double hi = 1500.0 * std::pow (20000.0 / 1500.0, jlimit (0.0, 1.0, (double) a.delay[6]));
+        auto m = fxModule ("delay", 1, { { "time", beat * 0.75 }, { "fb", jlimit (0.0, 0.95, a.delay[5] / 100.0) }, { "a", 1.0 }, { "b", 0.0 },
+                                         { "lo", 60.0 }, { "hi", hi }, { "mix", mixFor (send[1] * a.delay[1] / 100.0) } });
+        if (a.delay[0] > 0.5f)
+            if (auto* st = m["settings"].getDynamicObject())
+            {
+                // follows the song's tempo: a dotted eighth (the Delay BPM's usual setting in E-mu's banks)
+                st->setProperty ("sync", true);
+                st->setProperty ("num", 1);
+                st->setProperty ("den", 8);
+                st->setProperty ("dot", 1);
+            }
+        chain.add (m);
+    }
+    if (a.hasReverb && send[0] > 0.005f)
+    {
+        const double decay = 0.3 * std::pow (100.0, jlimit (0.0, 1.0, (double) a.reverb[2]));
+        const double damp = 20000.0 * std::pow (2.0, -4.0 * jlimit (0.0, 1.0, a.reverb[7] / 100.0));
+        chain.add (fxModule ("reverb", 1, { { "size", jlimit (0.1, 1.0, 0.3 + a.reverb[4]) }, { "decay", jlimit (0.2, 15.0, decay) },
+                                            { "pre", jlimit (0.0, 250.0, (double) a.reverb[6]) }, { "damp", jlimit (1000.0, 20000.0, damp) },
+                                            { "lo", 80.0 }, { "width", 1.0 }, { "mix", mixFor (send[0] * a.reverb[1] / 100.0) } }));
+    }
+    if (dryGain < 0.999)
+        chain.add (fxModule ("util", 0, { { "gain", Decibels::gainToDecibels (1.0 / dryGain) }, { "pan", 0.0 }, { "width", 1.0 } }));
+}
 } // namespace
 
 //== Files ===========================================================================
@@ -649,6 +745,26 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
                 addFxA (chain, a[4], a[5], a[6]);
             }
         }
+        // preset cords: in almost every preset MIDI K and L (knobs "Aux 1" / "Aux 2") send to the bank's aux effects
+        float send[2] {};
+        if (const auto* crd = list (chunks, "CrdL"))
+            for (auto& c : crd->kids)
+            {
+                if (c.id != "E5Cd" || c.size < 10)
+                    continue;
+                const int src = d[c.data + 4], dst = d[c.data + 5];
+                const float amount = beFloat (d + c.data + 6) / 100.0f;
+                int knob = -1;
+                if (src == 20 || src == 21) knob = src - 20;
+                else if (src >= 32 && src <= 37) knob = src - 30;
+                else if (src >= 40 && src <= 47) knob = src - 32;
+                const float value = src == 144 ? 1.0f : (knob >= 0 && (size_t) knob < r.macros.size() ? r.macros[(size_t) knob].second / 100.0f : 0.0f);
+                if (dst == 69 || dst == 70)
+                    send[dst - 69] += value * amount;
+            }
+        send[0] = jlimit (0.0f, 1.0f, send[0]);
+        send[1] = jlimit (0.0f, 1.0f, send[1]);
+        addAux (chain, readAuxFx (mb, toc), send, 120.0);
         if (! chain.isEmpty())
         {
             auto* fxo = new DynamicObject();
