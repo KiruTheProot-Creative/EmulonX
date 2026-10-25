@@ -161,6 +161,48 @@ target_link_libraries(EmulonXSD PRIVATE
     EmulonXAssets EmulonXSDAssets juce::juce_gui_extra
     juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 
+# --- Emulon X Hub: the launcher (downloads and updates everything) ------------
+set(EMX_HUB_VERSION "0.1af")
+juce_add_binary_data(EmulonXHubAssets
+    HEADER_NAME HubAssets.h
+    NAMESPACE   HubAssets
+    SOURCES
+        hub/emulon-x.md
+        hub/emulon-x-sd.md
+        hub/skins.md
+        hub/banks.md
+        hub/news.md
+        hub/hub.json
+        HubApp/assets/kiru-logo.png
+        HubApp/assets/tray-icon.png)
+
+juce_add_gui_app(EmulonXHub
+    PRODUCT_NAME   "Emulon X Hub"
+    COMPANY_NAME   "Emulon"
+    BUNDLE_ID      "org.emulon.emulonxhub"
+    VERSION        "${PROJECT_VERSION}"
+    ICON_BIG       "${CMAKE_CURRENT_SOURCE_DIR}/installer/icon-256.png")
+target_sources(EmulonXHub PRIVATE
+    HubApp/HubMain.cpp
+    HubApp/HubNet.cpp
+    HubApp/HubModel.cpp
+    HubApp/HubWidgets.cpp
+    HubApp/HubUi.cpp
+    Designer/SkinDocument.cpp
+    Designer/PreviewView.cpp
+    Source/Settings.cpp
+    Source/ui/Theme.cpp
+    Source/ui/EmxLookAndFeel.cpp
+    Source/ui/SkinFile.cpp
+    Source/ui/SkinDraw.cpp)
+target_include_directories(EmulonXHub PRIVATE Source Designer HubApp)
+target_compile_definitions(EmulonXHub PRIVATE
+    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_USE_XINPUT=0
+    EMX_HUB_VERSION="${EMX_HUB_VERSION}" EMX_SD_VERSION="${EMX_SD_VERSION}" EMX_VERSION_STRING="${EMX_FULL_VERSION}")
+target_link_libraries(EmulonXHub PRIVATE
+    EmulonXAssets EmulonXSDAssets EmulonXHubAssets juce::juce_gui_extra juce::juce_cryptography
+    juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+
 # --- Developer tool: render the UI to PNG files (off by default) -------------
 option(EMX_BUILD_PREVIEW "Build the EmulonXPreview screenshot tool" OFF)
 if(EMX_BUILD_PREVIEW)

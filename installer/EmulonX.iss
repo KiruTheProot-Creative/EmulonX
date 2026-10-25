@@ -120,6 +120,11 @@ begin
   FolderPage.Values[0] := GetPreviousData('BanksDir', ExpandConstant('{userdocs}\Emulon X\Base Banks'));
   FolderPage.Values[1] := GetPreviousData('PresetsDir', ExpandConstant('{userdocs}\Emulon X\Presets'));
   FolderPage.Values[2] := GetPreviousData('StandaloneDir', ExpandConstant('{commonpf64}\Emulon X'));
+  { The Emulon X Hub installs quietly and passes the folders you picked in the Hub:
+      /BANKSDIR="..." /PRESETSDIR="..." /STANDALONEDIR="..." (and /DIR="..." for the VST3 folder) }
+  FolderPage.Values[0] := ExpandConstant('{param:BANKSDIR|' + FolderPage.Values[0] + '}');
+  FolderPage.Values[1] := ExpandConstant('{param:PRESETSDIR|' + FolderPage.Values[1] + '}');
+  FolderPage.Values[2] := ExpandConstant('{param:STANDALONEDIR|' + FolderPage.Values[2] + '}');
 end;
 
 procedure RegisterPreviousData(PreviousDataKey: Integer);

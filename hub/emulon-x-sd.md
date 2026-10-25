@@ -2,9 +2,6 @@
 title: EMULON X SD
 subtitle: Skin designer
 tags: Free, Separate app
-version: 0.1 prototype
-size: 14 MB
-download:
 ---
 Make your own Emulon X skins without touching code. Click any part of the live preview, change its colours, pictures and textures, and save it as a skin you can use and share.
 
