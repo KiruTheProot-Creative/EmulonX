@@ -1,6 +1,6 @@
 # EMULON X
 
-a Vibecoded project to make a Sampler, inspired by Emulator X (by E-MU) and with the ease to use like Vital.
+a Vibecoded project to make a Sampler, inspired by Emulator X (by E-MU) and made to be as easy to use as possible.
 
 all Code has been written by CLAUDE. visuals have been made by me. all Sounds in the base presets / base bank that will be shipped are also made by me.
 
