@@ -794,7 +794,7 @@ public:
         br.assign (len, 0.0f);
         const auto apLen = (size_t) std::ceil (2.0 * 400.0 * sr / 48000.0) + 4;
         for (auto& c : ap) for (auto& a : c) { a.b.assign (apLen, 0.0f); a.i = 0; }
-        w = 0; D = -1; hl = hr = ll = lr = lfo = env = 0;
+        w = 0; D = -1; hl = hr = ll = lr = ho = lo = lfo = env = 0;
     }
 
     void process (const float* v, const Settings& s, float* L, float* R, int N, double sr, double bpm) noexcept override
@@ -836,13 +836,23 @@ public:
                 lfo += 1.0 / sr;
                 d *= 1 + a * (0.004 * std::sin (twoPi * 0.6 * lfo) + 0.0015 * std::sin (twoPi * 7.3 * lfo));
             }
-            const double dr = mode == 0 ? juce::jmin ((double) len - 8, d * (1 + a * 0.5)) : d;
-            double wl = readBack (bl, w, juce::jmin ((double) len - 8, d)), wr = readBack (br, w, juce::jmin ((double) len - 8, dr));
+            // Both sides repeat exactly on the beat. Stereo's SPREAD only shifts what you HEAR on the right by up
+            // to 12 ms (a fixed offset, outside the feedback), so the repeats never drift off the grid.
+            const double dd = juce::jmin ((double) len - 8, d);
+            double wl = readBack (bl, w, dd), wr = readBack (br, w, dd);
             if (mode == 3) { wl = diffuse (wl, 0); wr = diffuse (wr, 1); }
             hl += (wl - hl) * hc; hr += (wr - hr) * hc;
             double fl = hl, fr = hr;
             ll += (fl - ll) * lc; lr += (fr - lr) * lc;
             fl -= ll; fr -= lr;
+            double heardR = fr;
+            if (mode == 0 && a > 0)
+            {
+                const double wo = readBack (br, w, juce::jmin ((double) len - 8, dd + a * 0.012 * sr));
+                ho += (wo - ho) * hc;
+                lo += (ho - lo) * lc;
+                heardR = ho - lo;
+            }
             if (mode == 2)
             {
                 const double sg = 1 + b * 4;
@@ -855,7 +865,7 @@ public:
             bl[(size_t) w] = (float) il;
             br[(size_t) w] = (float) ir;
             if (++w >= len) w = 0;
-            double ol = fl, orr = fr;
+            double ol = fl, orr = heardR;
             if (mode == 1)
             {
                 const double m = (ol + orr) * 0.5;
@@ -879,7 +889,7 @@ private:
     std::vector<float> bl, br;
     AllPass ap[2][4];
     int w = 0;
-    double D = -1, hl = 0, hr = 0, ll = 0, lr = 0, lfo = 0, env = 0;
+    double D = -1, hl = 0, hr = 0, ll = 0, lr = 0, ho = 0, lo = 0, lfo = 0, env = 0;
 };
 
 //== Filter (12 / 24 dB, LP HP BP Notch) ============================================

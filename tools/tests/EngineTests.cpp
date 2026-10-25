@@ -1014,6 +1014,41 @@ int main (int argc, char** argv)
                    String ((double) (peakAt - 100) / SR, 4) + " s");
         }
 
+        // Stereo delay with spread, synced to 1/8 at 120 BPM: every repeat on both sides lands on the beat grid
+        // (the right side may sit a fixed few ms later, but never drifts further with each repeat).
+        {
+            auto d = makeModule (Type::delay, 1, SR);
+            d.settings.mode = 0;
+            d.settings.sync = true; d.settings.num = 1; d.settings.den = 8;
+            d.norm[6] = 1.0f;                                                       // only the echoes
+            d.norm[1] = def (Type::delay).slots[1].spec.toNorm (0.6f);             // repeats
+            d.norm[2] = 1.0f;                                                       // full spread
+            d.norm[4] = 0.0f; d.norm[5] = 1.0f;                                     // filters wide open
+            const int n = (int) (SR * 1.6);
+            std::vector<float> l ((size_t) n, 0.0f), r ((size_t) n, 0.0f);
+            l[100] = r[100] = 1.0f;
+            float v[maxSlots] {};
+            for (int i = 0; i < maxSlots; ++i) v[i] = d.value (i);
+            for (int p = 0; p < n; p += blk)
+                d.processor->process (v, d.settings, l.data() + p, r.data() + p, std::min (blk, n - p), SR, 120.0);
+            const double step = 0.25 * SR;   // an eighth at 120 BPM
+            auto peakNear = [&] (const std::vector<float>& x, double centre)
+            {
+                int best = (int) centre;
+                for (int i = (int) centre - 1000; i <= (int) centre + 1000; ++i)
+                    if (i > 0 && i < n && std::abs (x[(size_t) i]) > std::abs (x[(size_t) best])) best = i;
+                return (double) (best - 100) / SR;
+            };
+            double worstL = 0, firstR = peakNear (r, 100 + step) - 0.25, worstR = 0;
+            for (int k = 1; k <= 5; ++k)
+            {
+                worstL = std::max (worstL, std::abs (peakNear (l, 100 + k * step) - 0.25 * k));
+                worstR = std::max (worstR, std::abs (peakNear (r, 100 + k * step) - 0.25 * k - firstR));
+            }
+            check (worstL < 0.0005 && worstR < 0.0005 && firstR >= 0 && firstR < 0.0125, "stereo delay repeats stay on the beat",
+                   "left off by up to " + String (worstL * 1000, 2) + " ms, right offset " + String (firstR * 1000, 2) + " ms, drift " + String (worstR * 1000, 2) + " ms");
+        }
+
         // Reverb: sound keeps ringing after the input stops.
         {
             auto rv = makeModule (Type::reverb, 1, SR);
