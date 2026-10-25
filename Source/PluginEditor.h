@@ -36,6 +36,7 @@ public:
     void showSettings (bool show, int page = 0);
     Explorer& getExplorer() noexcept { return root->explorer; }
     FxPage& getFxPage() noexcept { return root->fxPage; }
+    EditorPage& getEditorPage() noexcept { return root->editorPage; }
 
     //== Drop audio files / presets anywhere on the window =====================
     bool isInterestedInFileDrag (const juce::StringArray&) override;

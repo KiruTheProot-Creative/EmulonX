@@ -498,6 +498,32 @@ int main (int argc, char** argv)
         editor.showPage (p);
         save (String ("preview-") + pages[p] + "-100");
     }
+    {
+        // V2 editor: scrolled to the keymap, the WARP tab, then the splicer
+        auto& ed = editor.getEditorPage();
+        editor.showPage (1);
+        ed.scrollTo (400);
+        save ("preview-editor-scrolled");
+        ed.scrollTo (0);
+        ed.showTab (emx::EditorPage::Tab::warp);
+        save ("preview-editor-warp");
+        if (auto* sz = proc.getSelectedZone())
+        {
+            emx::edit::Warp w;
+            w.shape = emx::edit::WarpShape::fold;
+            proc.warpZone (sz->id, w);
+        }
+        save ("preview-editor-warped");
+        proc.undo();
+        ed.showTab (emx::EditorPage::Tab::loop);
+        proc.setSplicer (true);
+        save ("preview-editor-splicer");
+        ed.setPanelShown (0, false);
+        save ("preview-editor-splicer-folded");
+        ed.setPanelShown (0, true);
+        proc.setSplicer (false);
+        editor.showPage (0);
+    }
     editor.showPage (3);
     save ("preview-arp");
     editor.showPage (2);

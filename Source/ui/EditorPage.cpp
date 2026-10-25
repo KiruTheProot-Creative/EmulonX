@@ -2,6 +2,7 @@
 #include "EditorPage.h"
 #include "Theme.h"
 #include "../PluginProcessor.h"
+#include "../engine/SampleLoader.h"
 #include "FxPage.h"
 
 namespace emx
@@ -24,9 +25,29 @@ NormalisableRange<double> timeRange()
              [] (double, double, double v) { return std::log (jmax (0.001, v) / 0.001) / std::log (1.0e4); } };
 }
 
+/** 176400 -> "176,400" */
+String framesText (double v)
+{
+    auto s = String (roundToInt (v));
+    for (int i = s.length() - 3; i > 0; i -= 3)
+        s = s.substring (0, i) + "," + s.substring (i);
+    return s;
+}
+
 const int whiteIndex[] { 0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6 };
 const bool isBlack[]   { false, true, false, true, false, false, true, false, true, false, true, false };
+int whiteNumber (int n) { return (n / 12) * 7 + whiteIndex[n % 12]; }
+
+const Colour warpYellow { 0xffffcc33 };
+const Colour amber { 0xffffb030 };
 } // namespace
+
+Colour zoneColour (int index)
+{
+    const float accentHue = theme::hue (0xffff2a2a).getHue();
+    const float h = std::fmod (accentHue + (float) index * (137.508f / 360.0f), 1.0f);
+    return Colour::fromHSL (h, 0.62f, 0.46f, 1.0f);
+}
 
 //==================================================================================
 // WaveformView
@@ -35,12 +56,14 @@ WaveformView::WaveformView (EmulonXProcessor& p) : proc (p) {}
 
 const ModelZone* WaveformView::zone() const { return proc.getSelectedZone(); }
 
+int WaveformView::viewKey (const ModelZone& z) const { return proc.isSplicer() ? -1 : z.id; }
+
 Range<double> WaveformView::view (const ModelZone& z)
 {
     const double n = z.sample != nullptr ? z.sample->length() : 1.0;
-    auto it = views.find (z.id);
+    auto it = views.find (viewKey (z));
     if (it == views.end() || it->second.getEnd() > n + 0.5)
-        return views[z.id] = { 0.0, n };
+        return views[viewKey (z)] = { 0.0, n };
     return it->second;
 }
 
@@ -49,7 +72,7 @@ void WaveformView::setView (const ModelZone& z, double a, double b)
     const double n = z.sample != nullptr ? z.sample->length() : 1.0;
     const double w = jlimit (jmin (32.0, n), n, b - a);
     a = jlimit (0.0, n - w, a);
-    views[z.id] = { a, a + w };
+    views[viewKey (z)] = { a, a + w };
     repaint();
 }
 
@@ -73,7 +96,7 @@ double WaveformView::frameAt (const ModelZone& z, float x)
 
 int WaveformView::hitMarker (const ModelZone& z, Point<float> pos)
 {
-    if (z.sample == nullptr)
+    if (z.sample == nullptr || mode != Mode::loop)
         return -1;
     const auto v = view (z);
     const double spp = v.getLength() / jmax (1, getWidth());
@@ -97,6 +120,24 @@ int WaveformView::hitMarker (const ModelZone& z, Point<float> pos)
     return best;
 }
 
+int WaveformView::hitCut (const ModelZone& z, Point<float> pos)
+{
+    if (z.sample == nullptr || mode != Mode::slices)
+        return -1;
+    const auto v = view (z);
+    const double spp = v.getLength() / jmax (1, getWidth());
+    const auto& cuts = proc.getSplice().cuts;
+    int best = -1;
+    float bestD = 6.0f;
+    for (size_t i = 1; i < cuts.size(); ++i)
+        if (const float d = std::abs ((float) ((cuts[i] - v.getStart()) / spp) - pos.x); d < bestD)
+        {
+            bestD = d;
+            best = (int) i;
+        }
+    return best;
+}
+
 int WaveformView::nearestZeroCrossing (const AudioBuffer<float>& b, int f)
 {
     const int n = b.getNumSamples();
@@ -116,13 +157,88 @@ void WaveformView::tick()
         SamplerEngine::Playhead ph[16];
         const int count = proc.getPlayheads (ph, 16);
         for (int i = 0; i < count; ++i)
-            if (ph[i].zoneId == z->id)
+            if (ph[i].zoneId == z->id || (proc.isSplicer() && mode == Mode::slices))
                 playheads.push_back (ph[i].position);
     }
     if (playheads != lastPlayheads)
     {
         lastPlayheads = playheads;
         repaint();
+    }
+}
+
+void WaveformView::paintWave (Graphics& g, const ModelZone& z, Range<double> v, bool warped)
+{
+    const auto& audio = z.sample->audio;
+    const int n = audio.getNumSamples(), chans = audio.getNumChannels();
+    const float W = (float) getWidth(), H = (float) getHeight();
+    const double spp = v.getLength() / W;
+    const auto X = [&] (double f) { return (float) ((f - v.getStart()) / spp); };
+    const float mid = H * 0.5f, amp = H * 0.5f - 8.0f;
+
+    const int from = warped ? jlimit (0, n, warp.from) : 0;
+    const int to = warped ? (warp.to < 0 ? n : jlimit (from, n, warp.to)) : n;
+    const float ref = warped ? edit::warpReference (*z.sample, from, to) : 1.0f;
+    const auto shape = [&] (float x) { return warped ? edit::warpedSample (warp, x, ref) : x; };
+
+    const Colour line = warped ? warpYellow : theme::hue (0xffff3b3b).withMultipliedAlpha (mode == Mode::warp ? 0.55f : 1.0f);
+    const Colour glow = warped ? warpYellow.withAlpha (0.22f) : theme::red.withAlpha (mode == Mode::warp ? 0.12f : 0.25f);
+
+    if (spp >= 1.0)
+    {
+        // Min/max per pixel column, drawn twice: a soft glow, then the solid line.
+        const int stride = jmax (1, (int) (spp / 200.0));
+        RectangleList<float> cols;
+        for (int i = 0; i < (int) W; ++i)
+        {
+            const int f0 = jmax (from, (int) (v.getStart() + i * spp));
+            const int f1 = jmin (to, (int) (v.getStart() + (i + 1) * spp) + 1);
+            float lo = 1.0e9f, hi = -1.0e9f;
+            for (int c = 0; c < chans; ++c)
+            {
+                const float* d = audio.getReadPointer (c);
+                for (int j = f0; j < f1; j += stride)
+                {
+                    const float s = shape (d[j]);
+                    lo = jmin (lo, s);
+                    hi = jmax (hi, s);
+                }
+            }
+            if (hi >= lo)
+                cols.addWithoutMerging ({ (float) i, mid - hi * amp, 1.0f, jmax (1.0f, (hi - lo) * amp) });
+        }
+        g.setColour (glow);
+        for (auto& r : cols)
+            g.fillRect (r.expanded (1.0f, 1.5f));
+        g.setColour (line);
+        g.fillRectList (cols);
+    }
+    else
+    {
+        auto sampleAt = [&] (int j)
+        {
+            float s = 0.0f;
+            for (int c = 0; c < chans; ++c)
+                s += shape (audio.getSample (c, j));
+            return s / (float) chans;
+        };
+        Path path;
+        const int f0 = jmax (from, (int) v.getStart()), f1 = jmin (to - 1, (int) std::ceil (v.getEnd()));
+        for (int j = f0; j <= f1; ++j)
+        {
+            const Point<float> pt (X (j), mid - sampleAt (j) * amp);
+            if (j == f0) path.startNewSubPath (pt); else path.lineTo (pt);
+        }
+        g.setColour (glow);
+        g.strokePath (path, PathStrokeType (4.0f));
+        g.setColour (line);
+        g.strokePath (path, PathStrokeType (1.5f));
+        if (spp < 0.15 && ! warped)
+        {
+            g.setColour (theme::textStrong);
+            for (int j = f0; j <= f1; ++j)
+                g.fillRect (X (j) - 1.5f, mid - sampleAt (j) * amp - 1.5f, 3.0f, 3.0f);
+        }
     }
 }
 
@@ -152,96 +268,56 @@ void WaveformView::paint (Graphics& g)
     Graphics::ScopedSaveState clipState (g);
     g.reduceClipRegion (getLocalBounds().reduced (1));
 
-    const auto& audio = z->sample->audio;
     const auto& p = z->params;
-    const int n = audio.getNumSamples(), chans = audio.getNumChannels();
+    const int n = z->sample->length();
     const auto v = view (*z);
     const float W = bounds.getWidth(), H = bounds.getHeight();
     const double spp = v.getLength() / W;
     const auto X = [&] (double f) { return (float) ((f - v.getStart()) / spp); };
-    const float mid = H * 0.5f, amp = H * 0.5f - 8.0f;
+    const float mid = H * 0.5f;
+    const auto& cuts = proc.getSplice().cuts;
+    const int selIndex = proc.getSelectedIndex();
 
-    // Loop region and crossfade zones
-    if (p.loopMode != LoopMode::off)
+    // Backgrounds: loop region, slices, or the part a warp changes
+    if (mode == Mode::loop && p.loopMode != LoopMode::off)
     {
         g.setColour (theme::hue (0x24ff3232));
         g.fillRect (Rectangle<float>::leftTopRightBottom (X (p.loopStart), 0.0f, X (p.loopEnd), H));
-        if (const int xe = effectiveCrossfade (p); xe > 0)
+        if (const int xe = effectiveCrossfade (p); xe > 0 && p.loopDir == LoopDir::forward)
         {
             g.setColour (theme::hue (0x21ffd2d2));
             g.fillRect (Rectangle<float>::leftTopRightBottom (X (p.loopEnd - xe), 0.0f, X (p.loopEnd), H));
             g.fillRect (Rectangle<float>::leftTopRightBottom (X (p.loopStart - xe), 0.0f, X (p.loopStart), H));
         }
     }
+    if (mode == Mode::slices)
+        for (size_t i = 0; i < cuts.size(); ++i)
+        {
+            const int b = i + 1 < cuts.size() ? cuts[i + 1] : n;
+            g.setColour (zoneColour ((int) i).withAlpha ((int) i == selIndex ? 0.30f : 0.12f));
+            g.fillRect (Rectangle<float>::leftTopRightBottom (X (cuts[i]), 0.0f, X (b), H));
+        }
+    if (mode == Mode::warp && (warp.from > 0 || (warp.to >= 0 && warp.to < n)))
+    {
+        g.setColour (warpYellow.withAlpha (0.08f));
+        g.fillRect (Rectangle<float>::leftTopRightBottom (X (warp.from), 0.0f, X (warp.to < 0 ? n : warp.to), H));
+    }
     g.setColour (theme::red.withAlpha (0.3f));
     g.fillRect (0.0f, mid, W, 1.0f);
 
-    auto sampleAt = [&] (int j)
-    {
-        float s = 0.0f;
-        for (int c = 0; c < chans; ++c)
-            s += audio.getSample (c, j);
-        return s / (float) chans;
-    };
+    paintWave (g, *z, v, false);
+    if (mode == Mode::warp)
+        paintWave (g, *z, v, true);
 
-    if (spp >= 1.0)
+    if (mode == Mode::loop)
     {
-        // Min/max per pixel column, drawn twice: a soft glow, then the solid line.
-        const int stride = jmax (1, (int) (spp / 200.0));
-        RectangleList<float> cols;
-        for (int i = 0; i < (int) W; ++i)
-        {
-            const int f0 = jmax (0, (int) (v.getStart() + i * spp));
-            const int f1 = jmin (n, (int) (v.getStart() + (i + 1) * spp) + 1);
-            float lo = 1.0f, hi = -1.0f;
-            for (int c = 0; c < chans; ++c)
-            {
-                const float* d = audio.getReadPointer (c);
-                for (int j = f0; j < f1; j += stride)
-                {
-                    lo = jmin (lo, d[j]);
-                    hi = jmax (hi, d[j]);
-                }
-            }
-            if (hi >= lo)
-                cols.addWithoutMerging ({ (float) i, mid - hi * amp, 1.0f, jmax (1.0f, (hi - lo) * amp) });
-        }
-        g.setColour (theme::red.withAlpha (0.25f));
-        for (auto& r : cols)
-            g.fillRect (r.expanded (1.0f, 1.5f));
-        g.setColour (theme::hue (0xffff3b3b));
-        g.fillRectList (cols);
-    }
-    else
-    {
-        Path line;
-        const int f0 = jmax (0, (int) v.getStart()), f1 = jmin (n - 1, (int) std::ceil (v.getEnd()));
-        for (int j = f0; j <= f1; ++j)
-        {
-            const Point<float> pt (X (j), mid - sampleAt (j) * amp);
-            if (j == f0) line.startNewSubPath (pt); else line.lineTo (pt);
-        }
-        g.setColour (theme::red.withAlpha (0.3f));
-        g.strokePath (line, PathStrokeType (4.0f));
-        g.setColour (theme::hue (0xffff3b3b));
-        g.strokePath (line, PathStrokeType (1.5f));
-        if (spp < 0.15)
-        {
-            g.setColour (theme::textStrong);
-            for (int j = f0; j <= f1; ++j)
-                g.fillRect (X (j) - 1.5f, mid - sampleAt (j) * amp - 1.5f, 3.0f, 3.0f);
-        }
-    }
-
-    // Sample start / end: darken what is not played, amber markers with flags at the bottom
-    {
+        // Sample start / end: darken what is not played, amber markers with flags at the bottom
         const int se = p.sampleEnd > 0 ? p.sampleEnd : n;
         g.setColour (Colours::black.withAlpha (0.5f));
         if (p.sampleStart > 0)
             g.fillRect (Rectangle<float>::leftTopRightBottom (jmax (0.0f, X (0)), 0.0f, X (p.sampleStart), H));
         if (se < n)
             g.fillRect (Rectangle<float>::leftTopRightBottom (X (se), 0.0f, jmin (W, X (n)), H));
-        const Colour amber (0xffffb030);
         for (int which = 0; which < 2; ++which)
         {
             const float px = std::round (X (which == 0 ? p.sampleStart : se));
@@ -254,41 +330,98 @@ void WaveformView::paint (Graphics& g)
             else            flag.addTriangle (px, H - 15.0f, px - 13.0f, H - 7.5f, px, H);
             g.fillPath (flag);
         }
-    }
 
-    // Random start area: shaded from the sample start to its own (dashed) marker
-    if (p.randomStart && p.randomEnd > p.sampleStart)
-    {
-        const Colour amber (0xffffb030);
-        g.setColour (amber.withAlpha (0.16f));
-        g.fillRect (Rectangle<float>::leftTopRightBottom (X (p.sampleStart), 0.0f, X (p.randomEnd), H));
-        const float px = std::round (X (p.randomEnd));
-        if (px >= -20.0f && px <= W + 20.0f)
+        // Random start area: shaded from the sample start to its own (dashed) marker
+        if (p.randomStart && p.randomEnd > p.sampleStart)
         {
-            g.setColour (amber);
-            for (float yy = 0.0f; yy < H; yy += 8.0f)
-                g.fillRect (px - 1.0f, yy, 2.0f, 4.0f);
-            Path diamond;
-            diamond.addQuadrilateral (px, H - 16.0f, px + 6.0f, H - 9.0f, px, H - 2.0f, px - 6.0f, H - 9.0f);
-            g.fillPath (diamond);
+            g.setColour (amber.withAlpha (0.16f));
+            g.fillRect (Rectangle<float>::leftTopRightBottom (X (p.sampleStart), 0.0f, X (p.randomEnd), H));
+            const float px = std::round (X (p.randomEnd));
+            if (px >= -20.0f && px <= W + 20.0f)
+            {
+                g.setColour (amber);
+                for (float yy = 0.0f; yy < H; yy += 8.0f)
+                    g.fillRect (px - 1.0f, yy, 2.0f, 4.0f);
+                Path diamond;
+                diamond.addQuadrilateral (px, H - 16.0f, px + 6.0f, H - 9.0f, px, H - 2.0f, px - 6.0f, H - 9.0f);
+                g.fillPath (diamond);
+            }
+        }
+
+        if (p.loopMode != LoopMode::off)
+        {
+            // which way the loop plays: arrows inside the loop
+            const float a = X (p.loopStart), b = X (p.loopEnd);
+            const float w = jmin (b, W) - jmax (a, 0.0f);
+            if (w > 70.0f)
+            {
+                const float y = H - 24.0f, len = jmin (110.0f, w * 0.32f);
+                auto arrow = [&] (float x0, float x1, bool both)
+                {
+                    Path pa;
+                    pa.startNewSubPath (x0, y);
+                    pa.lineTo (x1, y);
+                    g.strokePath (pa, PathStrokeType (1.6f));
+                    const float d = x1 > x0 ? -7.0f : 7.0f;
+                    Path head;
+                    head.addTriangle (x1, y, x1 + d, y - 4.0f, x1 + d, y + 4.0f);
+                    if (both)
+                        head.addTriangle (x0, y, x0 - d, y - 4.0f, x0 - d, y + 4.0f);
+                    g.fillPath (head);
+                };
+                g.setColour (theme::textStrong.withAlpha (0.85f));
+                const float c = (jmax (a, 0.0f) + jmin (b, W)) * 0.5f;
+                if (p.loopDir == LoopDir::pingPong)
+                    arrow (c - len, c + len, true);
+                else
+                {
+                    const bool fwd = p.loopDir == LoopDir::forward;
+                    for (float off : { -len - 12.0f, 12.0f })
+                        arrow (fwd ? c + off : c + off + len, fwd ? c + off + len : c + off, false);
+                }
+            }
+
+            // Loop markers with LS / LE flags
+            g.setFont (theme::font (8.5f, 900, 0.0f));
+            for (int which = 0; which < 2; ++which)
+            {
+                const float px = std::round (X (which == 0 ? p.loopStart : p.loopEnd));
+                if (px < -24.0f || px > W + 24.0f)
+                    continue;
+                g.setColour (theme::hue (0xffff3030));
+                g.fillRect (px - 1.0f, 0.0f, 2.0f, H);
+                const auto flag = Rectangle<float> (which == 0 ? px : px - 19.0f, 0.0f, 19.0f, 14.0f);
+                g.fillRect (flag);
+                g.setColour (Colours::white);
+                g.drawText (which == 0 ? "LS" : "LE", flag, Justification::centred, false);
+            }
         }
     }
 
-    // Loop markers
-    if (p.loopMode != LoopMode::off)
+    if (mode == Mode::slices)
     {
-        g.setFont (theme::font (9.0f, 900, 0.0f));
-        for (int which = 0; which < 2; ++which)
+        g.setFont (theme::font (8.5f, 900, 0.0f));
+        for (size_t i = 0; i < cuts.size(); ++i)
         {
-            const float px = std::round (X (which == 0 ? p.loopStart : p.loopEnd));
-            if (px < -20.0f || px > W + 20.0f)
+            const float px = std::round (X (cuts[i]));
+            if (px < -24.0f || px > W + 2.0f)
                 continue;
-            g.setColour (Colours::white);
-            g.fillRect (px - 1.0f, 0.0f, 2.0f, H);
-            const auto flag = Rectangle<float> (which == 0 ? px : px - 15.0f, 0.0f, 15.0f, 15.0f);
-            g.fillRect (flag);
-            g.setColour (theme::hue (0xff990000));
-            g.drawText (which == 0 ? "S" : "E", flag, Justification::centred, false);
+            const auto c = zoneColour ((int) i);
+            if (i > 0)
+            {
+                g.setColour (Colours::white.withAlpha ((int) i == selIndex || (int) i == selIndex + 1 ? 0.95f : 0.6f));
+                g.fillRect (px - 1.0f, 0.0f, 2.0f, H);
+            }
+            const auto tag = Rectangle<float> (px + (i > 0 ? 1.0f : 2.0f), 2.0f, 18.0f, 13.0f);
+            g.setColour (c);
+            g.fillRect (tag);
+            if ((int) i == selIndex)
+            {
+                g.setColour (Colours::white);
+                g.drawRect (tag, 1.0f);
+            }
+            g.setColour (theme::textOn (c));
+            g.drawText (String ((int) i + 1), tag, Justification::centred, false);
         }
     }
 
@@ -307,19 +440,52 @@ void WaveformView::paint (Graphics& g)
 void WaveformView::mouseMove (const MouseEvent& e)
 {
     const auto* z = zone();
-    setMouseCursor (z != nullptr && hitMarker (*z, e.position) >= 0 ? MouseCursor::LeftRightResizeCursor
-                                                                      : MouseCursor::DraggingHandCursor);
+    const bool onHandle = z != nullptr && (hitMarker (*z, e.position) >= 0 || hitCut (*z, e.position) >= 0);
+    setMouseCursor (onHandle ? MouseCursor::LeftRightResizeCursor
+                             : mode == Mode::slices ? MouseCursor::PointingHandCursor : MouseCursor::DraggingHandCursor);
 }
 
 void WaveformView::mouseDown (const MouseEvent& e)
 {
     dragMode = -1;
-    if (const auto* z = zone(); z != nullptr && z->sample != nullptr)
+    const auto* z = zone();
+    if (z == nullptr || z->sample == nullptr)
+        return;
+    dragView = view (*z);
+    if (mode == Mode::slices)
     {
-        const int hit = hitMarker (*z, e.position);
-        dragMode = hit >= 0 ? hit : 2;
-        dragView = view (*z);
+        const int cut = hitCut (*z, e.position);
+        if (e.mods.isPopupMenu())
+        {
+            if (cut > 0)   // right-click a cut: remove it
+            {
+                auto cuts = proc.getSplice().cuts;
+                cuts.erase (cuts.begin() + cut);
+                proc.setSliceCuts (std::move (cuts));
+            }
+            return;
+        }
+        if (cut > 0)
+        {
+            dragMode = 6;
+            dragCut = cut;
+            dragCuts = proc.getSplice().cuts;
+            return;
+        }
+        // click a slice: pick it
+        const double f = frameAt (*z, e.position.x);
+        const auto& cuts = proc.getSplice().cuts;
+        int k = 0;
+        for (size_t i = 0; i < cuts.size(); ++i)
+            if (f >= cuts[i]) k = (int) i;
+        const auto& zs = proc.getZones();
+        if (k < (int) zs.size() && zs[(size_t) k].id != z->id)
+            proc.selectZone (zs[(size_t) k].id);
+        dragMode = 5;
+        return;
     }
+    const int hit = hitMarker (*z, e.position);
+    dragMode = hit >= 0 ? hit : 5;
 }
 
 void WaveformView::mouseDrag (const MouseEvent& e)
@@ -327,19 +493,53 @@ void WaveformView::mouseDrag (const MouseEvent& e)
     const auto* z = zone();
     if (z == nullptr || z->sample == nullptr || dragMode < 0)
         return;
-    if (dragMode == 2)
+    const double spp = dragView.getLength() / jmax (1, getWidth());
+    if (dragMode == 5)
     {
-        const double d = -(double) e.getDistanceFromDragStartX() * dragView.getLength() / jmax (1, getWidth());
+        const double d = -(double) e.getDistanceFromDragStartX() * spp;
         setView (*z, dragView.getStart() + d, dragView.getEnd() + d);
     }
-    else if (onMarkerMoved)
+    else if (dragMode == 6)
     {
-        const double spp = dragView.getLength() / jmax (1, getWidth());
-        onMarkerMoved (dragMode, roundToInt (dragView.getStart() + e.position.x * spp));
+        if (dragCut <= 0 || dragCut >= (int) dragCuts.size())
+            return;
+        const int n = z->sample->length();
+        const int lo = dragCuts[(size_t) dragCut - 1] + 64;
+        const int hi = (dragCut + 1 < (int) dragCuts.size() ? dragCuts[(size_t) dragCut + 1] : n) - 64;
+        if (hi <= lo)
+            return;
+        auto cuts = dragCuts;
+        cuts[(size_t) dragCut] = jlimit (lo, hi, roundToInt (dragView.getStart() + e.position.x * spp));
+        if (cuts != proc.getSplice().cuts)
+            proc.setSliceCuts (std::move (cuts));
     }
+    else if (onMarkerMoved)
+        onMarkerMoved (dragMode, roundToInt (dragView.getStart() + e.position.x * spp));
 }
 
-void WaveformView::mouseDoubleClick (const MouseEvent&) { zoomAll(); }
+void WaveformView::mouseUp (const MouseEvent&)
+{
+    dragMode = -1;
+    dragCut = -1;
+}
+
+void WaveformView::mouseDoubleClick (const MouseEvent& e)
+{
+    const auto* z = zone();
+    if (mode == Mode::slices && z != nullptr && z->sample != nullptr)
+    {
+        // double-click: a new cut here
+        const int f = roundToInt (frameAt (*z, e.position.x));
+        auto cuts = proc.getSplice().cuts;
+        for (auto c : cuts)
+            if (std::abs (c - f) < 64)
+                return;
+        cuts.push_back (f);
+        proc.setSliceCuts (std::move (cuts));
+        return;
+    }
+    zoomAll();
+}
 
 void WaveformView::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)
 {
@@ -361,13 +561,146 @@ void WaveformView::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails&
 }
 
 //==================================================================================
+// CloseUpView
+//==================================================================================
+void CloseUpView::paint (Graphics& g)
+{
+    auto bounds = getLocalBounds().toFloat();
+    theme::drawScreen (g, bounds);
+    g.setColour (theme::textMuted);
+    g.setFont (theme::font (7.5f, 700, 0.1f));
+    g.drawText ("CLOSE-UP - 3 CYCLES", bounds.reduced (7.0f, 4.0f), Justification::topLeft, false);
+
+    const auto* z = proc.getSelectedZone();
+    if (z == nullptr || z->sample == nullptr)
+        return;
+    const auto& audio = z->sample->audio;
+    const int n = audio.getNumSamples(), chans = audio.getNumChannels();
+    if (n < 64)
+        return;
+    const auto mono = [&] (int j) { float s = 0.0f; for (int c = 0; c < chans; ++c) s += audio.getSample (c, j); return s / (float) chans; };
+
+    // three cycles: from one rising zero crossing to the fourth
+    const int c0 = jlimit (1, n - 2, centre);
+    std::vector<int> xs;
+    for (int j = c0; j < n && j < c0 + 30000 && xs.size() < 4; ++j)
+        if (mono (j - 1) < 0.0f && mono (j) >= 0.0f && (xs.empty() || j - xs.back() >= 12))
+            xs.push_back (j);
+    int a = c0, b = jmin (n, c0 + 1024);
+    if (xs.size() >= 4) { a = xs[0]; b = xs[3]; }
+    if (b - a < 48) b = jmin (n, a + 256);
+
+    const int from = jlimit (0, n, warp.from), to = warp.to < 0 ? n : jlimit (from, n, warp.to);
+    const float ref = edit::warpReference (*z->sample, from, to);
+    auto area = bounds.reduced (4.0f, 16.0f).withTrimmedBottom (-10.0f);
+    const float mid = area.getCentreY(), amp = area.getHeight() * 0.5f;
+    g.setColour (theme::red.withAlpha (0.25f));
+    g.fillRect (area.getX(), mid, area.getWidth(), 1.0f);
+
+    Path before, after;
+    const int steps = jmin (b - a, (int) area.getWidth() * 2);
+    for (int i = 0; i <= steps; ++i)
+    {
+        const int j = jmin (n - 1, a + (int) ((juce::int64) (b - a) * i / jmax (1, steps)));
+        const float x = area.getX() + area.getWidth() * (float) i / (float) jmax (1, steps);
+        float s = 0.0f, w = 0.0f;
+        for (int c = 0; c < chans; ++c)
+        {
+            const float v = audio.getSample (c, j);
+            s += v;
+            w += j >= from && j < to ? edit::warpedSample (warp, v, ref) : v;
+        }
+        s /= (float) chans; w /= (float) chans;
+        const Point<float> p0 (x, mid - jlimit (-1.2f, 1.2f, s / ref) * amp), p1 (x, mid - jlimit (-1.2f, 1.2f, w / ref) * amp);
+        if (i == 0) { before.startNewSubPath (p0); after.startNewSubPath (p1); }
+        else        { before.lineTo (p0); after.lineTo (p1); }
+    }
+    g.setColour (theme::hue (0xffff3b3b).withAlpha (0.7f));
+    g.strokePath (before, PathStrokeType (1.3f));
+    g.setColour (warpYellow.withAlpha (0.25f));
+    g.strokePath (after, PathStrokeType (4.0f));
+    g.setColour (warpYellow);
+    g.strokePath (after, PathStrokeType (1.8f));
+}
+
+//==================================================================================
+// ValueBox
+//==================================================================================
+ValueBox::ValueBox (String l) : label (l.toUpperCase()) {}
+
+Rectangle<float> ValueBox::ledArea() const
+{
+    auto r = getLocalBounds().toFloat();
+    return label.isEmpty() ? r : r.withTrimmedTop (14.0f);
+}
+
+void ValueBox::paint (Graphics& g)
+{
+    const float alpha = isEnabled() ? 1.0f : 0.4f;
+    if (label.isNotEmpty())
+    {
+        g.setColour (theme::textMuted.withMultipliedAlpha (alpha));
+        g.setFont (theme::font (7.5f, 700, 0.1f));
+        g.drawText (label, getLocalBounds().toFloat().removeFromTop (12.0f), Justification::centredLeft, true);
+    }
+    theme::drawLed (g, ledArea(), format ? format (value) : String (value), 9.5f, Justification::centred,
+                    theme::ledText.withMultipliedAlpha (alpha));
+}
+
+void ValueBox::set (double v)
+{
+    if (inc > 0.0)
+        v = lo + std::round ((v - lo) / inc) * inc;
+    v = jlimit (lo, hi, v);
+    if (exactlyEqual (v, value))
+        return;
+    value = v;
+    repaint();
+    if (onChange)
+        onChange (v);
+}
+
+void ValueBox::mouseDown (const MouseEvent&) { dragStart = value; }
+
+void ValueBox::mouseDrag (const MouseEvent& e)
+{
+    if (readOnly || ! isEnabled())
+        return;
+    const double perPixel = (hi - lo) / jmax (1.0f, dragPixels) * (e.mods.isShiftDown() ? 0.05 : 1.0);
+    set (dragStart - (double) e.getDistanceFromDragStartY() * perPixel);
+}
+
+void ValueBox::mouseDoubleClick (const MouseEvent&)
+{
+    if (readOnly || ! isEnabled())
+        return;
+    typeIn = std::make_unique<TypeInField> (*this, ledArea().toNearestInt(), format ? format (value) : String (value),
+                                            [this] (const String& typed)
+                                            {
+                                                double v = 0.0;
+                                                if (parse)
+                                                {
+                                                    if (parse (typed, v)) set (v);
+                                                    return;
+                                                }
+                                                const auto t = typed.trim().toUpperCase();
+                                                // a typed name ("C3", "OFF") that one of the values shows
+                                                if (format && inc > 0.0 && (hi - lo) / inc <= 4000.0)
+                                                    for (double x = lo; x <= hi + inc * 0.5; x += inc)
+                                                        if (format (x).toUpperCase() == t) { set (x); return; }
+                                                if (t.containsAnyOf ("0123456789"))
+                                                    set (t.retainCharacters ("0123456789.-").getDoubleValue());
+                                            });
+}
+
+//==================================================================================
 // KeymapView
 //==================================================================================
 KeymapView::KeymapView (EmulonXProcessor& p) : proc (p) {}
 
 KeymapView::KeyRect KeymapView::keyRect (int n) const
 {
-    const int wi = (n / 12) * 7 + whiteIndex[n % 12];
+    const int wi = whiteNumber (n) - whiteNumber (firstNote);
     if (! isBlack[n % 12])
         return { (float) wi * keyW, keyW, false };
     const float bw = keyW * 0.62f;
@@ -376,15 +709,14 @@ KeymapView::KeyRect KeymapView::keyRect (int n) const
 
 int KeymapView::noteAt (Point<float> pt) const
 {
-    if (pt.y < keysTop)
+    if (pt.y < keysTop || pt.y > keysTop + keysHeight)
         return -1;
-    const float keyH = (float) getHeight() - keysTop;
-    if (pt.y < keysTop + keyH * 0.6f)
-        for (int n = 0; n < 128; ++n)
+    if (pt.y < keysTop + keysHeight * 0.62f)
+        for (int n = firstNote; n <= lastNote; ++n)
             if (isBlack[n % 12])
                 if (const auto k = keyRect (n); pt.x >= k.x && pt.x < k.x + k.w)
                     return n;
-    for (int n = 0; n < 128; ++n)
+    for (int n = firstNote; n <= lastNote; ++n)
         if (! isBlack[n % 12])
             if (const auto k = keyRect (n); pt.x >= k.x && pt.x < k.x + k.w)
                 return n;
@@ -393,43 +725,101 @@ int KeymapView::noteAt (Point<float> pt) const
 
 int KeymapView::velocityAt (float y, int note) const
 {
-    const float keyH = ((float) getHeight() - keysTop) * (isBlack[note % 12] ? 0.6f : 1.0f);
+    const float keyH = keysHeight * (isBlack[note % 12] ? 0.62f : 1.0f);
     return jlimit (1, 127, roundToInt (20.0f + 107.0f * (y - keysTop) / jmax (1.0f, keyH)));
+}
+
+int KeymapView::zoneIndexOf (int id) const
+{
+    const auto& zs = proc.getZones();
+    for (size_t i = 0; i < zs.size(); ++i)
+        if (zs[i].id == id)
+            return (int) i;
+    return -1;
 }
 
 void KeymapView::layoutLanes()
 {
-    keyW = (float) getWidth() / 75.0f;
-
     const auto& zs = proc.getZones();
-    std::vector<size_t> order (zs.size());
-    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
-    std::stable_sort (order.begin(), order.end(), [&zs] (size_t a, size_t b) { return zs[a].params.loKey < zs[b].params.loKey; });
 
-    std::vector<int> laneEnd;
-    lanes.assign (zs.size(), 0);
-    for (auto i : order)
+    // the keys shown: at least C1..C6, more if a zone reaches further (always whole octaves from a C)
+    int lo = 36, hi = 96;
+    for (auto& z : zs)
     {
-        int l = 0;
-        while (l < (int) laneEnd.size() && laneEnd[(size_t) l] >= zs[i].params.loKey)
-            ++l;
-        if (l == (int) laneEnd.size())
-            laneEnd.push_back (-1);
-        laneEnd[(size_t) l] = zs[i].params.hiKey;
-        lanes[i] = l;
+        lo = jmin (lo, z.params.loKey);
+        hi = jmax (hi, z.params.hiKey);
     }
-    numLanes = jmax (1, (int) laneEnd.size());
-    // The keyboard takes whatever the zone bars don't need (66 to 100 px tall).
-    const float keysH = jlimit (66.0f, 100.0f, (float) getHeight() - ((float) jmax (2, numLanes) * 19.0f + 8.0f));
-    keysTop = (float) getHeight() - keysH;
-    laneH = jlimit (6.0f, 19.0f, (keysTop - 6.0f) / (float) numLanes);
+    firstNote = (lo / 12) * 12;
+    lastNote = jmin (127, ((hi + 11) / 12) * 12);
+    keyW = (float) getWidth() / (float) jmax (1, whiteNumber (lastNote) - whiteNumber (firstNote) + 1);
+
+    lanes.assign (zs.size(), 0);
+    if (proc.isSplicer())
+        numLanes = 1;
+    else
+    {
+        std::vector<size_t> order (zs.size());
+        for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::stable_sort (order.begin(), order.end(), [&zs] (size_t a, size_t b) { return zs[a].params.loKey < zs[b].params.loKey; });
+        std::vector<int> laneEnd;
+        for (auto i : order)
+        {
+            int l = 0;
+            while (l < (int) laneEnd.size() && laneEnd[(size_t) l] >= zs[i].params.loKey)
+                ++l;
+            if (l == (int) laneEnd.size())
+                laneEnd.push_back (-1);
+            laneEnd[(size_t) l] = zs[i].params.hiKey;
+            lanes[i] = l;
+        }
+        numLanes = jmax (1, (int) laneEnd.size());
+    }
+    laneH = laneStep;
+    keysTop = (float) getHeight() - keysHeight - labelsHeight;
+    if (! proc.isSplicer())
+        laneH = jlimit (16.0f, laneStep, (keysTop - 10.0f) / (float) numLanes);
+}
+
+int KeymapView::getPreferredHeight()
+{
+    if (lanes.size() != proc.getZones().size())
+        layoutLanes();
+    int count = 1;
+    if (! proc.isSplicer())
+    {
+        // the same packing as layoutLanes, without needing a size yet
+        const auto& zs = proc.getZones();
+        std::vector<size_t> order (zs.size());
+        for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::stable_sort (order.begin(), order.end(), [&zs] (size_t a, size_t b) { return zs[a].params.loKey < zs[b].params.loKey; });
+        std::vector<int> laneEnd;
+        for (auto i : order)
+        {
+            int l = 0;
+            while (l < (int) laneEnd.size() && laneEnd[(size_t) l] >= zs[i].params.loKey)
+                ++l;
+            if (l == (int) laneEnd.size())
+                laneEnd.push_back (-1);
+            laneEnd[(size_t) l] = zs[i].params.hiKey;
+        }
+        count = jlimit (1, 6, (int) laneEnd.size());
+    }
+    const float mapH = proc.isSplicer() ? 110.0f : jmax (2, count) * laneStep + 10.0f;
+    return roundToInt (mapH + 6.0f + keysHeight + labelsHeight);
 }
 
 Rectangle<float> KeymapView::barRect (size_t i) const
 {
     const auto& p = proc.getZones()[i].params;
-    const auto a = keyRect (p.loKey), b = keyRect (p.hiKey);
-    return { a.x, 2.0f + (float) lanes[i] * laneH, jmax (6.0f, b.x + b.w - a.x), laneH - 2.0f };
+    const int a0 = jmax (p.loKey, firstNote), b0 = jmin (p.hiKey, lastNote);
+    const auto a = keyRect (a0), b = keyRect (b0);
+    if (proc.isSplicer())
+    {
+        // slices side by side, one semitone wide each (the keyboard below shows which key plays which)
+        const float step = (float) getWidth() / (float) jmax (1, lastNote - firstNote + 1);
+        return { (float) (p.loKey - firstNote) * step + 1.0f, 5.0f, jmax (4.0f, step - 2.0f), keysTop - 16.0f };
+    }
+    return { a.x + 1.0f, 5.0f + (float) lanes[i] * laneH, jmax (6.0f, b.x + b.w - a.x - 2.0f), laneH - 6.0f };
 }
 
 void KeymapView::tick()
@@ -440,7 +830,7 @@ void KeymapView::tick()
     if (now != held)
     {
         held = now;
-        repaint (0, (int) keysTop, getWidth(), getHeight() - (int) keysTop);
+        repaint();
     }
 }
 
@@ -450,107 +840,146 @@ void KeymapView::paint (Graphics& g)
     if (lanes.size() != zs.size())
         layoutLanes();
     const auto* sel = proc.getSelectedZone();
+    const int selIndex = sel != nullptr ? zoneIndexOf (sel->id) : -1;
+    const bool splicer = proc.isSplicer();
 
-    // Zone bars
+    // The map: an LED screen behind the bars
+    const auto mapArea = Rectangle<float> (0.0f, 0.0f, (float) getWidth(), keysTop - 4.0f);
+    theme::drawScreen (g, mapArea, false);
     if (zs.empty())
     {
         g.setColour (theme::textMuted);
         g.setFont (theme::font (9.0f, 500, 0.06f));
-        g.drawText ("NO ZONES YET", Rectangle<float> (8.0f, 0.0f, (float) getWidth() - 16.0f, keysTop), Justification::centredLeft, false);
+        g.drawText ("NO ZONES YET - ADD SAMPLES OR DROP THEM HERE", mapArea.reduced (12.0f, 0.0f), Justification::centredLeft, false);
     }
-    for (int pass = 0; pass < 2; ++pass)   // selected bar last, on top
-        for (size_t i = 0; i < zs.size(); ++i)
-        {
-            const bool on = sel != nullptr && zs[i].id == sel->id;
-            if (on != (pass == 1))
-                continue;
-            const auto r = barRect (i);
-            if (on)
-            {
-                DropShadow (theme::red.withAlpha (0.7f), 8, {}).drawForRectangle (g, r.toNearestInt());
-                g.setGradientFill (ColourGradient::vertical (theme::hue (0xffff4a4a), r.getY(), theme::hue (0xffa50f0f), r.getBottom()));
-            }
-            else
-                g.setGradientFill (ColourGradient::vertical (theme::hue (0xff7a1414), r.getY(), theme::hue (0xff3a0606), r.getBottom()));
-            g.fillRoundedRectangle (r, 3.5f);
-            g.setColour ((on ? theme::hue (0xffffb0b0) : theme::hue (0x59ff7878)));
-            g.fillRect (r.getX() + 3.0f, r.getY() + 1.0f, r.getWidth() - 6.0f, 1.0f);
-            g.setColour (Colours::black);
-            g.drawRoundedRectangle (r, 3.5f, 1.0f);
 
-            const auto& p = zs[i].params;
-            if (p.root >= p.loKey && p.root <= p.hiKey)
+    {
+        Graphics::ScopedSaveState s (g);
+        g.reduceClipRegion (mapArea.reduced (1.0f).toNearestInt());
+        // a held key lights the bars that play it
+        for (int pass = 0; pass < 2; ++pass)   // selected bar last, on top
+            for (size_t i = 0; i < zs.size(); ++i)
             {
-                const auto k = keyRect (p.root);
-                g.setColour (Colours::white);
-                g.fillRect (k.x + k.w * 0.5f - 1.0f, r.getY() + 2.0f, 2.0f, r.getHeight() - 4.0f);
-            }
-            if (on)
-            {
-                g.setColour (Colours::white.withAlpha (0.28f));
-                g.fillRect (r.withWidth (5.0f).reduced (0.0f, 1.0f));
-                g.fillRect (r.withLeft (r.getRight() - 5.0f).reduced (0.0f, 1.0f));
-            }
-            if (laneH >= 11.0f)
-            {
-                g.setColour (theme::isXp() || theme::isLightSkin() ? theme::textOn (on ? theme::hue (0xffff4a4a) : theme::hue (0xff7a1414)) : (on ? Colours::white : theme::hue (0xffffb0b0)));
-                g.setFont (theme::font (jmin (8.0f, laneH * 0.5f), 700, 0.06f));
-                g.drawText (zs[i].name, r.reduced (8.0f, 0.0f), Justification::centredLeft, true);
-            }
-        }
+                const bool on = (int) i == selIndex;
+                if (on != (pass == 1))
+                    continue;
+                const auto& p = zs[i].params;
+                if (p.hiKey < firstNote || p.loKey > lastNote)
+                    continue;
+                const auto r = barRect (i);
+                bool sounding = false;
+                for (int n = p.loKey; n <= p.hiKey && ! sounding; ++n)
+                    sounding = held[(size_t) n];
+                const auto c = zoneColour ((int) i);
+                g.setColour (c.withAlpha (on ? 1.0f : 0.82f).brighter (sounding ? 0.35f : 0.0f));
+                g.fillRoundedRectangle (r, 4.0f);
+                g.setColour (on ? Colours::white : Colours::black.withAlpha (0.8f));
+                g.drawRoundedRectangle (r.reduced (on ? 1.0f : 0.5f), 4.0f, on ? 2.0f : 1.0f);
 
-    // Keyboard
-    const float keyH = (float) getHeight() - keysTop;
+                const auto tc = theme::textOn (c);
+                if (splicer)
+                {
+                    g.setColour (tc);
+                    g.setFont (theme::font (jmin (10.0f, r.getWidth() * 0.7f), 800, 0.0f));
+                    g.drawText (String ((int) i + 1), r.withHeight (18.0f), Justification::centred, false);
+                    continue;
+                }
+                // the root note: a white tick
+                if (p.root >= p.loKey && p.root <= p.hiKey && p.root >= firstNote && p.root <= lastNote)
+                {
+                    const auto k = keyRect (p.root);
+                    g.setColour (Colours::white.withAlpha (0.85f));
+                    g.fillRect (k.x + k.w * 0.5f - 1.0f, r.getBottom() - 9.0f, 2.0f, 6.0f);
+                }
+                if (r.getWidth() > 26.0f)
+                {
+                    auto t = r.reduced (7.0f, 4.0f);
+                    g.setColour (tc);
+                    g.setFont (theme::font (jmin (10.5f, laneH * 0.3f), 800, 0.04f));
+                    g.drawText (zs[i].name.toUpperCase(), t.removeFromTop (jmin (14.0f, laneH * 0.4f)), Justification::centredLeft, true);
+                    if (laneH >= 34.0f)
+                    {
+                        g.setColour (tc.withAlpha (0.8f));
+                        g.setFont (theme::font (8.0f, 500, 0.04f));
+                        g.drawText (noteName (p.loKey) + "-" + noteName (p.hiKey) + "  ROOT " + noteName (p.root), t.removeFromTop (12.0f),
+                                    Justification::centredLeft, true);
+                    }
+                }
+            }
+    }
+
+    // Keyboard: keys inside the selected zone (or each slice's key) take its colour
     for (int black = 0; black < 2; ++black)
-        for (int n = 0; n < 128; ++n)
+        for (int n = firstNote; n <= lastNote; ++n)
         {
             if (isBlack[n % 12] != (black == 1))
                 continue;
             const auto k = keyRect (n);
-            const auto r = Rectangle<float> (k.x, keysTop, k.w, keyH * (k.black ? 0.6f : 1.0f));
+            const auto r = Rectangle<float> (k.x, keysTop, k.w, keysHeight * (k.black ? 0.62f : 1.0f));
             const bool down = held[(size_t) n];
+            int tint = -1;
+            if (splicer)
+            {
+                for (size_t i = 0; i < zs.size(); ++i)
+                    if (zs[i].params.loKey == n) tint = (int) i;
+            }
+            else if (sel != nullptr && n >= sel->params.loKey && n <= sel->params.hiKey)
+                tint = selIndex;
+
+            Colour top, bottom;
             if (k.black)
-                g.setGradientFill (ColourGradient::vertical (down ? theme::hue (0xffff3a3a) : Colour (0xff3a373f), r.getY(),   // real piano colours in every skin
-                                                             down ? theme::hue (0xff7a0808) : Colour (0xff09080b), r.getBottom()));
+            {
+                top = Colour (0xff3a373f); bottom = Colour (0xff09080b);   // real piano colours in every skin
+                if (tint >= 0) { top = zoneColour (tint).darker (0.2f); bottom = zoneColour (tint).darker (1.2f); }
+            }
             else
-                g.setGradientFill (ColourGradient::vertical (down ? theme::hue (0xffff6a6a) : Colour (theme::isMetal() ? 0xffc6d6e6 : 0xffcfc9c9), r.getY(),   // EMUL8R: bluish keys
-                                                             down ? theme::hue (0xffc01818) : Colour (theme::isMetal() ? 0xfff1f6fb : 0xfff2eeee), r.getBottom()));
+            {
+                top = Colour (theme::isMetal() ? 0xffc6d6e6 : 0xffcfc9c9); bottom = Colour (theme::isMetal() ? 0xfff1f6fb : 0xfff2eeee);
+                if (tint >= 0) { top = zoneColour (tint).interpolatedWith (Colours::white, 0.45f); bottom = zoneColour (tint).interpolatedWith (Colours::white, 0.65f); }
+            }
+            if (down) { top = theme::hue (0xffff6a6a); bottom = theme::hue (0xffc01818); }
+            g.setGradientFill (ColourGradient::vertical (top, r.getY(), bottom, r.getBottom()));
             g.fillRect (r);
-            g.setColour (Colours::black);
+            g.setColour (Colours::black.withAlpha (0.7f));
             g.drawRect (r, 1.0f);
 
-            if (sel != nullptr && n >= sel->params.loKey && n <= sel->params.hiKey)
+            if (! splicer && sel != nullptr && n == sel->params.root)
             {
                 g.setColour (theme::red);
-                g.fillRect (r.withHeight (4.0f).reduced (1.0f, 0.0f));
-            }
-            if (sel != nullptr && n == sel->params.root)
-            {
-                g.setColour (theme::red);
-                g.fillEllipse (r.getCentreX() - 3.0f, r.getBottom() - (k.black ? 10.0f : 16.0f), 6.0f, 6.0f);
-            }
-            if (n % 12 == 0)
-            {
-                g.setColour (Colour (0xff444444));
-                g.setFont (theme::font (6.5f, 700, 0.0f));
-                g.drawText (noteName (n), r.withTrimmedBottom (2.0f), Justification::centredBottom, false);
+                g.fillEllipse (r.getCentreX() - 3.0f, r.getBottom() - (k.black ? 10.0f : 14.0f), 6.0f, 6.0f);
             }
         }
+
+    // octave names under the keys
+    g.setColour (theme::textMuted);
+    g.setFont (theme::font (8.0f, 600, 0.04f));
+    for (int n = firstNote; n <= lastNote; n += 12)
+    {
+        const auto k = keyRect (n);
+        g.drawText (noteName (n), Rectangle<float> (k.x + 2.0f, keysTop + keysHeight + 1.0f, 40.0f, labelsHeight - 2.0f),
+                    Justification::centredLeft, false);
+    }
 }
 
 void KeymapView::mouseMove (const MouseEvent& e)
 {
     const auto* sel = proc.getSelectedZone();
-    for (size_t i = 0; i < proc.getZones().size(); ++i)
-        if (barRect (i).contains (e.position))
-        {
-            const auto r = barRect (i);
-            const bool edge = sel != nullptr && proc.getZones()[i].id == sel->id
-                              && (e.position.x < r.getX() + 6.0f || e.position.x > r.getRight() - 6.0f);
-            setMouseCursor (edge ? MouseCursor::LeftRightResizeCursor : MouseCursor::DraggingHandCursor);
-            return;
-        }
-    setMouseCursor (MouseCursor::NormalCursor);
+    if (e.position.y < keysTop)
+        for (size_t i = 0; i < proc.getZones().size(); ++i)
+            if (barRect (i).contains (e.position))
+            {
+                if (proc.isSplicer())
+                {
+                    setMouseCursor (MouseCursor::PointingHandCursor);
+                    return;
+                }
+                const auto r = barRect (i);
+                const bool edge = sel != nullptr && proc.getZones()[i].id == sel->id
+                                  && (e.position.x < r.getX() + 7.0f || e.position.x > r.getRight() - 7.0f);
+                setMouseCursor (edge ? MouseCursor::LeftRightResizeCursor : MouseCursor::DraggingHandCursor);
+                return;
+            }
+    setMouseCursor (e.position.y >= keysTop ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor);
 }
 
 void KeymapView::mouseDown (const MouseEvent& e)
@@ -568,9 +997,14 @@ void KeymapView::mouseDown (const MouseEvent& e)
                 const bool isSel = sel != nullptr && zs[i].id == sel->id;
                 if (isSel != (pass == 0) || ! barRect (i).contains (e.position))
                     continue;
+                if (proc.isSplicer())
+                {
+                    proc.selectZone (zs[i].id);
+                    return;
+                }
                 const auto r = barRect (i);
-                drag = isSel && e.position.x < r.getX() + 6.0f ? Drag::resizeLo
-                     : isSel && e.position.x > r.getRight() - 6.0f ? Drag::resizeHi : Drag::move;
+                drag = isSel && e.position.x < r.getX() + 7.0f ? Drag::resizeLo
+                     : isSel && e.position.x > r.getRight() - 7.0f ? Drag::resizeHi : Drag::move;
                 dragZone = zs[i].id;
                 dragLo = zs[i].params.loKey;
                 dragHi = zs[i].params.hiKey;
@@ -583,7 +1017,7 @@ void KeymapView::mouseDown (const MouseEvent& e)
     const int note = noteAt (e.position);
     if (note < 0)
         return;
-    if (e.mods.isShiftDown())
+    if (e.mods.isShiftDown() && ! proc.isSplicer())
     {
         if (const auto* sel = proc.getSelectedZone())
         {
@@ -593,6 +1027,10 @@ void KeymapView::mouseDown (const MouseEvent& e)
         }
         return;
     }
+    if (proc.isSplicer())   // playing a slice's key picks that slice
+        for (auto& z : zs)
+            if (z.params.loKey == note && z.id != proc.getSelectedZoneId())
+                proc.selectZone (z.id);
     drag = Drag::play;
     playingNote = note;
     proc.keyboardState.noteOn (proc.getKeyboardChannel(), note, (float) velocityAt (e.position.y, note) / 127.0f);
@@ -629,13 +1067,13 @@ void KeymapView::mouseDrag (const MouseEvent& e)
     }
     else
     {
-        int note = noteAt ({ e.position.x, keysTop + 1.0f });
+        int note = noteAt ({ e.position.x, keysTop + keysHeight - 2.0f });
         if (note < 0)
-            note = e.position.x < 0 ? 0 : 127;
+            note = e.position.x < 0 ? firstNote : lastNote;
         if (drag == Drag::resizeLo) p.loKey = jmin (note, p.hiKey);
         else                        p.hiKey = jmax (note, p.loKey);
     }
-    if (p.loKey != z->params.loKey || p.hiKey != z->params.hiKey || p.root != z->params.root)
+    if (p.loKey != z->params.loKey || p.hiKey != z->params.hiKey)
         proc.setZoneParams (dragZone, p);
 }
 
@@ -648,64 +1086,28 @@ void KeymapView::mouseUp (const MouseEvent&)
 }
 
 //==================================================================================
-// Horizontal slider for a position in the sample (in frames)
+// The scrolling part of the page
 //==================================================================================
-class EditorPage::FrameSlider final : public Component, public SettableTooltipClient
+class EditorPage::Stack final : public Component
 {
 public:
-    explicit FrameSlider (String labelText) : label (std::move (labelText)) {}
-
-    std::function<void (int)> onChange;
-    void setRange (int maximum) { maxValue = jmax (1, maximum); repaint(); }
-    void setValue (int v) { if (v != value) { value = v; repaint(); } }
-
-    void paint (Graphics& g) override
+    explicit Stack (EditorPage& p) : page (p) {}
+    void paint (Graphics& g) override { page.paintStack (g); }
+    void mouseUp (const MouseEvent& e) override
     {
-        auto r = getLocalBounds().toFloat();
-        g.setColour (isEnabled() ? theme::textMuted : theme::textMuted.withAlpha (0.4f));
-        g.setFont (theme::font (7.5f, 700, 0.08f));
-        g.drawText (label, r.removeFromLeft (labelW), Justification::centredLeft, true);
-        track = r;
-        theme::drawLed (g, r, {});
-        const float pos = (float) jlimit (0.0, 1.0, (double) value / maxValue);
-        auto fill = r.reduced (2.0f, 3.0f);
-        const float x = fill.getX() + fill.getWidth() * pos;
-        const float alpha = isEnabled() ? 1.0f : 0.35f;
-        g.setGradientFill (ColourGradient::horizontal (theme::hue (0xff5a0808).withAlpha (alpha), fill.getX(),
-                                                       theme::hue (0xffd02a2a).withAlpha (alpha), jmax (fill.getX() + 1.0f, x)));
-        g.fillRoundedRectangle (fill.withRight (x), 2.5f);
-        g.setColour (theme::textStrong.withAlpha (alpha));
-        g.fillRoundedRectangle (x - 1.5f, r.getY() + 1.0f, 3.0f, r.getHeight() - 2.0f, 1.5f);
-        g.setColour (theme::hue (0xffffd0d0).withAlpha (alpha));
-        g.setFont (theme::font (7.5f, 500, 0.04f));
-        g.drawText (String (value), r.reduced (6.0f, 0.0f), Justification::centredRight, false);
+        if (e.mouseWasClicked())
+            page.stackClicked (e.getPosition());
     }
-
-    void mouseDown (const MouseEvent& e) override { dragStart = value; set (e, true); }
-    void mouseDrag (const MouseEvent& e) override { set (e, false); }
+    void mouseMove (const MouseEvent& e) override
+    {
+        bool onHead = false;
+        for (auto& h : page.headArea)
+            onHead = onHead || h.contains (e.position);
+        setMouseCursor (onHead ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor);
+    }
 
 private:
-    void set (const MouseEvent& e, bool first)
-    {
-        if (! isEnabled() || track.getWidth() <= 4.0f)
-            return;
-        int v;
-        if (e.mods.isShiftDown())   // fine: drag moves 1/20 as far
-        {
-            if (first) return;
-            v = dragStart + roundToInt ((double) e.getDistanceFromDragStartX() / track.getWidth() * maxValue / 20.0);
-        }
-        else
-            v = roundToInt ((double) (e.position.x - track.getX()) / track.getWidth() * maxValue);
-        v = jlimit (0, maxValue, v);
-        if (v != value && onChange)
-            onChange (v);
-    }
-
-    String label;
-    int value = 0, maxValue = 1, dragStart = 0;
-    static constexpr float labelW = 44.0f;
-    Rectangle<float> track;
+    EditorPage& page;
 };
 
 //==================================================================================
@@ -715,110 +1117,107 @@ EditorPage::EditorPage (EmulonXProcessor& p)
     : proc (p),
       zoneName ([this]
       {
+          const auto& zs = proc.getZones();
           const auto* z = proc.getSelectedZone();
           if (z == nullptr)
               return String ("NO ZONE");
-          return "ZONE " + String (proc.getSelectedIndex() + 1) + "/" + String ((int) proc.getZones().size()) + "  -  " + z->name;
+          if (proc.isSplicer())
+          {
+              const auto s = proc.getSliceSample();
+              return (s != nullptr ? s->name.toUpperCase() : String ("SPLICER")) + "  -  " + String ((int) zs.size()) + " SLICES  -  "
+                     + noteName (zs.front().params.loKey) + "-" + noteName (zs.back().params.loKey);
+          }
+          return "ZONE " + String (proc.getSelectedIndex() + 1) + "/" + String ((int) zs.size()) + "  -  " + z->name.toUpperCase()
+                 + "  -  " + noteName (z->params.loKey) + "-" + noteName (z->params.hiKey);
       }, 10.0f),
-      wave (p),
-      loopInfo ([this]
-      {
-          const auto* z = proc.getSelectedZone();
-          if (z == nullptr || z->sample == nullptr)
-              return String ("-");
-          const auto& q = z->params;
-          const int len = q.loopEnd - q.loopStart, xe = effectiveCrossfade (q);
-          String t = q.loopMode == LoopMode::off ? String ("NO LOOP") : q.loopMode == LoopMode::loop ? String ("LOOP") : String ("LOOP UNTIL RELEASE");
-          t << "  -  LENGTH " << len << " (" << String (len / z->sample->sampleRate * 1000.0, 1) << " MS)";
-          if (q.crossfade > 0)
-              t << "  -  X-FADE " << xe << (xe < q.crossfade ? " (LIMITED: NEEDS AUDIO BEFORE THE LOOP START)" : "");
-          return t;
-      }, 9.0f),
-      keymap (p)
+      stack (std::make_unique<Stack> (*this)),
+      wave (p), closeUp (p), keymap (p)
 {
-    //== Top bar ===================================================================
+    //== Strip =====================================================================
+    const char* modeTips[] { "Sampler: zones spread over the keys, each with its own sample",
+                             "Splicer: one sample chopped into slices, one slice per key (drum loops, phrases)" };
+    for (int i = 0; i < 2; ++i)
+    {
+        modeButtons[i].setTooltip (modeTips[i]);
+        modeButtons[i].onClick = [this, i] { proc.setSplicer (i == 1); };
+        addAndMakeVisible (modeButtons[i]);
+    }
     prevButton.setTooltip ("Previous zone");
     nextButton.setTooltip ("Next zone");
     prevButton.onClick = [this] { proc.selectNextZone (-1); };
     nextButton.onClick = [this] { proc.selectNextZone (1); };
-    dupButton.setTooltip ("Copy this zone (same sample and settings)");
-    dupButton.onClick = [this] { proc.duplicateZone (proc.getSelectedZoneId()); };
-    deleteButton.setTooltip ("Remove this zone");
-    deleteButton.onClick = [this] { proc.removeZone (proc.getSelectedZoneId()); };
-    mapButton.setTooltip ("Spread the zones across the keyboard by their root notes");
-    mapButton.onClick = [this] { proc.autoMap(); };
-    undoButton.setTooltip ("Undo the last zone change (Ctrl+Z)");
+    const char* showTips[] { "Show or hide the SAMPLE panel (loop, warp, slices)", "Show or hide the VOICE panel (pitch, amp, envelope)",
+                             "Show or hide the KEYMAP panel" };
+    for (int i = 0; i < 3; ++i)
+    {
+        showButtons[i].setTooltip (showTips[i]);
+        showButtons[i].onClick = [this, i] { setPanelShown (i, ! shown[i]); };
+        addAndMakeVisible (showButtons[i]);
+        interpButtons[i].setTooltip ("Playback quality for the whole preset: Linear is lightest on the CPU, Sinc HQ sounds cleanest");
+        interpButtons[i].onClick = [this, i] { proc.setInterpolation ((Interp) i); };
+        addAndMakeVisible (interpButtons[i]);
+    }
+    allButton.setTooltip ("Open every panel");
+    allButton.onClick = [this] { for (int i = 0; i < 3; ++i) shown[i] = true; refresh(); };
+    undoButton.setTooltip ("Undo the last change (Ctrl+Z)");
     undoButton.onClick = [this] { proc.undo(); };
     redoButton.setTooltip ("Redo (Ctrl+Shift+Z)");
     redoButton.onClick = [this] { proc.redo(); };
-    for (int i = 0; i < 3; ++i)
-    {
-        interpButtons[i].setTooltip ("Interpolation for the whole preset: Linear is lightest on the CPU, Sinc HQ sounds cleanest");
-        interpButtons[i].onClick = [this, i] { proc.setInterpolation ((Interp) i); };
-    }
+    for (Component* c : { (Component*) &prevButton, (Component*) &nextButton, (Component*) &zoneName, (Component*) &allButton,
+                          (Component*) &undoButton, (Component*) &redoButton })
+        addAndMakeVisible (c);
 
-    //== Sample & loop =============================================================
+    viewport.setViewedComponent (stack.get(), false);
+    viewport.setScrollBarsShown (true, false);
+    viewport.setScrollBarThickness (8);
+    addAndMakeVisible (viewport);
+
+    //== SAMPLE ====================================================================
+    for (int i = 0; i < 2; ++i)
+        tabButtons[i].onClick = [this, i]
+        {
+            tab = i == 1 ? Tab::warp : (proc.isSplicer() ? Tab::slices : Tab::loop);
+            refresh();
+        };
     wave.onMarkerMoved = [this] (int which, int frame) { setLoopPoint (which, frame, false); };
+
+    //   loop
     const char* loopTips[] { "No loop: the sample plays once", "Loop while the note is held and during the release",
                              "Loop while the key is held, then play on to the end of the sample" };
+    const char* dirTips[] { "The loop plays start to end, again and again", "The loop plays forward, then backward, then forward...",
+                            "The loop plays end to start, again and again" };
     for (int i = 0; i < 3; ++i)
     {
         loopButtons[i].setTooltip (loopTips[i]);
         loopButtons[i].onClick = [this, i] { edit ([i] (ZoneParams& q) { q.loopMode = (LoopMode) i; }); };
+        dirButtons[i].setTooltip (dirTips[i]);
+        dirButtons[i].onClick = [this, i] { edit ([i] (ZoneParams& q) { q.loopDir = (LoopDir) i; }); };
     }
-    for (auto* box : { &startBox, &endBox, &fadeBox })
+    for (auto* b : { &startBox, &endBox, &loopStartBox, &loopEndBox, &randomBox })
     {
-        box->setJustificationType (Justification::centred);
-        box->setTooltip ("Click to type an exact value in sample frames");
-        box->onEditorShow = [box] { if (auto* ed = box->getCurrentTextEditor()) ed->setInputRestrictions (9, "0123456789"); };
+        b->format = framesText;
+        b->setDragPixels (400.0f);
     }
-    startBox.onTextChange = [this] { setLoopPoint (0, startBox.getText().getIntValue(), true); };
-    endBox.onTextChange = [this] { setLoopPoint (1, endBox.getText().getIntValue(), true); };
-    fadeBox.onTextChange = [this]
+    startBox.setTooltip ("Where the sample starts playing (amber marker) - drag up / down, shift for fine moves, double-click to type");
+    endBox.setTooltip ("Where the sample stops when it isn't looping (amber marker)");
+    loopStartBox.setTooltip ("Loop start (LS flag) - drag up / down, shift for fine moves, double-click to type");
+    loopEndBox.setTooltip ("Loop end (LE flag)");
+    randomBox.setTooltip ("End of the random start area (dashed amber marker): each note starts somewhere between START and here");
+    startBox.onChange = [this] (double v) { setLoopPoint (2, roundToInt (v), true); };
+    endBox.onChange = [this] (double v) { setLoopPoint (3, roundToInt (v), true); };
+    loopStartBox.onChange = [this] (double v) { setLoopPoint (0, roundToInt (v), true); };
+    loopEndBox.onChange = [this] (double v) { setLoopPoint (1, roundToInt (v), true); };
+    randomBox.onChange = [this] (double v) { setLoopPoint (4, roundToInt (v), true); };
+    fadeBox.setTooltip ("Cross-fade at the loop seam, so the jump from end to start doesn't click (forward loops)");
+    fadeBox.onChange = [this] (double v)
     {
-        const int v = fadeBox.getText().getIntValue();
-        edit ([v] (ZoneParams& q) { q.crossfade = jlimit (0, q.loopEnd - q.loopStart, v); });
+        const auto* z = proc.getSelectedZone();
+        if (z == nullptr || z->sample == nullptr)
+            return;
+        const int frames = roundToInt (v / 1000.0 * z->sample->sampleRate);
+        edit ([frames] (ZoneParams& q) { q.crossfade = jlimit (0, q.loopEnd - q.loopStart, frames); });
     };
-    zeroStart.setTooltip ("Move the loop start to the nearest zero crossing (avoids clicks)");
-    zeroEnd.setTooltip ("Move the loop end to the nearest zero crossing (avoids clicks)");
-    zeroStart.onClick = [this]
-    {
-        if (auto* z = proc.getSelectedZone(); z != nullptr && z->sample != nullptr)
-            setLoopPoint (0, WaveformView::nearestZeroCrossing (z->sample->audio, z->params.loopStart), true);
-    };
-    zeroEnd.onClick = [this]
-    {
-        if (auto* z = proc.getSelectedZone(); z != nullptr && z->sample != nullptr)
-            setLoopPoint (1, WaveformView::nearestZeroCrossing (z->sample->audio, z->params.loopEnd), true);
-    };
-    snapButton.setTooltip ("Dragged loop markers jump to zero crossings");
-    snapButton.onClick = [this] { wave.snapToZero = ! wave.snapToZero; snapButton.setToggleState (wave.snapToZero, dontSendNotification); };
-    zoomAllButton.setTooltip ("Show the whole sample (or double-click the waveform)");
-    zoomAllButton.onClick = [this] { wave.zoomAll(); };
-    zoomStartButton.setTooltip ("Zoom in on the loop start");
-    zoomStartButton.onClick = [this] { if (auto* z = proc.getSelectedZone()) wave.zoomAround (z->params.loopStart); };
-    zoomEndButton.setTooltip ("Zoom in on the loop end");
-    zoomEndButton.onClick = [this] { if (auto* z = proc.getSelectedZone()) wave.zoomAround (z->params.loopEnd); };
-
-    const char* sliderNames[] { "START", "END", "L START", "L END", "X-FADE" };
-    const char* sliderTips[] { "Where the sample starts playing (amber marker) - shift-drag for fine moves",
-                               "Where the sample stops when it isn't looping (amber marker)",
-                               "Loop start (white S flag)", "Loop end (white E flag)", "Crossfade length at the loop seam" };
-    for (int i = 0; i < 5; ++i)
-    {
-        sliders[i] = std::make_unique<FrameSlider> (sliderNames[i]);
-        sliders[i]->setTooltip (sliderTips[i]);
-        addAndMakeVisible (*sliders[i]);
-    }
-    sliders[0]->onChange = [this] (int v) { setLoopPoint (2, v, true); };
-    sliders[1]->onChange = [this] (int v) { setLoopPoint (3, v, true); };
-    sliders[2]->onChange = [this] (int v) { setLoopPoint (0, v, true); };
-    sliders[3]->onChange = [this] (int v) { setLoopPoint (1, v, true); };
-    sliders[4]->onChange = [this] (int v) { edit ([v] (ZoneParams& q) { q.crossfade = jlimit (0, q.loopEnd - q.loopStart, v); }); };
-    randomSlider = std::make_unique<FrameSlider> ("RND TO");
-    randomSlider->setTooltip ("End of the random start area (dashed amber marker): each note starts somewhere between SMP START and here");
-    randomSlider->onChange = [this] (int v) { setLoopPoint (4, v, true); };
-    addAndMakeVisible (*randomSlider);
+    fadeBox.format = [] (double v) { return String (roundToInt (v)) + " MS"; };
     randomButton.setTooltip ("Random start: every note starts at a different spot inside the shaded area, so repeated notes sound less alike");
     randomButton.onClick = [this]
     {
@@ -829,28 +1228,73 @@ EditorPage::EditorPage (EmulonXProcessor& p)
                 q.randomEnd = q.sampleStart + jmax (1, ((q.sampleEnd > 0 ? q.sampleEnd : q.loopEnd) - q.sampleStart) / 4);
         });
     };
-    addAndMakeVisible (randomButton);
+    zeroButton.setTooltip ("Move both loop points to the nearest zero crossings (avoids clicks)");
+    zeroButton.onClick = [this]
+    {
+        if (auto* z = proc.getSelectedZone(); z != nullptr && z->sample != nullptr)
+        {
+            const int a = WaveformView::nearestZeroCrossing (z->sample->audio, z->params.loopStart);
+            const int b = WaveformView::nearestZeroCrossing (z->sample->audio, z->params.loopEnd);
+            edit ([a, b] (ZoneParams& q) { if (b - a >= 16) { q.loopStart = a; q.loopEnd = b; } });
+        }
+    };
+    snapButton.setTooltip ("Dragged loop flags jump to zero crossings");
+    snapButton.onClick = [this] { wave.snapToZero = ! wave.snapToZero; snapButton.setToggleState (wave.snapToZero, dontSendNotification); };
+    zoomAllButton.setTooltip ("Show the whole sample (or double-click the waveform)");
+    zoomAllButton.onClick = [this] { wave.zoomAll(); };
 
-    //== Zone settings =============================================================
-    auto noteFmt = [] (double v) { return noteName (roundToInt (v)); };
+    //   warp
+    for (int i = 0; i < edit::numWarpShapes; ++i)
+    {
+        shapeButtons[i].setButtonText (edit::warpShapeName ((edit::WarpShape) i));
+        shapeButtons[i].setTooltip (String (edit::warpShapeName ((edit::WarpShape) i)) + ": " + edit::warpShapeHint ((edit::WarpShape) i));
+        shapeButtons[i].onClick = [this, i] { warp.shape = (edit::WarpShape) i; refresh(); };
+    }
+    for (auto* b : { &amountBox, &mixBox })
+    {
+        b->setRange (0.0, 100.0, 1.0);
+        b->format = [] (double v) { return String (roundToInt (v)) + "%"; };
+    }
+    amountBox.setTooltip ("How strongly the wave is reshaped - drag up / down");
+    mixBox.setTooltip ("How much of the reshaped wave is mixed with the original");
+    amountBox.onChange = [this] (double v) { warp.amount = (float) v / 100.0f; updateWarpPreview(); };
+    mixBox.onChange = [this] (double v) { warp.mix = (float) v / 100.0f; updateWarpPreview(); };
+    whereButtons[0].setTooltip ("Reshape the whole sample");
+    whereButtons[0].onClick = [this] { warpPart = false; refresh(); };
+    whereButtons[1].onClick = [this] { warpPart = true; refresh(); };
+    undoWarpButton.setTooltip ("Take back the last warp");
+    undoWarpButton.onClick = [this] { proc.unwarpZone (proc.getSelectedZoneId()); };
+    applyButton.setTooltip ("Bake the yellow wave into the sample (it is saved inside the preset)");
+    applyButton.setToggleState (true, dontSendNotification);
+    applyButton.onClick = [this]
+    {
+        applyButton.setToggleState (true, dontSendNotification);
+        proc.warpZone (proc.getSelectedZoneId(), currentWarp());
+    };
+
+    //   slices
+    findHitsButton.setTooltip ("Put a cut at every hit (drum strike, note start)");
+    findHitsButton.onClick = [this] { proc.findSliceHits ((float) sensBox.getValue() / 100.0f); };
+    sensBox.setRange (0.0, 100.0, 1.0);
+    sensBox.setValue (60.0);
+    sensBox.format = [] (double v) { return String (roundToInt (v)) + "%"; };
+    sensBox.setTooltip ("Higher finds quieter hits (then press FIND HITS)");
+    for (int i = 0; i < 4; ++i)
+    {
+        const int count = 4 << i;
+        evenButtons[i].setTooltip ("Cut the sample into " + String (count) + " equal slices");
+        evenButtons[i].onClick = [this, count] { proc.splitSlicesEvenly (count); };
+    }
+    firstKeyBox.setRange (0.0, 127.0, 1.0);
+    firstKeyBox.format = [] (double v) { return noteName (roundToInt (v)); };
+    firstKeyBox.setDragPixels (300.0f);
+    firstKeyBox.setTooltip ("The key that plays the first slice; the others follow one key each");
+    firstKeyBox.onChange = [this] (double v) { proc.setSliceFirstKey (roundToInt (v)); };
+    toZonesButton.setTooltip ("Keep the slices as ordinary zones and go back to sampler mode");
+    toZonesButton.onClick = [this] { proc.slicesToZones(); };
+
+    //== VOICE =====================================================================
     auto intRange = [] (int lo, int hi) { return NormalisableRange<double> (lo, hi, 1.0); };
-
-    root.setRange (intRange (0, 127), 60);   root.format = noteFmt;
-    loKey.setRange (intRange (0, 127), 0);   loKey.format = noteFmt;
-    hiKey.setRange (intRange (0, 127), 127); hiKey.format = noteFmt;
-    loVel.setRange (intRange (1, 127), 1);   loVel.format = [] (double v) { return String (roundToInt (v)); };
-    hiVel.setRange (intRange (1, 127), 127); hiVel.format = loVel.format;
-    root.onChange  = [this] (double v) { edit ([v] (ZoneParams& q) { q.root = roundToInt (v); }); };
-    loKey.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.loKey = jmin (roundToInt (v), q.hiKey); }); };
-    hiKey.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.hiKey = jmax (roundToInt (v), q.loKey); }); };
-    loVel.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.loVel = jmin (roundToInt (v), q.hiVel); }); };
-    hiVel.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.hiVel = jmax (roundToInt (v), q.loVel); }); };
-    root.slider.setTooltip ("The note at which the sample plays at its original pitch (or shift-click a key)");
-    loKey.slider.setTooltip ("Lowest key this zone plays on");
-    hiKey.slider.setTooltip ("Highest key this zone plays on");
-    loVel.slider.setTooltip ("Softest velocity this zone answers to (for velocity layers)");
-    hiVel.slider.setTooltip ("Hardest velocity this zone answers to");
-
     semi.setRange (intRange (-24, 24), 0);
     semi.format = [] (double v) { const int st = roundToInt (v); return (st > 0 ? "+" : "") + String (st) + " ST"; };
     semi.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.semitones = roundToInt (v); }); };
@@ -861,7 +1305,6 @@ EditorPage::EditorPage (EmulonXProcessor& p)
     semi.modRings = [this, semiTarget] { return modui::rings (proc, semiTarget(), (float) ((semi.getValue() + 24.0) / 48.0)); };
     for (auto* k : { &semi, &tune, &grain })
         k->setRingMargin (6);
-
     tune.setRange (intRange (-100, 100), 0);
     tune.format = [] (double v) { const int c = roundToInt (v); return (c > 0 ? "+" : "") + String (c) + " CT"; };
     tune.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.tuneCents = (float) roundToInt (v); }); };
@@ -870,7 +1313,7 @@ EditorPage::EditorPage (EmulonXProcessor& p)
     grain.format = [] (double v) { return String (roundToInt (v)) + " MS"; };
     grain.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.grainMs = (float) roundToInt (v); }); };
     grain.slider.setTooltip ("Keep speed grain size: short for drums and speech, long for pads");
-    keepSpeed.setTooltip ("Pitch this zone without changing its length, like the Emulator X");
+    keepSpeed.setTooltip ("Pitch without changing the length, like the Emulator X");
     keepSpeed.onClick = [this] { edit ([] (ZoneParams& q) { q.keepSpeed = ! q.keepSpeed; }); };
 
     gain.setRange (NormalisableRange<double> (-24.0, 12.0, 0.5), 0.0);
@@ -893,41 +1336,13 @@ EditorPage::EditorPage (EmulonXProcessor& p)
     sustain.setRange (NormalisableRange<double> (0.0, 1.0, 0.001), 1.0);
     sustain.format = [] (double v) { return String (roundToInt (v * 100.0)) + "%"; };
     sustain.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.sustain = (float) v; }); };
-    envCopyBox.setTextWhenNothingSelected ("COPY FROM...");
-    envCopyBox.setTextWhenNoChoicesAvailable ("ONLY ONE ZONE");
-    envCopyBox.setTooltip ("Copy attack, decay, sustain and release from another zone - or give every zone this envelope");
-    envCopyBox.onChange = [this]
-    {
-        const int id = envCopyBox.getSelectedId();
-        envCopyBox.setSelectedId (0, dontSendNotification);
-        const auto* z = proc.getSelectedZone();
-        if (id == 0 || z == nullptr)
-            return;
-        if (id == allZonesItem)
-            proc.copyEnvelope (z->id, -1);   // this envelope -> every zone
-        else
-            proc.copyEnvelope (id, z->id);   // that zone's envelope -> this one
-    };
-    addAndMakeVisible (envCopyBox);
     attack.slider.setTooltip ("Fade-in time when a key is pressed");
     decay.slider.setTooltip ("Time to fall to the sustain level");
     sustain.slider.setTooltip ("Level while the key is held");
     release.slider.setTooltip ("Fade-out time after the key is let go");
+    copyEnvButton.setTooltip ("Give every zone this attack, decay, sustain and release");
+    copyEnvButton.onClick = [this] { if (const auto* z = proc.getSelectedZone()) proc.copyEnvelope (z->id, -1); };
 
-    for (Component* c : { (Component*) &prevButton, (Component*) &nextButton, (Component*) &zoneName, (Component*) &dupButton,
-                          (Component*) &deleteButton, (Component*) &mapButton, (Component*) &undoButton, (Component*) &redoButton, (Component*) &interpButtons[0],
-                          (Component*) &interpButtons[1], (Component*) &interpButtons[2], (Component*) &wave,
-                          (Component*) &loopButtons[0], (Component*) &loopButtons[1], (Component*) &loopButtons[2],
-                          (Component*) &startBox, (Component*) &endBox, (Component*) &fadeBox, (Component*) &zeroStart,
-                          (Component*) &zeroEnd, (Component*) &snapButton, (Component*) &zoomAllButton,
-                          (Component*) &zoomStartButton, (Component*) &zoomEndButton, (Component*) &loopInfo,
-                          (Component*) &root, (Component*) &loKey, (Component*) &hiKey, (Component*) &loVel, (Component*) &hiVel,
-                          (Component*) &semi, (Component*) &tune, (Component*) &keepSpeed, (Component*) &grain, (Component*) &gain, (Component*) &pan,
-                          (Component*) &attack, (Component*) &decay, (Component*) &sustain, (Component*) &release, (Component*) &keymap,
-                          (Component*) &polyButton, (Component*) &monoButton, (Component*) &legatoButton, (Component*) &glide })
-        addAndMakeVisible (c);
-
-    //== Voice mode ================================================================
     polyButton.setTooltip ("Play chords: every note gets its own voice");
     monoButton.setTooltip ("One note at a time (for leads and basses); letting go returns to a key you still hold");
     legatoButton.setTooltip ("Mono: overlapping notes slide without restarting the sample or envelope (glide only then)");
@@ -940,7 +1355,73 @@ EditorPage::EditorPage (EmulonXProcessor& p)
                     0.0);
     glide.format = [] (double t) { return t <= 0.0 ? String ("OFF") : t < 1.0 ? String (roundToInt (t * 1000.0)) + " MS" : String (t, 2) + " S"; };
     glide.onChange = [this] (double v) { auto s = proc.getVoiceSettings(); s.glide = (float) v; proc.setVoiceSettings (s); };
-    glide.slider.setTooltip ("Mono: time for the pitch to slide to the next note"); 
+    glide.slider.setTooltip ("Mono: time for the pitch to slide to the next note");
+
+    //== KEYMAP ====================================================================
+    for (auto* b : { &rootBox, &loKeyBox, &hiKeyBox })
+    {
+        b->setRange (0.0, 127.0, 1.0);
+        b->format = [] (double v) { return noteName (roundToInt (v)); };
+        b->setDragPixels (300.0f);
+    }
+    for (auto* b : { &loVelBox, &hiVelBox })
+    {
+        b->setRange (1.0, 127.0, 1.0);
+        b->format = [] (double v) { return String (roundToInt (v)); };
+        b->setDragPixels (300.0f);
+    }
+    rootBox.setTooltip ("The key where the sample plays at its own pitch (or shift-click a key)");
+    loKeyBox.setTooltip ("Lowest key this zone plays on");
+    hiKeyBox.setTooltip ("Highest key this zone plays on");
+    loVelBox.setTooltip ("Softest velocity this zone answers to");
+    hiVelBox.setTooltip ("Hardest velocity this zone answers to");
+    rootBox.onChange  = [this] (double v) { edit ([v] (ZoneParams& q) { q.root = roundToInt (v); }); };
+    loKeyBox.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.loKey = jmin (roundToInt (v), q.hiKey); }); };
+    hiKeyBox.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.hiKey = jmax (roundToInt (v), q.loKey); }); };
+    loVelBox.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.loVel = jmin (roundToInt (v), q.hiVel); }); };
+    hiVelBox.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.hiVel = jmax (roundToInt (v), q.loVel); }); };
+    addZoneButton.setTooltip ("Add samples as new zones");
+    addZoneButton.onClick = [this]
+    {
+        chooser = std::make_unique<FileChooser> ("Add samples", proc.getSettings().getUserPresetFolder(), loader::supportedWildcards());
+        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::canSelectMultipleItems,
+                              [this] (const FileChooser& fc)
+                              {
+                                  if (! fc.getResults().isEmpty())
+                                      proc.loadFiles (fc.getResults());
+                              });
+    };
+    autoMapButton.setTooltip ("Spread the zones across the keyboard by their root notes");
+    autoMapButton.onClick = [this] { proc.autoMap(); };
+    dupButton.setTooltip ("Copy this zone (same sample and settings)");
+    dupButton.onClick = [this] { proc.duplicateZone (proc.getSelectedZoneId()); };
+    deleteButton.setTooltip ("Remove this zone");
+    deleteButton.onClick = [this] { proc.removeZone (proc.getSelectedZoneId()); };
+    sliceKeyBox.setReadOnly (true);
+    sliceKeyBox.format = [] (double v) { return noteName (roundToInt (v)); };
+    sliceKeyBox.setRange (0.0, 127.0);
+    sliceLenBox.setReadOnly (true);
+    sliceLenBox.setRange (0.0, 1.0e9);
+    sliceLenBox.format = [] (double ms) { return ms < 1000.0 ? String (roundToInt (ms)) + " MS" : String (ms / 1000.0, 2) + " S"; };
+    sliceOnlyButton.setTooltip ("Each slice stops where the next one starts");
+    sliceOnlyButton.onClick = [this] { proc.setSlicesToEnd (false); };
+    toEndButton.setTooltip ("Each slice plays on to the end of the sample");
+    toEndButton.onClick = [this] { proc.setSlicesToEnd (true); };
+
+    // everything in the scrolling stack
+    stackItems = { &tabButtons[0], &tabButtons[1], &wave,
+                   &loopButtons[0], &loopButtons[1], &loopButtons[2], &dirButtons[0], &dirButtons[1], &dirButtons[2],
+                   &startBox, &endBox, &loopStartBox, &loopEndBox, &fadeBox, &randomButton, &randomBox, &zeroButton, &snapButton, &zoomAllButton,
+                   &amountBox, &mixBox, &whereButtons[0], &whereButtons[1], &closeUp, &undoWarpButton, &applyButton,
+                   &findHitsButton, &sensBox, &evenButtons[0], &evenButtons[1], &evenButtons[2], &evenButtons[3], &firstKeyBox, &toZonesButton,
+                   &copyEnvButton, &semi, &tune, &keepSpeed, &grain, &gain, &pan, &attack, &decay, &sustain, &release,
+                   &polyButton, &monoButton, &legatoButton, &glide,
+                   &keymap, &rootBox, &loKeyBox, &hiKeyBox, &loVelBox, &hiVelBox, &addZoneButton, &autoMapButton, &dupButton, &deleteButton,
+                   &sliceKeyBox, &sliceLenBox, &sliceOnlyButton, &toEndButton };
+    for (auto& b : shapeButtons)
+        stackItems.push_back (&b);
+    for (auto* c : stackItems)
+        stack->addChildComponent (c);
 
     proc.addChangeListener (this);
     settings->addChangeListener (this);
@@ -961,7 +1442,10 @@ void EditorPage::edit (std::function<void (ZoneParams&)> change)
     {
         auto q = z->params;
         change (q);
-        proc.setZoneParams (z->id, q);
+        if (proc.isSplicer())
+            proc.setSliceVoice (q);   // the VOICE panel is for all slices
+        else
+            proc.setZoneParams (z->id, q);
     }
 }
 
@@ -985,94 +1469,143 @@ void EditorPage::setLoopPoint (int which, int frame, bool exact)
         proc.setZoneParams (z->id, q);
 }
 
+EditorPage::Tab EditorPage::shownTab() const
+{
+    if (tab == Tab::warp)
+        return Tab::warp;
+    return proc.isSplicer() ? Tab::slices : Tab::loop;
+}
+
+edit::Warp EditorPage::currentWarp() const
+{
+    auto w = warp;
+    w.from = 0;
+    w.to = -1;
+    if (const auto* z = proc.getSelectedZone(); z != nullptr && z->sample != nullptr && warpPart)
+    {
+        const auto& q = z->params;
+        if (proc.isSplicer())
+        {
+            w.from = q.sampleStart;
+            w.to = q.sampleEnd > 0 ? q.sampleEnd : z->sample->length();
+        }
+        else if (q.loopMode != LoopMode::off)
+        {
+            w.from = q.loopStart;
+            w.to = q.loopEnd;
+        }
+    }
+    return w;
+}
+
+void EditorPage::updateWarpPreview()
+{
+    const auto w = currentWarp();
+    wave.setWarp (w);
+    int centre = 0;
+    if (const auto* z = proc.getSelectedZone(); z != nullptr && z->sample != nullptr)
+    {
+        const int n = z->sample->length();
+        centre = w.to > 0 ? (w.from + w.to) / 2 : (z->params.loopMode != LoopMode::off ? (z->params.loopStart + z->params.loopEnd) / 2 : n * 3 / 10);
+    }
+    closeUp.setWarp (w, centre);
+}
+
+void EditorPage::showTab (Tab t) { tab = t; refresh(); }
+void EditorPage::setPanelShown (int panel, bool s) { shown[jlimit (0, 2, panel)] = s; refresh(); }
+void EditorPage::scrollTo (int y) { viewport.setViewPosition (0, y); }
+
 void EditorPage::refresh()
 {
     const auto* z = proc.getSelectedZone();
     const bool has = z != nullptr, hasAudio = has && z->sample != nullptr;
+    const bool splicer = proc.isSplicer();
+    const auto t = shownTab();
 
-    // envelope copy list: every other zone, plus "to all zones"
-    envCopyBox.clear (dontSendNotification);
-    if (has && proc.getZones().size() > 1)
-    {
-        envCopyBox.addSectionHeading ("Copy the envelope from");
-        int n = 0;
-        for (auto& other : proc.getZones())
-        {
-            ++n;
-            if (other.id == z->id)
-                continue;
-            const auto& q = other.params;
-            envCopyBox.addItem ("ZONE " + String (n) + "  -  " + other.name + "    (" + timeText (q.attack) + " / " + timeText (q.decay)
-                                    + " / " + String (roundToInt (q.sustain * 100.0f)) + "% / " + timeText (q.release) + ")",
-                                other.id);
-        }
-        envCopyBox.addSeparator();
-        envCopyBox.addItem ("GIVE EVERY ZONE THIS ENVELOPE", allZonesItem);
-    }
-    envCopyBox.setEnabled (has && proc.getZones().size() > 1);
-
+    //== Strip
+    modeButtons[0].setToggleState (! splicer, dontSendNotification);
+    modeButtons[1].setToggleState (splicer, dontSendNotification);
     zoneName.refresh();
-    loopInfo.refresh();
     for (int i = 0; i < 3; ++i)
     {
+        showButtons[i].setToggleState (shown[i], dontSendNotification);
         interpButtons[i].setToggleState ((int) proc.getInterpolation() == i, dontSendNotification);
-        loopButtons[i].setToggleState (has && (int) z->params.loopMode == i, dontSendNotification);
-        loopButtons[i].setEnabled (hasAudio);
     }
     for (auto* b : { &prevButton, &nextButton })
         b->setEnabled (proc.getZones().size() > 1);
-    for (auto* b : { &dupButton, &deleteButton, &mapButton })
-        b->setEnabled (has);
     undoButton.setEnabled (proc.canUndo());
     redoButton.setEnabled (proc.canRedo());
 
-    const bool looping = hasAudio && z->params.loopMode != LoopMode::off;
-    for (Component* c : { (Component*) &startBox, (Component*) &endBox, (Component*) &fadeBox, (Component*) &zeroStart,
-                          (Component*) &zeroEnd, (Component*) &zoomStartButton, (Component*) &zoomEndButton })
-        c->setEnabled (looping);
-    zoomAllButton.setEnabled (hasAudio);
-    snapButton.setToggleState (wave.snapToZero, dontSendNotification);
+    //== SAMPLE
+    tabButtons[0].setButtonText (splicer ? "SLICES" : "LOOP");
+    tabButtons[1].setButtonText ("WARP");
+    tabButtons[0].setToggleState (t != Tab::warp, dontSendNotification);
+    tabButtons[1].setToggleState (t == Tab::warp, dontSendNotification);
+    tabButtons[0].setTooltip (splicer ? "Cut the sample into slices" : "When and which way the sample loops");
+    tabButtons[1].setTooltip ("Reshape the waveform itself, then bake it into the sample");
+    wave.setMode (t == Tab::warp ? WaveformView::Mode::warp : t == Tab::slices ? WaveformView::Mode::slices : WaveformView::Mode::loop);
 
+    for (int i = 0; i < 3; ++i)
+    {
+        loopButtons[i].setToggleState (has && (int) z->params.loopMode == i, dontSendNotification);
+        loopButtons[i].setEnabled (hasAudio);
+        dirButtons[i].setToggleState (has && (int) z->params.loopDir == i, dontSendNotification);
+    }
+    const bool looping = hasAudio && z->params.loopMode != LoopMode::off;
+    for (Component* c : { (Component*) &dirButtons[0], (Component*) &dirButtons[1], (Component*) &dirButtons[2], (Component*) &loopStartBox,
+                          (Component*) &loopEndBox, (Component*) &zeroButton })
+        c->setEnabled (looping);
+    fadeBox.setEnabled (looping && z->params.loopDir == LoopDir::forward);
+    for (Component* c : { (Component*) &startBox, (Component*) &endBox, (Component*) &randomButton, (Component*) &zoomAllButton })
+        c->setEnabled (hasAudio);
+    snapButton.setToggleState (wave.snapToZero, dontSendNotification);
+    randomButton.setToggleState (hasAudio && z->params.randomStart, dontSendNotification);
+    randomBox.setEnabled (hasAudio && z->params.randomStart);
     if (hasAudio)
     {
         const auto& q = z->params;
         const int n = z->sample->length();
-        for (int i = 0; i < 4; ++i)
-            sliders[i]->setRange (n);
-        sliders[4]->setRange (jmax (1, q.loopEnd - q.loopStart));
-        sliders[0]->setValue (q.sampleStart);
-        sliders[1]->setValue (q.sampleEnd > 0 ? q.sampleEnd : n);
-        sliders[2]->setValue (q.loopStart);
-        sliders[3]->setValue (q.loopEnd);
-        sliders[4]->setValue (q.crossfade);
-        randomSlider->setRange (n);
-        randomSlider->setValue (q.randomEnd);
+        for (auto* b : { &startBox, &endBox, &loopStartBox, &loopEndBox, &randomBox })
+            b->setRange (0.0, n);
+        startBox.setValue (q.sampleStart);
+        endBox.setValue (q.sampleEnd > 0 ? q.sampleEnd : n);
+        loopStartBox.setValue (q.loopStart);
+        loopEndBox.setValue (q.loopEnd);
+        randomBox.setValue (q.randomEnd);
+        const double msLoop = (q.loopEnd - q.loopStart) / z->sample->sampleRate * 1000.0;
+        fadeBox.setRange (0.0, jmax (1.0, std::floor (msLoop)), 1.0);
+        fadeBox.setValue (std::round (q.crossfade / z->sample->sampleRate * 1000.0));
     }
-    randomButton.setToggleState (hasAudio && z->params.randomStart, dontSendNotification);
-    randomButton.setEnabled (hasAudio);
-    randomSlider->setEnabled (hasAudio && z->params.randomStart);
-    randomSlider->repaint();
-    sliders[0]->setEnabled (hasAudio);
-    sliders[1]->setEnabled (hasAudio);
-    for (int i = 2; i < 5; ++i)
-        sliders[i]->setEnabled (looping);
-    for (auto& sl : sliders)
-        sl->repaint();
 
-    auto setBox = [] (LedLabel& box, const String& t) { if (! box.isBeingEdited()) box.setText (t, dontSendNotification); };
-    setBox (startBox, hasAudio ? String (z->params.loopStart) : String());
-    setBox (endBox, hasAudio ? String (z->params.loopEnd) : String());
-    setBox (fadeBox, hasAudio ? String (z->params.crossfade) : String());
+    for (int i = 0; i < edit::numWarpShapes; ++i)
+        shapeButtons[i].setToggleState ((int) warp.shape == i, dontSendNotification);
+    amountBox.setValue (std::round (warp.amount * 100.0f));
+    mixBox.setValue (std::round (warp.mix * 100.0f));
+    whereButtons[1].setButtonText (splicer ? "SLICE" : "LOOP");
+    whereButtons[1].setTooltip (splicer ? "Reshape only the selected slice" : "Reshape only the loop");
+    whereButtons[1].setEnabled (splicer || looping);
+    if (! whereButtons[1].isEnabled())
+        warpPart = false;
+    whereButtons[0].setToggleState (! warpPart, dontSendNotification);
+    whereButtons[1].setToggleState (warpPart, dontSendNotification);
+    applyButton.setEnabled (hasAudio);
+    undoWarpButton.setEnabled (has && ! z->warps.isEmpty());
 
-    for (Component* c : { (Component*) &root, (Component*) &loKey, (Component*) &hiKey, (Component*) &loVel, (Component*) &hiVel,
-                          (Component*) &semi, (Component*) &tune, (Component*) &keepSpeed, (Component*) &gain, (Component*) &pan,
+    if (splicer)
+    {
+        firstKeyBox.setValue (proc.getSplice().firstKey);
+        const int count = (int) proc.getSplice().cuts.size();
+        for (int i = 0; i < 4; ++i)
+            evenButtons[i].setToggleState (count == (4 << i), dontSendNotification);
+    }
+
+    //== VOICE
+    for (Component* c : { (Component*) &semi, (Component*) &tune, (Component*) &keepSpeed, (Component*) &gain, (Component*) &pan,
                           (Component*) &attack, (Component*) &decay, (Component*) &sustain, (Component*) &release })
         c->setEnabled (has);
     if (has)
     {
         const auto& q = z->params;
-        root.setValue (q.root);   loKey.setValue (q.loKey); hiKey.setValue (q.hiKey);
-        loVel.setValue (q.loVel); hiVel.setValue (q.hiVel);
         tune.setValue (q.tuneCents);
         semi.setValue (q.semitones);
         grain.setValue (q.grainMs);
@@ -1081,6 +1614,7 @@ void EditorPage::refresh()
         attack.setValue (q.attack); decay.setValue (q.decay); sustain.setValue (q.sustain); release.setValue (q.release);
     }
     grain.setEnabled (has && z->params.keepSpeed);
+    copyEnvButton.setEnabled (has && proc.getZones().size() > 1);
 
     const auto& vs = proc.getVoiceSettings();
     polyButton.setToggleState (! vs.mono, dontSendNotification);
@@ -1090,13 +1624,32 @@ void EditorPage::refresh()
     glide.setValue (vs.glide);
     glide.setEnabled (vs.mono);
 
+    //== KEYMAP
+    for (Component* c : { (Component*) &rootBox, (Component*) &loKeyBox, (Component*) &hiKeyBox, (Component*) &loVelBox, (Component*) &hiVelBox,
+                          (Component*) &dupButton, (Component*) &deleteButton, (Component*) &autoMapButton })
+        c->setEnabled (has);
+    if (has)
+    {
+        const auto& q = z->params;
+        rootBox.setValue (q.root); loKeyBox.setValue (q.loKey); hiKeyBox.setValue (q.hiKey);
+        loVelBox.setValue (q.loVel); hiVelBox.setValue (q.hiVel);
+        sliceKeyBox.setValue (q.loKey);
+        if (hasAudio)
+            sliceLenBox.setValue (((q.sampleEnd > 0 ? q.sampleEnd : z->sample->length()) - q.sampleStart) / z->sample->sampleRate * 1000.0);
+    }
+    sliceOnlyButton.setToggleState (! proc.getSplice().toEnd, dontSendNotification);
+    toEndButton.setToggleState (proc.getSplice().toEnd, dontSendNotification);
+
     const int sens = settings->getKnobSensitivity();
-    for (auto* c : { &root, &loKey, &hiKey, &loVel, &hiVel, &semi, &tune, &grain, &gain, &pan })
+    for (auto* c : { &semi, &tune, &grain, &gain, &pan, &glide })
         c->setSensitivity (sens);
 
+    updateWarpPreview();
+    layoutStack();
     keymap.layoutLanes();
     keymap.repaint();
     wave.repaint();
+    stack->repaint();
     repaint();
 }
 
@@ -1108,162 +1661,428 @@ void EditorPage::tick()
         semi.repaint();   // modulation ring dot
 }
 
+//== Layout ==========================================================================
 void EditorPage::resized()
 {
     auto r = getLocalBounds();
-
-    //== Top bar ===================================================================
-    topArea = r.removeFromTop (46).toFloat();
+    stripArea = r.removeFromTop (44).toFloat();
+    stripTexts.clear();
     {
-        auto t = topArea.toNearestInt().reduced (11, 10);
-        prevButton.setBounds (t.removeFromLeft (30));
-        t.removeFromLeft (5);
-        auto interp = t.removeFromRight (3 * 66 + 10);
-        for (auto& b : interpButtons)
+        auto s = stripArea.toNearestInt().reduced (10, 9);
+        auto label = [&] (const String& t, int w)
         {
-            b.setBounds (interp.removeFromLeft (66));
-            interp.removeFromLeft (5);
+            stripTexts.push_back ({ s.removeFromLeft (w).toFloat(), t, false, Justification::centredLeft });
+        };
+        auto place = [&] (Component& c, int w, int gap = 0) { c.setBounds (s.removeFromLeft (w)); s.removeFromLeft (gap); };
+        label ("MODE", 40);
+        place (modeButtons[0], 76);
+        place (modeButtons[1], 72, 14);
+        // right side first, so the zone name gets whatever is left
+        allButton.setBounds (s.removeFromRight (42));
+        s.removeFromRight (12);
+        for (int i = 2; i >= 0; --i)
+            interpButtons[i].setBounds (s.removeFromRight (i == 2 ? 62 : 56));
+        stripTexts.push_back ({ s.removeFromRight (58).toFloat(), "QUALITY", false, Justification::centredLeft });
+        s.removeFromRight (10);
+        redoButton.setBounds (s.removeFromRight (50));
+        s.removeFromRight (4);
+        undoButton.setBounds (s.removeFromRight (50));
+        s.removeFromRight (14);
+        for (int i = 2; i >= 0; --i)
+        {
+            showButtons[i].setBounds (s.removeFromRight (i == 2 ? 74 : 66));
+            s.removeFromRight (i > 0 ? 4 : 0);
         }
-        t.removeFromRight (14);
-        redoButton.setBounds (t.removeFromRight (56));
-        t.removeFromRight (5);
-        undoButton.setBounds (t.removeFromRight (56));
-        t.removeFromRight (14);
-        mapButton.setBounds (t.removeFromRight (82));
-        t.removeFromRight (5);
-        deleteButton.setBounds (t.removeFromRight (68));
-        t.removeFromRight (5);
-        dupButton.setBounds (t.removeFromRight (88));
-        t.removeFromRight (10);
-        nextButton.setBounds (t.removeFromRight (30));
-        t.removeFromRight (5);
-        zoneName.setBounds (t);
+        stripTexts.push_back ({ s.removeFromRight (44).toFloat(), "SHOW", false, Justification::centredLeft });
+        s.removeFromRight (12);
+        place (prevButton, 26, 4);
+        nextButton.setBounds (s.removeFromRight (26));
+        s.removeFromRight (4);
+        zoneName.setBounds (s);
     }
     r.removeFromTop (8);
-
-    //== Sample & loop =============================================================
-    sampleArea = r.removeFromTop (250).toFloat();
-    {
-        auto s = sampleArea.toNearestInt().reduced (11, 9);
-        s.removeFromTop (24);
-        auto info = s.removeFromBottom (18);
-        loopInfo.setBounds (info);
-        s.removeFromBottom (6);
-        auto row = s.removeFromBottom (24);
-        s.removeFromBottom (6);
-        auto sliderRow = s.removeFromBottom (20);
-        randomButton.setBounds (sliderRow.removeFromLeft (66));
-        sliderRow.removeFromLeft (8);
-        const int sw = (sliderRow.getWidth() - 5 * 8) / 6;
-        for (auto* sl : { sliders[0].get(), sliders[1].get(), randomSlider.get(), sliders[2].get(), sliders[3].get(), sliders[4].get() })
-        {
-            sl->setBounds (sliderRow.removeFromLeft (sw));
-            sliderRow.removeFromLeft (8);
-        }
-        s.removeFromBottom (7);
-        waveArea = s.toFloat();
-        wave.setBounds (s);
-
-        auto place = [&row] (Component& c, int w, int gap = 5) { c.setBounds (row.removeFromLeft (w)); row.removeFromLeft (gap); };
-        place (loopButtons[0], 42);
-        place (loopButtons[1], 50);
-        place (loopButtons[2], 108, 14);
-        labelStart = row.removeFromLeft (38).toFloat();
-        place (startBox, 66);
-        place (zeroStart, 58, 12);
-        labelEnd = row.removeFromLeft (28).toFloat();
-        place (endBox, 66);
-        place (zeroEnd, 58, 12);
-        labelFade = row.removeFromLeft (44).toFloat();
-        place (fadeBox, 58, 8);
-        place (snapButton, 50, 12);
-        zoomEndButton.setBounds (row.removeFromRight (62));
-        row.removeFromRight (5);
-        zoomStartButton.setBounds (row.removeFromRight (62));
-        row.removeFromRight (5);
-        zoomAllButton.setBounds (row.removeFromRight (40));
-    }
-    r.removeFromTop (8);
-
-    //== Zone settings: four panels + voice mode ===================================
-    auto params = r.removeFromTop (172);
-    const int gap = 8, total = params.getWidth() - 4 * gap;
-    const int wMap = total * 28 / 100, wPitch = total * 25 / 100, wAmp = total * 13 / 100, wEnv = total * 20 / 100;
-    mapArea = params.removeFromLeft (wMap).toFloat();     params.removeFromLeft (gap);
-    pitchArea = params.removeFromLeft (wPitch).toFloat(); params.removeFromLeft (gap);
-    ampArea = params.removeFromLeft (wAmp).toFloat();     params.removeFromLeft (gap);
-    envArea = params.removeFromLeft (wEnv).toFloat();     params.removeFromLeft (gap);
-    voiceArea = params.toFloat();
-    {
-        auto v = voiceArea.reduced (10.0f, 9.0f).withTrimmedTop (22.0f).reduced (6.0f, 8.0f).toNearestInt();
-        auto col = v.removeFromLeft (64);
-        polyButton.setBounds (col.removeFromTop (24));
-        col.removeFromTop (6);
-        monoButton.setBounds (col.removeFromTop (24));
-        col.removeFromTop (6);
-        legatoButton.setBounds (col.removeFromTop (24));
-        glide.setBounds (v.withSizeKeepingCentre (jmin (62, v.getWidth()), glide.getPreferredHeight()));
-    }
-
-    auto layoutRow = [] (Rectangle<float> panel, std::initializer_list<Component*> items, int itemW, int itemH)
-    {
-        auto inner = panel.reduced (10.0f, 9.0f).withTrimmedTop (22.0f).toNearestInt();
-        const int count = (int) items.size();
-        const int step = inner.getWidth() / count;
-        int i = 0;
-        for (auto* c : items)
-        {
-            auto cell = Rectangle<int> (inner.getX() + i * step, inner.getY(), step, inner.getHeight());
-            c->setBounds (cell.withSizeKeepingCentre (jmin (itemW, step), itemH));
-            ++i;
-        }
-    };
-    const int kh = root.getPreferredHeight();
-    layoutRow (mapArea, { &root, &loKey, &hiKey, &loVel, &hiVel }, 62, kh);
-    layoutRow (pitchArea, { &semi, &tune, &keepSpeed, &grain }, 62, semi.getPreferredHeight());
-    keepSpeed.setBounds (keepSpeed.getBounds().withSizeKeepingCentre (keepSpeed.getWidth(), 30).translated (0, -8));
-    layoutRow (ampArea, { &gain, &pan }, 62, kh);
-    layoutRow (envArea, { &attack, &decay, &sustain, &release }, 54, attack.getPreferredHeight());
-    {
-        // in the panel's title row, on the right
-        auto head = envArea.reduced (10.0f, 9.0f).removeFromTop (16.0f).toNearestInt();
-        envCopyBox.setBounds (head.removeFromRight (jmin (104, head.getWidth() - 70)).expanded (0, 1));
-    }
-    r.removeFromTop (8);
-
-    //== Keymap ====================================================================
-    keyArea = r.toFloat();
-    keyInset = keyArea.reduced (10.0f, 9.0f).withTrimmedTop (22.0f);
-    keymap.setBounds (keyInset.reduced (6.0f, 5.0f).toNearestInt());
+    viewport.setBounds (r);
+    layoutStack();
 }
 
-void EditorPage::paint (Graphics& g)
+void EditorPage::layoutStack()
 {
-    theme::drawPanel (g, topArea.reduced (1.0f));
+    const int W = jmax (300, viewport.getWidth() - viewport.getScrollBarThickness() - 4);
+    const bool splicer = proc.isSplicer();
+    const auto t = shownTab();
+    const auto* z = proc.getSelectedZone();
 
-    theme::drawPanel (g, sampleArea.reduced (1.0f));
-    String info;
-    if (const auto* z = proc.getSelectedZone(); z != nullptr && z->sample != nullptr)
-        info << String (roundToInt (z->sample->sampleRate)) << " HZ - " << z->sample->audio.getNumChannels() << " CH - "
-             << z->sample->length() << " FRAMES   |   WHEEL = ZOOM - DRAG = SCROLL - DRAG S / E FLAGS - DOUBLE-CLICK = ALL";
-    theme::drawHeading (g, sampleArea.reduced (10.0f, 9.0f), "Sample & loop", info);
-
-    g.setColour (theme::textMuted);
-    g.setFont (theme::font (8.0f, 700, 0.1f));
-    g.drawText ("START", labelStart, Justification::centredLeft, false);
-    g.drawText ("END", labelEnd, Justification::centredLeft, false);
-    g.drawText ("X-FADE", labelFade, Justification::centredLeft, false);
-
-    for (auto [area, title] : { std::pair { mapArea, "Mapping" }, std::pair { pitchArea, "Pitch" },
-                                std::pair { ampArea, "Amp" }, std::pair { envArea, "Envelope" }, std::pair { voiceArea, "Voice" } })
+    texts.clear();
+    for (auto* c : stackItems)
+        c->setVisible (false);
+    for (auto& g : groupArea) g = {};
+    chipArea = {};
+    auto show = [] (Component& c, Rectangle<int> b) { c.setBounds (b); c.setVisible (true); };
+    auto text = [this] (Rectangle<int> r, const String& s, bool hint = false, Justification j = Justification::centredLeft)
     {
-        theme::drawPanel (g, area.reduced (1.0f));
-        theme::drawInset (g, theme::drawHeading (g, area.reduced (10.0f, 9.0f), title));
+        texts.push_back ({ r.toFloat(), s, hint, j });
+    };
+    auto textWidth = [] (const String& s, float h, int weight, float kern)
+    {
+        GlyphArrangement ga;
+        ga.addLineOfText (theme::font (h, weight, kern), s, 0.0f, 0.0f);
+        return (int) std::ceil (ga.getBoundingBox (0, -1, true).getWidth()) + 2;
+    };
+    // a row of buttons that belong together; returns the space after them
+    auto buttons = [&] (Rectangle<int>& row, std::initializer_list<TextButton*> bs, int gapAfter = 12)
+    {
+        for (auto* b : bs)
+        {
+            const int w = textWidth (b->getButtonText(), 9.0f, 700, 0.1f) + 20;
+            show (*b, row.removeFromLeft (w));
+            row.removeFromLeft (2);
+        }
+        row.removeFromLeft (gapAfter);
+    };
+    auto rowLabel = [&] (Rectangle<int>& row, const String& s)
+    {
+        const int w = textWidth (s, 7.5f, 700, 0.1f) + 8;
+        text (row.removeFromLeft (w), s);
+    };
+
+    int y = 0;
+    const int pad = 10, headH = 22, gap = 8, folded = 2 * pad + headH - 2;
+
+    //== SAMPLE ====================================================================
+    {
+        String info;
+        if (z != nullptr && z->sample != nullptr)
+        {
+            const auto& s = *z->sample;
+            info << s.name << "  -  " << String (roundToInt (s.sampleRate)) << " HZ  -  " << s.audio.getNumChannels() << " CH  -  "
+                 << String (s.length() / s.sampleRate, 2) << " S";
+            if (! z->warps.isEmpty())
+                info << "  -  WARPED";
+        }
+        const int h = shown[0] ? 300 : folded;
+        panelArea[0] = Rectangle<int> (0, y, W, h).toFloat();
+        auto inner = Rectangle<int> (pad, y + pad, W - 2 * pad, h - 2 * pad);
+        auto head = inner.removeFromTop (headH);
+        headArea[0] = head.toFloat();
+        texts.push_back ({ head.toFloat(), "SAMPLE|" + (shown[0] ? info : String (splicer ? "loop, warp and slices" : "loop and warp")), false, Justification::centredLeft, 0 });
+        if (shown[0])
+        {
+            {
+                auto hr = head;
+                show (tabButtons[1], hr.removeFromRight (62).reduced (0, 1));
+                hr.removeFromRight (2);
+                show (tabButtons[0], hr.removeFromRight (62).reduced (0, 1));
+                headArea[0] = head.withRight (hr.getRight() - 8).toFloat();
+            }
+            inner.removeFromTop (6);
+            auto tools = inner.removeFromTop (24);
+            inner.removeFromTop (8);
+            auto bottom = inner.removeFromBottom (t == Tab::loop ? ValueBox::labelledHeight : 24);
+            inner.removeFromBottom (8);
+            auto waveArea = inner;
+
+            if (t == Tab::loop)
+            {
+                rowLabel (tools, "LOOP");
+                buttons (tools, { &loopButtons[0], &loopButtons[1], &loopButtons[2] }, 16);
+                rowLabel (tools, "DIRECTION");
+                buttons (tools, { &dirButtons[0], &dirButtons[1], &dirButtons[2] }, 12);
+                if (z != nullptr)
+                    text (tools, z->params.loopDir == LoopDir::forward ? "start -> end, again and again"
+                               : z->params.loopDir == LoopDir::pingPong ? "forward, then backward, then forward..." : "end -> start, again and again", true);
+                show (wave, waveArea);
+
+                auto b = bottom;
+                for (auto* vb : { &startBox, &endBox, &loopStartBox, &loopEndBox, &fadeBox })
+                {
+                    show (*vb, b.removeFromLeft (98));
+                    b.removeFromLeft (8);
+                }
+                b.removeFromLeft (8);
+                show (randomButton, b.removeFromLeft (textWidth ("RANDOM START", 9.0f, 700, 0.1f) + 20).removeFromBottom (22));
+                b.removeFromLeft (4);
+                show (randomBox, b.removeFromLeft (98));
+                b.removeFromLeft (16);
+                auto rb = b.removeFromBottom (22);
+                show (zoomAllButton, rb.removeFromRight (textWidth ("SHOW ALL", 9.0f, 700, 0.1f) + 20));
+                rb.removeFromRight (4);
+                show (snapButton, rb.removeFromRight (52));
+                rb.removeFromRight (4);
+                show (zeroButton, rb.removeFromRight (62));
+                rb.removeFromRight (10);
+                text (rb.withTop (rb.getY() - 14), "drag the LS / LE flags - wheel = zoom", true, Justification::bottomRight);
+            }
+            else if (t == Tab::warp)
+            {
+                rowLabel (tools, "SHAPE");
+                for (auto& b : shapeButtons)
+                {
+                    show (b, tools.removeFromLeft (textWidth (b.getButtonText(), 9.0f, 700, 0.1f) + 18));
+                    tools.removeFromLeft (2);
+                }
+                tools.removeFromLeft (14);
+                rowLabel (tools, "AMOUNT");
+                show (amountBox, tools.removeFromLeft (62));
+                tools.removeFromLeft (12);
+                rowLabel (tools, "MIX");
+                show (mixBox, tools.removeFromLeft (62));
+                tools.removeFromLeft (16);
+                rowLabel (tools, "WHERE");
+                buttons (tools, { &whereButtons[0], &whereButtons[1] });
+
+                show (closeUp, waveArea.removeFromRight (232));
+                waveArea.removeFromRight (8);
+                show (wave, waveArea);
+
+                auto b = bottom;
+                show (applyButton, b.removeFromRight (textWidth ("APPLY TO SAMPLE", 9.0f, 700, 0.1f) + 24));
+                b.removeFromRight (4);
+                if (z != nullptr && ! z->warps.isEmpty())
+                {
+                    show (undoWarpButton, b.removeFromRight (56));
+                    b.removeFromRight (8);
+                    // the warps baked in so far, newest last (as many as fit)
+                    String tags;
+                    for (int i = jmax (0, z->warps.size() - 4); i < z->warps.size(); ++i)
+                        tags << (tags.isEmpty() ? "" : "|") << z->warps[i];
+                    const int tw = jmin (b.getWidth() / 2, 4 * 104);
+                    chipArea = b.removeFromRight (tw).toFloat();
+                    texts.push_back ({ chipArea, tags, false, Justification::centredRight, -1, true });
+                }
+                text (b, String (edit::warpShapeHint (warp.shape)) + "  -  yellow = how it will sound, red = the sample now", true);
+            }
+            else
+            {
+                show (findHitsButton, tools.removeFromLeft (textWidth ("FIND HITS", 9.0f, 700, 0.1f) + 20));
+                tools.removeFromLeft (8);
+                rowLabel (tools, "SENSITIVITY");
+                show (sensBox, tools.removeFromLeft (62));
+                tools.removeFromLeft (16);
+                rowLabel (tools, "SPLIT EVENLY");
+                buttons (tools, { &evenButtons[0], &evenButtons[1], &evenButtons[2], &evenButtons[3] }, 16);
+                rowLabel (tools, "FIRST KEY");
+                show (firstKeyBox, tools.removeFromLeft (56));
+                show (wave, waveArea);
+
+                auto b = bottom;
+                show (toZonesButton, b.removeFromRight (textWidth ("TURN SLICES INTO ZONES", 9.0f, 700, 0.1f) + 22));
+                b.removeFromRight (8);
+                if (z != nullptr)
+                {
+                    chipArea = b.removeFromRight (120).toFloat();
+                    texts.push_back ({ chipArea, "SLICE " + String (proc.getSelectedIndex() + 1) + " -> " + noteName (z->params.loKey), false,
+                                       Justification::centredRight, -1, true });
+                    b.removeFromRight (8);
+                }
+                text (b, "click a slice to pick it (or play its key) - drag a cut to move it - double-click to add a cut - right-click a cut to remove it", true);
+            }
+        }
+        y += h + gap;
     }
 
-    theme::drawPanel (g, keyArea.reduced (1.0f));
-    theme::drawHeading (g, keyArea.reduced (10.0f, 9.0f), "Keymap",
-                        "bars = zones: click to edit, drag to move, drag the ends to resize - keys: click to play, shift-click sets the root");
-    theme::drawLed (g, keyInset, {});
+    //== VOICE =====================================================================
+    {
+        const int h = shown[1] ? 196 : folded;
+        panelArea[1] = Rectangle<int> (0, y, W, h).toFloat();
+        auto inner = Rectangle<int> (pad, y + pad, W - 2 * pad, h - 2 * pad);
+        auto head = inner.removeFromTop (headH);
+        headArea[1] = head.toFloat();
+        texts.push_back ({ head.toFloat(), "VOICE|" + String (splicer ? "settings for all slices" : (shown[1] ? "settings of the selected zone" : "pitch, amp, envelope")),
+                           false, Justification::centredLeft, 1 });
+        if (shown[1])
+        {
+            if (! splicer)
+            {
+                show (copyEnvButton, head.removeFromRight (textWidth (copyEnvButton.getButtonText(), 9.0f, 700, 0.1f) + 22).reduced (0, 1));
+                headArea[1] = head.withRight (copyEnvButton.getX() - 8).toFloat();
+            }
+            inner.removeFromTop (8);
+            const int g = 8, total = inner.getWidth() - 3 * g;
+            const int widths[4] { total * 24 / 100, total * 17 / 100, total * 37 / 100, 0 };
+            Rectangle<int> areas[4];
+            auto row = inner;
+            for (int i = 0; i < 3; ++i)
+            {
+                areas[i] = row.removeFromLeft (widths[i]);
+                row.removeFromLeft (g);
+            }
+            areas[3] = row;
+            const char* titles[] { "PITCH", "AMP", "ENVELOPE", "VOICE" };
+            for (int i = 0; i < 4; ++i)
+            {
+                groupArea[i] = areas[i].toFloat();
+                auto a = areas[i].reduced (10, 8);
+                text (a.removeFromTop (12), titles[i]);
+                areas[i] = a;
+            }
+            auto cells = [&] (Rectangle<int> a, std::initializer_list<Component*> items, int w, int hgt)
+            {
+                const int step = a.getWidth() / (int) items.size();
+                int i = 0;
+                for (auto* c : items)
+                    show (*c, Rectangle<int> (a.getX() + step * i++, a.getY(), step, a.getHeight()).withSizeKeepingCentre (jmin (w, step), hgt));
+            };
+            {
+                auto a = areas[0];
+                const int step = a.getWidth() / 3;
+                cells (a.removeFromLeft (step * 2), { &semi, &tune }, 62, semi.getPreferredHeight());
+                auto col = a.withSizeKeepingCentre (jmin (a.getWidth(), 86), 26 + 6 + grain.getPreferredHeight());
+                show (keepSpeed, col.removeFromTop (24).withSizeKeepingCentre (jmin (col.getWidth(), 84), 24));
+                col.removeFromTop (4);
+                show (grain, col.withSizeKeepingCentre (62, grain.getPreferredHeight()));
+            }
+            cells (areas[1], { &gain, &pan }, 62, gain.getPreferredHeight());
+            cells (areas[2], { &attack, &decay, &sustain, &release }, 54, jmin (areas[2].getHeight(), attack.getPreferredHeight()));
+            {
+                auto a = areas[3];
+                auto top = a.removeFromTop (24);
+                buttons (top, { &polyButton, &monoButton, &legatoButton }, 0);
+                a.removeFromTop (4);
+                show (glide, a.withSizeKeepingCentre (62, jmin (a.getHeight(), glide.getPreferredHeight())));
+            }
+        }
+        y += h + gap;
+    }
+
+    //== KEYMAP ====================================================================
+    {
+        const int mapH = shown[2] ? keymap.getPreferredHeight() : 0;
+        const int h = shown[2] ? pad + headH + 8 + mapH + pad : folded;
+        panelArea[2] = Rectangle<int> (0, y, W, h).toFloat();
+        auto inner = Rectangle<int> (pad, y + pad, W - 2 * pad, h - 2 * pad);
+        auto head = inner.removeFromTop (headH);
+        headArea[2] = head.toFloat();
+        texts.push_back ({ head.toFloat(), "KEYMAP|" + String (splicer ? "one slice per key - click a slice or play its key"
+                                                                       : "drag a zone to move it, its ends to resize it - click the keys to play, shift-click sets the root"),
+                           false, Justification::centredLeft, 2 });
+        if (shown[2])
+        {
+            inner.removeFromTop (8);
+            auto side = inner.removeFromRight (246);
+            inner.removeFromRight (10);
+            show (keymap, inner);
+            keymap.layoutLanes();
+
+            const int colW = (side.getWidth() - 8) / 2;
+            auto pair = [&] (ValueBox& a, ValueBox* b)
+            {
+                auto row = side.removeFromTop (ValueBox::labelledHeight);
+                show (a, row.removeFromLeft (colW));
+                if (b != nullptr)
+                    show (*b, row.removeFromRight (colW));
+                side.removeFromTop (6);
+            };
+            if (splicer)
+            {
+                text (side.removeFromTop (14), "SLICE " + String (proc.getSelectedIndex() + 1) + " OF " + String ((int) proc.getZones().size()));
+                side.removeFromTop (4);
+                pair (sliceKeyBox, &sliceLenBox);
+                auto row = side.removeFromTop (24);
+                buttons (row, { &sliceOnlyButton, &toEndButton }, 0);
+                side.removeFromTop (6);
+                text (side.removeFromTop (28), "Every slice plays its own part of the sample at its original pitch.", true, Justification::topLeft);
+            }
+            else
+            {
+                text (side.removeFromTop (14), z != nullptr ? "ZONE " + String (proc.getSelectedIndex() + 1) + "  -  drag the values" : String ("NO ZONE"));
+                side.removeFromTop (4);
+                pair (rootBox, nullptr);
+                pair (loKeyBox, &hiKeyBox);
+                pair (loVelBox, &hiVelBox);
+                auto row = side.removeFromTop (24);
+                buttons (row, { &addZoneButton, &autoMapButton }, 0);
+                side.removeFromTop (4);
+                row = side.removeFromTop (24);
+                buttons (row, { &dupButton, &deleteButton }, 0);
+            }
+        }
+        y += h;
+    }
+
+    stack->setSize (W, y + 4);
+    stack->repaint();
+}
+
+void EditorPage::stackClicked (Point<int> pos)
+{
+    for (int i = 0; i < 3; ++i)
+        if (headArea[i].contains (pos.toFloat()))
+        {
+            setPanelShown (i, ! shown[i]);
+            return;
+        }
+}
+
+//== Painting =========================================================================
+void EditorPage::paint (Graphics& g)
+{
+    theme::drawPanel (g, stripArea.reduced (1.0f));
+    g.setFont (theme::font (7.5f, 700, 0.12f));
+    g.setColour (theme::textMuted);
+    for (auto& t : stripTexts)
+        g.drawText (t.text, t.r, t.just, false);
+    // thin separators between the strip's groups
+    g.setColour (Colours::black.withAlpha (0.45f));
+    for (auto* c : { (Component*) &modeButtons[1], (Component*) &nextButton })
+        g.fillRect ((float) c->getRight() + 7.0f, stripArea.getY() + 11.0f, 1.0f, stripArea.getHeight() - 22.0f);
+}
+
+void EditorPage::paintStack (Graphics& g)
+{
+    for (int i = 0; i < 3; ++i)
+        if (! panelArea[i].isEmpty())
+            theme::drawPanel (g, panelArea[i].reduced (1.0f));
+    for (auto& a : groupArea)
+        if (! a.isEmpty())
+            theme::drawInset (g, a);
+
+    for (auto& t : texts)
+    {
+        if (t.chips)
+        {
+            // little rounded tags, right-aligned
+            auto r = t.r;
+            auto items = StringArray::fromTokens (t.text, "|", "");
+            g.setFont (theme::font (7.5f, 700, 0.08f));
+            for (int i = items.size(); --i >= 0;)
+            {
+                GlyphArrangement ga;
+                ga.addLineOfText (g.getCurrentFont(), items[i], 0, 0);
+                const float w = ga.getBoundingBox (0, -1, true).getWidth() + 16.0f;
+                if (w > r.getWidth())
+                    break;
+                auto chip = r.removeFromRight (w).withSizeKeepingCentre (w, 18.0f);
+                r.removeFromRight (4.0f);
+                const auto c = shownTab() == Tab::warp ? warpYellow : theme::red;
+                g.setColour (c.withAlpha (0.12f));
+                g.fillRoundedRectangle (chip, 9.0f);
+                g.setColour (c.withAlpha (0.8f));
+                g.drawRoundedRectangle (chip.reduced (0.5f), 9.0f, 1.0f);
+                g.drawText (items[i], chip, Justification::centred, false);
+            }
+            continue;
+        }
+        if (t.heading >= 0)
+        {
+            // a panel title: chevron, then the heading and its hint
+            const int bar = t.text.indexOfChar ('|');
+            const bool open = shown[t.heading];
+            const auto c = Point<float> (t.r.getX() + 5.0f, t.r.getCentreY());
+            Path chevron;
+            if (open) { chevron.startNewSubPath (c.x - 4.0f, c.y - 2.0f); chevron.lineTo (c.x, c.y + 2.5f); chevron.lineTo (c.x + 4.0f, c.y - 2.0f); }
+            else      { chevron.startNewSubPath (c.x - 2.0f, c.y - 4.0f); chevron.lineTo (c.x + 2.5f, c.y); chevron.lineTo (c.x - 2.0f, c.y + 4.0f); }
+            g.setColour (theme::textStrong);
+            g.strokePath (chevron, PathStrokeType (1.8f, PathStrokeType::curved, PathStrokeType::rounded));
+            theme::drawHeading (g, t.r.withTrimmedLeft (16.0f).withSizeKeepingCentre (t.r.getWidth() - 16.0f, 16.0f).withX (t.r.getX() + 16.0f),
+                                t.text.substring (0, bar), t.text.substring (bar + 1));
+            continue;
+        }
+        g.setColour (theme::textMuted);
+        if (t.hint)
+            g.setFont (theme::font (8.0f, 500, 0.04f));
+        else
+            g.setFont (theme::font (7.5f, 700, 0.12f));
+        g.drawFittedText (t.text, t.r.toNearestInt(), t.just, t.hint && t.r.getHeight() > 26.0f ? 3 : 1, 1.0f);
+    }
 }
 } // namespace emx
