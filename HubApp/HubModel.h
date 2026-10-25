@@ -127,6 +127,7 @@ public:
     }
     bool textsLive = false;       // came from GitHub just now (otherwise the last copy or the built-in one)
     bool releasesLive = false;
+    juce::String releasesError;   // why the releases couldn't be loaded (empty when they could)
     juce::String clientId;        // the Hub's GitHub sign-in app (hub/hub.json)
 
     HubSettings settings;

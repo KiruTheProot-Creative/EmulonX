@@ -478,6 +478,7 @@ void Model::refresh (std::function<void()> done)
     auto onReleases = [this, st, finish] (const Response& r)
     {
         releasesLive = r.ok() && r.json().isArray();
+        releasesError = releasesLive ? String() : r.ok() ? String ("GitHub sent something unexpected") : Net::describe (r);
         if (releasesLive)
         {
             st->releases = r.json();

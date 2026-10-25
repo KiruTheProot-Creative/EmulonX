@@ -58,6 +58,12 @@ public:
 
     void shutdown();   // stop background work (app exit)
 
+    /** Set when GitHub refused the saved sign-in (it was revoked or ran out). The Hub then works signed out. */
+    std::atomic<bool> tokenRejected { false };
+
+    /** Why a request failed, in a few words for the window ("no internet connection", "GitHub's limit..."). */
+    static juce::String describe (const Response&);
+
 private:
     juce::ThreadPool pool { 4 };
     juce::CriticalSection lock;
