@@ -163,7 +163,7 @@ target_link_libraries(EmulonXSD PRIVATE
     juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 
 # --- Emulon X Hub: the launcher (downloads and updates everything) ------------
-set(EMX_HUB_VERSION "1.0ir")
+set(EMX_HUB_VERSION "1.1bf")
 juce_add_binary_data(EmulonXHubAssets
     HEADER_NAME HubAssets.h
     NAMESPACE   HubAssets
@@ -189,6 +189,7 @@ target_sources(EmulonXHub PRIVATE
     HubApp/HubModel.cpp
     HubApp/HubWidgets.cpp
     HubApp/HubUi.cpp
+    HubApp/HubWin.cpp
     Designer/SkinDocument.cpp
     Designer/PreviewView.cpp
     Source/Settings.cpp

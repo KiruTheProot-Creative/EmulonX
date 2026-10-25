@@ -77,7 +77,52 @@ void Net::api (const String& method, const String& path, const var& body, Callba
         text = JSON::toString (body, true);
         headers << "Content-Type: application/json\r\n";
     }
-    request (method, "https://api.github.com" + path, text, headers, std::move (cb));
+    const String address = "https://api.github.com" + path;
+    if (t.isEmpty())
+    {
+        request (method, address, text, headers, std::move (cb));
+        return;
+    }
+    // A sign-in GitHub no longer accepts (revoked, or the app's access removed) makes it refuse even public
+    // things like the releases list. Then drop it and ask again without it.
+    String authHeader = "Authorization: Bearer " + t + "\r\n";
+    String plain = headers.replace (authHeader, {});
+    request (method, address, text, headers, [this, method, address, text, plain, cb] (const Response& r)
+    {
+        if (r.status == 401)
+        {
+            tokenRejected = true;
+            setToken ({});
+            request (method, address, text, plain, cb);
+            return;
+        }
+        if (cb) cb (r);
+    });
+}
+
+String Net::describe (const Response& r)
+{
+    if (r.ok())
+        return {};
+    if (r.status == 0)
+        return "no internet connection (or a firewall blocks the Hub)";
+    if (r.status == 403 || r.status == 429)
+    {
+        String remaining, reset;
+        for (auto& k : r.headers.getAllKeys())
+        {
+            if (k.equalsIgnoreCase ("x-ratelimit-remaining")) remaining = r.headers[k].trim();
+            if (k.equalsIgnoreCase ("x-ratelimit-reset")) reset = r.headers[k].trim();
+        }
+        if (remaining == "0" || r.status == 429)
+        {
+            String when;
+            if (reset.getLargeIntValue() > 0)
+                when = " - try again after " + Time (reset.getLargeIntValue() * 1000).formatted ("%H:%M");
+            return "GitHub's limit for this hour is used up" + when;
+        }
+    }
+    return "GitHub answered with error " + String (r.status);
 }
 
 void Net::privateAssetLink (const String& assetApiUrl, std::function<void (String, String)> done)

@@ -127,6 +127,9 @@ public:
     }
     bool textsLive = false;       // came from GitHub just now (otherwise the last copy or the built-in one)
     bool releasesLive = false;
+    juce::String releasesError;
+    /** "Please close Ableton Live first..." when a program has the files an update must replace open (empty if none). */
+    juce::String programsBlocking (const juce::String& key, const juce::Array<juce::File>& folders) const;   // why the releases couldn't be loaded (empty when they could)
     juce::String clientId;        // the Hub's GitHub sign-in app (hub/hub.json)
 
     HubSettings settings;

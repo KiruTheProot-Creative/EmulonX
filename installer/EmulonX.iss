@@ -43,6 +43,8 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 CloseApplications=yes
+; also notice programs (a DAW) that have the plugin loaded, not only .exe / .dll files
+CloseApplicationsFilter=*.exe,*.dll,*.chm,*.vst3
 
 ; The GNU AGPL text (LICENSE) plus a short, less serious note at the end.
 LicenseFile=License.txt

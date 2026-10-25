@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "HubModel.h"
+#include "HubWin.h"
 #include "HubAssets.h"
 #include "Settings.h"
 #include <juce_cryptography/juce_cryptography.h>
@@ -478,6 +479,7 @@ void Model::refresh (std::function<void()> done)
     auto onReleases = [this, st, finish] (const Response& r)
     {
         releasesLive = r.ok() && r.json().isArray();
+        releasesError = releasesLive ? String() : r.ok() ? String ("GitHub sent something unexpected") : Net::describe (r);
         if (releasesLive)
         {
             st->releases = r.json();
@@ -945,6 +947,11 @@ void Model::installApp (const String& key, const Array<File>& folders, Done done
     }
     for (int i = 0; i < folders.size(); ++i)
         settings.set ("where." + key + "." + String (i), folders[i].getFullPathName());
+    if (const auto busy = programsBlocking (key, folders); busy.isNotEmpty())
+    {
+        done (false, busy);
+        return;
+    }
     if (! testBuild)
     {
         downloadApp (key, rel, rel.assetUrl, folders, done);
@@ -986,13 +993,20 @@ void Model::downloadApp (const String& key, const Release& rel, const String& ur
         }
        #if JUCE_WINDOWS
         auto q = [] (const File& f) { return "\"" + f.getFullPathName() + "\""; };
-        String params = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS";
+        // never let the installer shut a DAW down by itself (unsaved songs!): the Hub asks you to close it first
+        String params = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCLOSEAPPLICATIONS";
         if (key == "emx" && folders.size() >= 3)
             params << " /DIR=" << q (folders[0]) << " /STANDALONEDIR=" << q (folders[1]) << " /BANKSDIR=" << q (folders[2]);
         else if (key == "sd" && folders.size() >= 1)
             params << " /DIR=" << q (folders[0]);
         else if (key == "hub")
             params = "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS";
+        if (const auto busy = programsBlocking (key, folders); busy.isNotEmpty())
+        {
+            endJob();
+            done (false, busy);
+            return;
+        }
         runInstaller (key, setup, params, version, done);
        #else
         endJob();
@@ -1033,6 +1047,35 @@ void Model::runInstaller (const String& key, const File& setup, const String& pa
     });
 }
 
+namespace { String installFailReason (const String& logText, const String& key); }
+
+String Model::programsBlocking (const String& key, const Array<File>& folders) const
+{
+    // the files an update has to replace; a DAW with the plugin loaded (or the program itself) keeps them locked
+    Array<File> files;
+    if (key == "emx")
+    {
+        const auto plugin = [] (const File& dir) { return dir.getChildFile ("Emulon X.vst3").getChildFile ("Contents").getChildFile ("x86_64-win").getChildFile ("Emulon X.vst3"); };
+        if (folders.size() > 0) files.add (plugin (folders[0]));
+        files.add (plugin (File::getSpecialLocation (File::globalApplicationsDirectory).getChildFile ("Common Files").getChildFile ("VST3")));
+        if (folders.size() > 1) files.add (folders[1].getChildFile ("Emulon X.exe"));
+    }
+    else if (key == "sd" && folders.size() > 0)
+        files.add (folders[0].getChildFile ("Emulon X SD.exe"));
+    std::vector<std::wstring> paths;
+    for (auto& f : files)
+        paths.push_back (f.getFullPathName().toWideCharPointer());
+    StringArray names;
+    for (auto& n : win::programsUsing (paths))
+        names.addIfNotAlreadyThere (String (n.c_str()));
+    if (names.isEmpty())
+        return {};
+    const String app = key == "sd" ? "Emulon X SD" : "Emulon X";
+    return "Please close " + names.joinIntoString (", ") + " first - " + (names.size() == 1 ? "it has " : "they have ") + app
+           + " open, so it can't be updated. Then press install again.";
+}
+
+
 void Model::watchInstaller (const String& key, const File& log, const String& version, Done done)
 {
     setJob (key, "INSTALLING...", 0.85f);
@@ -1064,8 +1107,9 @@ void Model::watchInstaller (const String& key, const File& log, const String& ve
         }
         if (closed || waited > 30 * 60 * 1000)
         {
+            const auto reason = installFailReason (text, key);
             endJob();
-            finish (false, "The installer stopped before it was done.");
+            finish (false, reason);
             return;
         }
         setJob (key, "INSTALLING...", jmin (0.98f, currentJob.progress + 0.004f));
@@ -1076,6 +1120,38 @@ void Model::watchInstaller (const String& key, const File& log, const String& ve
 
 namespace
 {
+/** Why an installer gave up, from its log: the last line that says what went wrong, plus a plain hint. */
+String installFailReason (const String& logText, const String& key)
+{
+    const auto lines = StringArray::fromLines (logText);
+    String last;
+    for (auto l : lines)
+    {
+        // "2026-10-25 14:30:01.123   DeleteFile: ..." -> "DeleteFile: ..."
+        if (l.length() > 24 && l[4] == '-' && l[13] == ':')
+            l = l.substring (23).trim();
+        const auto low = l.toLowerCase();
+        if (low.contains ("error") || low.contains ("failed") || low.contains ("in use") || low.contains ("denied") || low.contains ("not enough"))
+            last = l;
+        else if (low.contains ("canceled") && last.isEmpty())
+            last = l;
+    }
+    const auto low = logText.toLowerCase();
+    const String app = key == "sd" ? "Emulon X SD" : "Emulon X";
+    String hint;
+    if (low.contains ("in use") || low.contains ("(32)") || low.contains ("code 32") || low.contains ("sharing violation"))
+        hint = app + " is still open somewhere" + (key == "emx" ? String (" (Ableton or another DAW, or the standalone)") : String()) + ". Close it and install again.";
+    else if (low.contains ("canceled"))
+        hint = "The install was cancelled.";
+    else if (low.contains ("denied") || low.contains ("(5)") || low.contains ("code 5"))
+        hint = "Windows didn't allow writing to the install folder. A program may still have " + app + " open - close it and try again.";
+    else if (low.contains ("not enough") || low.contains ("disk"))
+        hint = "There isn't enough free disk space.";
+    else
+        hint = "Please try again.";
+    return "The installer stopped before it was done. " + hint + (last.isNotEmpty() ? "\n(" + last.substring (0, 160) + ")" : String());
+}
+
 bool checksumOk (const File& f, const String& sha)
 {
     if (sha.isEmpty())

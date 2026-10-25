@@ -856,6 +856,22 @@ void HubComponent::refreshNow (bool fromTimer)
         if (safe == nullptr)
             return;
         auto& self = *safe;
+        if (Net::get().tokenRejected.exchange (false))
+        {
+            // GitHub no longer accepts the saved sign-in: forget it (sign in again for dev mode or submitting)
+            self.model.settings.set ("githubToken", "");
+            self.model.settings.set ("githubLogin", "");
+            self.flash ("Your GitHub sign-in stopped working, so you're signed out now. Sign in again for dev mode.");
+        }
+        if (Net::get().tokenRejected.exchange (false))
+        {
+            // GitHub no longer accepts the saved sign-in: forget it (sign in again for dev mode or submitting)
+            self.model.settings.set ("githubToken", "");
+            self.model.settings.set ("githubLogin", "");
+            if (self.dev)
+                self.setDevMode (false, {});
+            self.flash ("Your GitHub sign-in stopped working, so you're signed out. Sign in again for dev mode.");
+        }
         // first start: the skins that are already there aren't news
         if (! self.model.settings.flag ("knewSkins", false))
         {
@@ -870,7 +886,7 @@ void HubComponent::refreshNow (bool fromTimer)
         {
             const auto have = self.model.installedVersion (self.tab == Tab::sd ? "sd" : "emx");
             const auto& rel = self.tab == Tab::sd ? self.model.relSd : self.model.relEmx;
-            self.checkStatus = ! self.model.releasesLive ? String ("Couldn't reach GitHub")
+            self.checkStatus = ! self.model.releasesLive ? "Couldn't reach GitHub: " + self.model.releasesError
                              : ! rel.found ? String ("Not released yet")
                              : isNewer (rel.version, have) ? "Update found: " + rel.version : "Up to date (" + rel.version + ")";
             Timer::callAfterDelay (2500, [safe] { if (safe != nullptr) { safe->checkStatus = {}; safe->rebuild(); } });
@@ -1454,7 +1470,7 @@ void HubComponent::buildProduct (Product& p)
     }
     else
     {
-        ib->status = ! model.releasesLive ? String ("Couldn't reach GitHub to look for downloads") : String ("Not released yet - turn on notifications and the Hub tells you when it's out");
+        ib->status = ! model.releasesLive ? "Couldn't reach GitHub to look for downloads: " + model.releasesError : String ("Not released yet - turn on notifications and the Hub tells you when it's out");
         ib->dotColour = look::red;
         ib->big.setButtonText ("NOT AVAILABLE YET");
         ib->big.style = Style::quiet;
