@@ -1453,13 +1453,16 @@ void HubComponent::buildProduct (Product& p)
     }
     else if (update)
     {
-        ib->status = "Installed: " + have + " " + middot + " update available";
+        const auto onDisk = formatBytes (model.installedSize (p.key));
+        ib->status = "Installed: " + have + (onDisk.isNotEmpty() ? " (" + onDisk + ")" : String()) + " " + middot + " update available"
+                     + (size.isNotEmpty() ? " (" + size + " download)" : String());
         ib->dotColour = look::red;
         ib->big.setButtonText ("UPDATE TO " + rel.version.toUpperCase());
     }
     else if (have.isNotEmpty())
     {
-        ib->status = "Installed: " + have + (rel.found ? " " + middot + " up to date" : "");
+        const auto onDisk = formatBytes (model.installedSize (p.key));
+        ib->status = "Installed: " + have + (onDisk.isNotEmpty() ? " (" + onDisk + ")" : String()) + (rel.found ? " " + middot + " up to date" : "");
         ib->dotColour = look::ok;
         ib->big.setButtonText (isEmx ? "LAUNCH EMULON X" : "LAUNCH EMULON X SD");
     }

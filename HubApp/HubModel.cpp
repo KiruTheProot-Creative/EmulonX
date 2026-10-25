@@ -828,6 +828,29 @@ File Model::installedFolder (const String& key) const
     return path.isEmpty() ? File() : File (path).getParentDirectory();
 }
 
+juce::int64 Model::installedSize (const String& key) const
+{
+    // the files on disk now: the plugin folder + the standalone (Emulon X), or the program (SD)
+    // (the Hub asks often while redrawing, so it only looks again every few seconds)
+    const auto nowMs = Time::getMillisecondCounter();
+    if (auto it = sizeCache.find (key); it != sizeCache.end() && nowMs - it->second.first < 5000)
+        return it->second.second;
+    juce::int64 total = 0;
+    auto addFile = [&total] (const File& f) { if (f.existsAsFile()) total += f.getSize(); };
+    if (key == "emx")
+    {
+        const auto plugin = installedFolder ("emx").getChildFile ("Emulon X.vst3");
+        if (installedFolder ("emx") != File() && plugin.isDirectory())
+            for (const auto& e : RangedDirectoryIterator (plugin, true, "*", File::findFiles))
+                total += e.getFileSize();
+        addFile (appFile ("emx"));
+    }
+    else if (key == "sd")
+        addFile (appFile ("sd"));
+    sizeCache[key] = { nowMs, total };
+    return total;
+}
+
 File Model::appFile (const String& key) const
 {
    #if JUCE_WINDOWS

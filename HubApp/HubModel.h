@@ -128,10 +128,13 @@ public:
     bool textsLive = false;       // came from GitHub just now (otherwise the last copy or the built-in one)
     bool releasesLive = false;
     juce::String releasesError;
+    /** Bytes the installed program takes on disk now (0 if not installed or unknown). */
+    juce::int64 installedSize (const juce::String& key) const;
     /** "Please close Ableton Live first..." when a program has the files an update must replace open (empty if none). */
     juce::String programsBlocking (const juce::String& key, const juce::Array<juce::File>& folders) const;   // why the releases couldn't be loaded (empty when they could)
     juce::String clientId;        // the Hub's GitHub sign-in app (hub/hub.json)
 
+    mutable std::map<juce::String, std::pair<juce::uint32, juce::int64>> sizeCache;
     HubSettings settings;
     ImageStore images;
 
