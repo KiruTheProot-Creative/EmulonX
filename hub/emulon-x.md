@@ -1,9 +1,9 @@
 ---
 title: EMULON X
-subtitle: Sample synthesizer · VST3 & standalone
+subtitle: Sample synthesizer   VST3 & standalone
 tags: Free, Open source · AGPLv3, Windows · macOS
 ---
-A sampler in the spirit of E-mu's Emulator X, with the soul of Vital. Load your own samples or banks, shape them with filters, envelopes and effects, and play them right in your DAW.
+A sampler in the spirit of E-mu's Emulator X, while also easy to use. Load your own samples or banks, shape them with filters, envelopes and effects, and play them right in your DAW.
 
 ## Features
 - Multi-zone sampling with auto-mapping
