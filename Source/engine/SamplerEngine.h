@@ -88,7 +88,7 @@ private:
         float glide = 0.0f, glideStep = 0.0f;         // semitones still to slide, and per sample
         float level = 0.0f;
         int stage = 0;                        // 0 attack, 1 decay/sustain, 3 release
-        bool released = false, stolen = false, keepSpeed = true;
+        bool released = false, stolen = false, keepSpeed = true, inLoop = false;
         juce::uint64 age = 0;
     };
 

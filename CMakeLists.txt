@@ -81,6 +81,7 @@ set(EMX_SOURCES
     Source/engine/SamplerEngine.cpp
     Source/engine/SampleLoader.cpp
     Source/engine/Arpeggiator.cpp
+    Source/engine/SampleEdit.cpp
     Source/ui/PresetPanel.cpp
     Source/ui/BankPanel.cpp
     Source/ui/Explorer.cpp
@@ -226,6 +227,7 @@ if(EMX_BUILD_TESTS)
         Source/engine/SamplerEngine.cpp
         Source/engine/SampleLoader.cpp
         Source/engine/Arpeggiator.cpp
+        Source/engine/SampleEdit.cpp
         Source/fx/FxDefs.cpp
         Source/fx/FxDsp.cpp
         Source/fx/FxModel.cpp

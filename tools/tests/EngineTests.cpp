@@ -7,6 +7,7 @@
 #include "engine/SampleLoader.h"
 #include "fx/FxEngine.h"
 #include "engine/Arpeggiator.h"
+#include "engine/SampleEdit.h"
 #include "NaturalSort.h"
 #include "ui/SkinFile.h"
 #include "ui/SkinDraw.h"
@@ -1292,6 +1293,101 @@ int main (int argc, char** argv)
     }
 
     skinFileTests();
+
+    //== V2: loop directions =========================================================
+    {
+        // A ramp (value = position / length) played at its own pitch, so the output shows where the voice reads.
+        auto ramp = std::make_shared<SampleData>();
+        ramp->sampleRate = SR;
+        ramp->audio.setSize (1, 4800);
+        for (int i = 0; i < 4800; ++i)
+            ramp->audio.setSample (0, i, (float) i / 4800.0f);
+        auto pos = [&] (LoopDir dir, int at)
+        {
+            ZoneParams p = ZoneParams::defaultsFor (*ramp);
+            p.root = 60; p.keepSpeed = false; p.loopMode = LoopMode::loop; p.loopDir = dir;
+            p.loopStart = 1000; p.loopEnd = 2000; p.crossfade = 0; p.attack = 0.001f; p.sustain = 1.0f;
+            const auto r = play (ramp, p, 60, 0.1, Interp::linear);
+            return r.left[(size_t) at] / 0.5f * 4800.0f;   // headroom 0.5 at full velocity, centre pan
+        };
+        const bool fwd = near (pos (LoopDir::forward, 2300), 1300, 3) && near (pos (LoopDir::forward, 3300), 1300, 3);
+        const bool ping = near (pos (LoopDir::pingPong, 2300), 1699, 4) && near (pos (LoopDir::pingPong, 3300), 1300, 4);
+        const bool back = near (pos (LoopDir::backward, 2300), 1699, 4) && pos (LoopDir::backward, 2600) < pos (LoopDir::backward, 2500);
+        check (fwd, "loop forward repeats start to end", String (pos (LoopDir::forward, 2300), 0) + " / " + String (pos (LoopDir::forward, 3300), 0));
+        check (ping, "loop ping-pong goes back and forth", String (pos (LoopDir::pingPong, 2300), 0) + " / " + String (pos (LoopDir::pingPong, 3300), 0));
+        check (back, "loop backward plays end to start", String (pos (LoopDir::backward, 2300), 0));
+        // released in "until release": carries on from where it really is, then stops at the end
+        ZoneParams p = ZoneParams::defaultsFor (*ramp);
+        p.root = 60; p.keepSpeed = false; p.loopMode = LoopMode::untilRelease; p.loopDir = LoopDir::pingPong;
+        p.loopStart = 1000; p.loopEnd = 2000; p.attack = 0.001f; p.release = 0.001f; p.sustain = 1.0f;
+        const auto r = play (ramp, p, 60, 0.2, Interp::linear, 2600.0 / SR);
+        check (r.finite && r.aliveSeconds < 0.15, "a released ping-pong loop finishes cleanly", String (r.aliveSeconds, 3) + " s");
+    }
+
+    //== V2: waveform warp =============================================================
+    {
+        bool bounded = true;
+        for (int sh = 0; sh < edit::numWarpShapes; ++sh)
+            for (float a : { 0.0f, 0.5f, 1.0f })
+                for (float v = -1.0f; v <= 1.0f; v += 0.05f)
+                {
+                    const float y = edit::warpValue ((edit::WarpShape) sh, v, a);
+                    bounded = bounded && std::isfinite (y) && std::abs (y) <= 1.6f;
+                }
+        check (bounded, "every warp shape stays in range");
+        check (near (edit::warpValue (edit::WarpShape::drive, 0.3f, 0.0f), 0.3f, 0.06) && near (edit::warpValue (edit::WarpShape::bend, 0.3f, 0.0f), 0.3f, 1e-6),
+               "a warp at 0% leaves the wave nearly as it is");
+
+        auto quiet = sine (SR, 0.5, 220.0, 0.2f);
+        quiet->source = "file|x.wav";
+        edit::Warp w;
+        w.shape = edit::WarpShape::fold; w.amount = 0.8f;
+        auto folded = edit::applyWarp (*quiet, w);
+        double diff = 0;
+        for (int i = 0; i < quiet->length(); ++i)
+            diff += std::abs (folded->audio.getSample (0, i) - quiet->audio.getSample (0, i));
+        check (folded->length() == quiet->length() && diff / quiet->length() > 0.02 && folded->source == "edited|file|x.wav",
+               "fold changes a quiet sample (as much as a loud one) and marks it as edited", String (diff / quiet->length(), 4));
+        check (folded->audio.getMagnitude (0, 0, folded->length()) <= 0.2f * 1.01f, "a warp keeps the sample's loudest level");
+
+        edit::Warp part = w;
+        part.from = 6000; part.to = 12000;
+        auto onlyPart = edit::applyWarp (*quiet, part);
+        bool outsideSame = true, insideChanged = false;
+        for (int i = 0; i < quiet->length(); ++i)
+        {
+            const bool same = onlyPart->audio.getSample (0, i) == quiet->audio.getSample (0, i);
+            if (i < 6000 || i >= 12000) outsideSame = outsideSame && same;
+            else if (i > 6100 && i < 11900 && ! same) insideChanged = true;
+        }
+        check (outsideSame && insideChanged, "a warp of the loop changes only the loop");
+        edit::Warp mix0 = w;
+        mix0.mix = 0.0f;
+        auto dry = edit::applyWarp (*quiet, mix0);
+        check (dry->audio.getSample (0, 1234) == quiet->audio.getSample (0, 1234), "mix 0% keeps the original");
+    }
+
+    //== V2: splicer hits ==============================================================
+    {
+        auto loop = std::make_shared<SampleData>();
+        loop->sampleRate = SR;
+        loop->audio.setSize (1, (int) SR);
+        loop->audio.clear();
+        Random rnd (7);
+        const double at[] { 0.0, 0.125, 0.25, 0.5, 0.625, 0.75 };
+        for (double t : at)
+            for (int i = 0; i < 2400; ++i)
+                loop->audio.setSample (0, (int) (t * SR) + i, (rnd.nextFloat() * 2.0f - 1.0f) * 0.8f * std::exp (-i / 400.0f));
+        const auto hits = edit::findHits (*loop, 0.6f);
+        bool placed = hits.size() == 6;
+        for (size_t i = 0; placed && i < hits.size(); ++i)
+            placed = std::abs (hits[i] - (int) (at[i] * SR)) < 400;
+        String where;
+        for (auto h : hits) where << String (h / SR, 3) << " ";
+        check (placed, "the splicer finds each drum hit", where.trim());
+        const auto even = edit::splitEvenly (48000, 8);
+        check (even.size() == 8 && even[0] == 0 && even[1] == 6000 && even[7] == 42000, "split evenly into 8");
+    }
 
     std::printf ("\n%d passed, %d failed\n", passes, failures);
     return failures == 0 ? 0 : 1;

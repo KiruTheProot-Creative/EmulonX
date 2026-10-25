@@ -285,7 +285,7 @@ void SamplerEngine::startVoicesFor (int note, int velocity, float glideFrom, con
         v.glideStep = glideStepFor (glideFrom);
         v.level = 0.0f;
         v.stage = 0;
-        v.released = v.stolen = false;
+        v.released = v.stolen = v.inLoop = false;
         v.keepSpeed = p.keepSpeed;
         v.age = ++ageCounter;
     }
@@ -350,7 +350,33 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
     const int loopLen = le - ls;
     const int playEnd = z.sampleEnd > 0 ? juce::jmin (n, z.sampleEnd) : n;   // sample end marker
     const bool looping = z.loopMode != LoopMode::off && ! (z.loopMode == LoopMode::untilRelease && v.released) && loopLen >= 16;
-    const int xf = looping ? juce::jmax (0, juce::jmin (z.crossfade, ls, loopLen / 2)) : 0;
+    const auto dir = z.loopDir;
+    // Positions run on past the loop end; this folds them back into the loop for each direction.
+    // Forward repeats every loop length, backward too (end to start), ping-pong every two lengths.
+    const double period = dir == LoopDir::pingPong ? 2.0 * loopLen : (double) loopLen;
+    auto fold = [ls, le, loopLen, dir] (double x) noexcept
+    {
+        if (x < le)
+            return x;
+        const double o = x - le;
+        if (dir == LoopDir::forward)
+            return ls + std::fmod (o, (double) loopLen);
+        if (dir == LoopDir::backward)
+            return le - 1.0 - std::fmod (o, (double) (loopLen - 1));
+        const double q = std::fmod (o, 2.0 * loopLen);
+        return q < loopLen ? le - 1.0 - q * (loopLen - 1.0) / loopLen : ls + (q - loopLen) * (loopLen - 1.0) / loopLen;
+    };
+    // A note that stops looping (released in "until release") carries on from where it really is in the sample.
+    if (! looping && v.pos >= le && v.pos < le + period && v.inLoop)
+    {
+        const double real = fold (v.pos);
+        v.pos = real;
+        v.read0 = fold (v.read0);
+        v.read1 = fold (v.read1);
+    }
+    v.inLoop = looping;
+    // The cross-fade smooths the jump from the loop end back to its start, so it only applies going forward.
+    const int xf = looping && dir == LoopDir::forward ? juce::jmax (0, juce::jmin (z.crossfade, ls, loopLen / 2)) : 0;
     const float* table = mode == Interp::sinc ? SincTables::get().forStep (step) : nullptr;
 
     auto read = [&] (const float* ch, double x) noexcept -> float
@@ -358,7 +384,7 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
         if (looping)
         {
             if (x >= le)
-                x = ls + std::fmod (x - ls, (double) loopLen);
+                x = fold (x);
             if (xf > 0 && x >= le - xf)
             {
                 // Crossfade: fade the loop end into the audio just before the loop start.
@@ -407,8 +433,8 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
             a = read (c0, x);
             b = stereo ? read (c1, x) : a;
             v.pos += step;
-            if (looping && v.pos >= le)
-                v.pos -= loopLen;
+            if (looping && v.pos >= le + period)
+                v.pos -= period;
         }
         else
         {
@@ -425,7 +451,7 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
                 auto quick = [&] (double x) noexcept
                 {
                     if (looping && x >= le)
-                        x = ls + std::fmod (x - ls, (double) loopLen);
+                        x = fold (x);
                     return interpolate (c0, x, n, Interp::linear, nullptr);
                 };
                 constexpr int M = 32;              // compare 32 points, 3 output samples apart
@@ -466,8 +492,8 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
             if (++v.grainCounter >= G)
                 v.grainCounter = 0;
             v.pos += k;
-            if (looping && v.pos >= le)
-                v.pos -= loopLen;
+            if (looping && v.pos >= le + period)
+                v.pos -= period;
         }
 
         if (! looping && v.pos >= playEnd)

@@ -99,11 +99,18 @@ void EmulonXProcessor::applySettings()
     setBendRange = settings->getBendRange();
     emx::setMiddleCOctave (settings->getMiddleCOctave());
     setTuneCents = (float) (1200.0 * std::log2 (jlimit (400.0f, 480.0f, settings->getA4()) / 440.0));
-    if (settings->getEmbedSamples())
+    if (needsEmbedding())
     {
         const ScopedLock sl (embedLock);
         embedDirty = true;
     }
+}
+
+bool EmulonXProcessor::needsEmbedding() const
+{
+    // Warped samples only exist in the preset, so they always go inside the project.
+    return settings->getEmbedSamples()
+        || std::any_of (zones.begin(), zones.end(), [] (auto& z) { return z.sample != nullptr && z.sample->source.startsWith ("edited|"); });
 }
 
 //== Audio ========================================================================
@@ -382,7 +389,7 @@ void EmulonXProcessor::timerCallback()
     bool build = false;
     {
         const ScopedLock sl (embedLock);
-        build = embedDirty && ! embedBuilding && settings->getEmbedSamples() && ! isBusy();
+        build = embedDirty && ! embedBuilding && needsEmbedding() && ! isBusy();
         if (build)
             embedBuilding = true;
     }
@@ -429,6 +436,8 @@ PresetToSave EmulonXProcessor::makePresetToSave() const
     p.fx = fxToJson (false);
     p.arp = arpSettings.toJson();
     p.voice = voiceSettings.toJson();
+    if (splice.on)
+        p.splice = splice.toJson();
     auto ordered = zones;
     std::sort (ordered.begin(), ordered.end(), [] (auto& a, auto& b) { return a.order < b.order; });
     for (auto& z : ordered)
@@ -495,6 +504,7 @@ void EmulonXProcessor::newPreset()
     fxSetup = fx::Setup();
     arpSettings = ArpSettings();
     voiceSettings = VoiceSettings();
+    splice = SpliceState();
     publishPlayModes();
     ++fxStructure;
     interp = (Interp) jlimit (0, 2, settings->getDefaultInterp());
@@ -704,7 +714,7 @@ void EmulonXProcessor::pushUndo (const String& tag)
     lastUndoTime = now;
     if (sameGesture)
         return;
-    undoStack.push_back ({ zones, interp, selectedZoneId, fxSetup, arpSettings, voiceSettings });
+    undoStack.push_back ({ zones, interp, selectedZoneId, fxSetup, arpSettings, voiceSettings, splice });
     if (undoStack.size() > 100)
         undoStack.erase (undoStack.begin());
     redoStack.clear();
@@ -721,7 +731,7 @@ void EmulonXProcessor::undo()
 {
     if (undoStack.empty())
         return;
-    redoStack.push_back ({ zones, interp, selectedZoneId, fxSetup, arpSettings, voiceSettings });
+    redoStack.push_back ({ zones, interp, selectedZoneId, fxSetup, arpSettings, voiceSettings, splice });
     auto st = std::move (undoStack.back());
     undoStack.pop_back();
     zones = std::move (st.zones);
@@ -730,6 +740,7 @@ void EmulonXProcessor::undo()
     fxSetup = std::move (st.fx);
     arpSettings = st.arp;
     voiceSettings = st.voice;
+    splice = std::move (st.splice);
     publishPlayModes();
     ++fxStructure;
     lastUndoTag = {};
@@ -741,7 +752,7 @@ void EmulonXProcessor::redo()
 {
     if (redoStack.empty())
         return;
-    undoStack.push_back ({ zones, interp, selectedZoneId, fxSetup, arpSettings, voiceSettings });
+    undoStack.push_back ({ zones, interp, selectedZoneId, fxSetup, arpSettings, voiceSettings, splice });
     auto st = std::move (redoStack.back());
     redoStack.pop_back();
     zones = std::move (st.zones);
@@ -750,11 +761,246 @@ void EmulonXProcessor::redo()
     fxSetup = std::move (st.fx);
     arpSettings = st.arp;
     voiceSettings = st.voice;
+    splice = std::move (st.splice);
     publishPlayModes();
     ++fxStructure;
     lastUndoTag = {};
     message ("Redo");
     publish();
+}
+
+
+//== Editing the sample (V2) ======================================================
+void EmulonXProcessor::warpZone (int id, const edit::Warp& w)
+{
+    auto it = std::find_if (zones.begin(), zones.end(), [id] (auto& z) { return z.id == id; });
+    if (it == zones.end() || it->sample == nullptr)
+        return;
+    pushUndo ("warp" + String (Time::getMillisecondCounter()));
+    const auto old = it->sample;
+    std::shared_ptr<const SampleData> warped = edit::applyWarp (*old, w);
+    const auto label = String (edit::warpShapeName (w.shape)) + " " + String (roundToInt (w.amount * 100.0f)) + "%"
+                       + (w.from > 0 || (w.to >= 0 && w.to < old->length()) ? (splice.on ? " SLICE" : " LOOP") : "");
+    // every zone using the same sample gets the new one (all slices in splicer mode)
+    for (auto& z : zones)
+        if (z.sample == old)
+        {
+            z.beforeWarp.push_back (old);
+            z.warps.add (label);
+            z.sample = warped;
+            z.source = warped->source;
+        }
+    message ("Warped " + old->name + ": " + label);
+    publish();
+}
+
+void EmulonXProcessor::unwarpZone (int id)
+{
+    auto it = std::find_if (zones.begin(), zones.end(), [id] (auto& z) { return z.id == id; });
+    if (it == zones.end() || it->beforeWarp.empty())
+        return;
+    pushUndo ("unwarp" + String (Time::getMillisecondCounter()));
+    const auto now = it->sample, back = it->beforeWarp.back();
+    for (auto& z : zones)
+        if (z.sample == now && ! z.beforeWarp.empty())
+        {
+            z.sample = back;
+            z.source = back->source;
+            z.beforeWarp.pop_back();
+            z.warps.remove (z.warps.size() - 1);
+        }
+    message ("Took back the last warp");
+    publish();
+}
+
+std::shared_ptr<const SampleData> EmulonXProcessor::getSliceSample() const
+{
+    return splice.on && ! zones.empty() ? zones.front().sample : nullptr;
+}
+
+void EmulonXProcessor::rebuildSlices (std::shared_ptr<const SampleData> sample, const ZoneParams& voice)
+{
+    if (sample == nullptr)
+        return;
+    const int n = sample->length();
+    auto& cuts = splice.cuts;
+    std::sort (cuts.begin(), cuts.end());
+    cuts.erase (std::unique (cuts.begin(), cuts.end()), cuts.end());
+    cuts.erase (std::remove_if (cuts.begin(), cuts.end(), [n] (int c) { return c < 0 || c >= n - 16; }), cuts.end());
+    if (cuts.empty() || cuts.front() != 0)
+        cuts.insert (cuts.begin(), 0);
+    if ((int) cuts.size() > 128 - splice.firstKey)
+        cuts.resize ((size_t) (128 - splice.firstKey));
+
+    // keep the warp history and the selected slice
+    const int selIndex = juce::jmax (0, getSelectedIndex());
+    const auto warps = zones.empty() ? StringArray() : zones.front().warps;
+    const auto before = zones.empty() ? std::vector<std::shared_ptr<const SampleData>>() : zones.front().beforeWarp;
+    std::vector<int> ids;
+    for (auto& z : zones)
+        ids.push_back (z.id);
+
+    zones.clear();
+    for (size_t i = 0; i < cuts.size(); ++i)
+    {
+        ModelZone z;
+        z.id = i < ids.size() ? ids[i] : nextZoneId++;
+        z.order = (int) i;
+        z.sample = sample;
+        z.source = sample->source;
+        z.name = "SLICE " + String ((int) i + 1);
+        z.warps = warps;
+        z.beforeWarp = before;
+        auto& p = z.params;
+        p = voice;
+        p.root = p.loKey = p.hiKey = juce::jlimit (0, 127, splice.firstKey + (int) i);
+        p.loVel = 1; p.hiVel = 127;
+        p.sampleStart = cuts[i];
+        p.sampleEnd = splice.toEnd || i + 1 >= cuts.size() ? n : cuts[i + 1];
+        p.randomStart = false;
+        p.randomEnd = p.sampleStart;
+        p.loopMode = LoopMode::off;
+        p.loopStart = p.sampleStart;
+        p.loopEnd = p.sampleEnd;
+        p.clampTo (n);
+        zones.push_back (std::move (z));
+    }
+    nextOrder = (int) zones.size();
+    selectedZoneId = zones[(size_t) juce::jlimit (0, (int) zones.size() - 1, selIndex)].id;
+}
+
+void EmulonXProcessor::setSplicer (bool on)
+{
+    if (on == splice.on)
+        return;
+    if (on)
+    {
+        const auto* src = getSelectedZone();
+        if (src == nullptr || src->sample == nullptr)
+            for (auto& z : zones)
+                if (z.sample != nullptr) { src = &z; break; }
+        if (src == nullptr)
+        {
+            message ("Add a sample first - the splicer chops one sample into slices");
+            return;
+        }
+        pushUndo ("splicer");
+        auto sample = src->sample;
+        auto voice = src->params;
+        voice.keepSpeed = false;   // slices play as they are
+        voice.semitones = 0;
+        voice.tuneCents = 0.0f;
+        splice.samplerZones = zones;
+        splice.samplerSelected = selectedZoneId;
+        splice.on = true;
+        splice.cuts = edit::findHits (*sample, 0.6f, 32);
+        if (splice.cuts.size() < 2)
+            splice.cuts = edit::splitEvenly (sample->length(), 8);
+        zones.clear();
+        rebuildSlices (sample, voice);
+        message ("Splicer: " + String ((int) splice.cuts.size()) + " slices from " + noteName (splice.firstKey));
+    }
+    else
+    {
+        pushUndo ("sampler");
+        zones = splice.samplerZones;
+        selectedZoneId = splice.samplerSelected;
+        splice = SpliceState();
+        message ("Sampler mode");
+    }
+    publish();
+}
+
+void EmulonXProcessor::setSliceCuts (std::vector<int> cuts)
+{
+    if (! splice.on || zones.empty())
+        return;
+    pushUndo ("slicecuts");
+    splice.cuts = std::move (cuts);
+    rebuildSlices (zones.front().sample, zones.front().params);
+    publish();
+}
+
+void EmulonXProcessor::findSliceHits (float sensitivity)
+{
+    if (auto s = getSliceSample())
+    {
+        auto hits = edit::findHits (*s, sensitivity, 64);
+        message ("Found " + String ((int) hits.size()) + " hits");
+        setSliceCuts (std::move (hits));
+    }
+}
+
+void EmulonXProcessor::splitSlicesEvenly (int count)
+{
+    if (auto s = getSliceSample())
+        setSliceCuts (edit::splitEvenly (s->length(), count));
+}
+
+void EmulonXProcessor::setSliceFirstKey (int key)
+{
+    if (! splice.on || zones.empty())
+        return;
+    pushUndo ("slicekey");
+    splice.firstKey = juce::jlimit (0, 127 - (int) splice.cuts.size() + 1, key);
+    rebuildSlices (zones.front().sample, zones.front().params);
+    publish();
+}
+
+void EmulonXProcessor::setSlicesToEnd (bool toEnd)
+{
+    if (! splice.on || zones.empty() || toEnd == splice.toEnd)
+        return;
+    pushUndo ("sliceend");
+    splice.toEnd = toEnd;
+    rebuildSlices (zones.front().sample, zones.front().params);
+    publish();
+}
+
+void EmulonXProcessor::slicesToZones()
+{
+    if (! splice.on)
+        return;
+    pushUndo ("slicestozones");
+    const auto name = zones.empty() || zones.front().sample == nullptr ? String() : zones.front().sample->name;
+    for (size_t i = 0; i < zones.size(); ++i)
+        zones[i].name = name + " " + String ((int) i + 1);
+    splice = SpliceState();
+    message ("The slices are zones now");
+    publish();
+}
+
+void EmulonXProcessor::setSliceVoice (const ZoneParams& v)
+{
+    if (! splice.on)
+        return;
+    pushUndo ("slicevoice");
+    for (auto& z : zones)
+    {
+        auto& p = z.params;
+        p.attack = jlimit (0.001f, 10.0f, v.attack); p.decay = jlimit (0.001f, 10.0f, v.decay);
+        p.sustain = jlimit (0.0f, 1.0f, v.sustain); p.release = jlimit (0.001f, 10.0f, v.release);
+        p.gainDb = jlimit (-48.0f, 24.0f, v.gainDb); p.pan = jlimit (-100.0f, 100.0f, v.pan);
+        p.tuneCents = jlimit (-100.0f, 100.0f, v.tuneCents); p.semitones = jlimit (-24, 24, v.semitones);
+        p.keepSpeed = v.keepSpeed; p.grainMs = jlimit (20.0f, 150.0f, v.grainMs);
+    }
+    publish();
+}
+
+void EmulonXProcessor::applySpliceJson (const var& j)
+{
+    if (! j.isObject() || zones.empty())
+        return;
+    splice = SpliceState();
+    splice.on = true;
+    splice.firstKey = jlimit (0, 127, (int) j.getProperty ("firstKey", 48));
+    splice.toEnd = (bool) j.getProperty ("toEnd", false);
+    if (auto* c = j.getProperty ("cuts", var()).getArray())
+        for (auto& x : *c)
+            splice.cuts.push_back ((int) x);
+    if (splice.cuts.empty())
+        for (auto& z : zones)
+            splice.cuts.push_back (z.params.sampleStart);
 }
 
 int EmulonXProcessor::getPlayheads (SamplerEngine::Playhead* out, int maxCount) const noexcept
@@ -818,6 +1064,7 @@ void EmulonXProcessor::addLoaded (LoadResult&& r, bool autoMapAfter, const File&
         }
         clearUndo();
         zones.clear();
+        splice = SpliceState();
         presetName = r.presetName;
         presetFile = loader::isPresetFile (fromFile) ? fromFile : File();
         if (r.interp >= 0)
@@ -827,6 +1074,20 @@ void EmulonXProcessor::addLoaded (LoadResult&& r, bool autoMapAfter, const File&
         updateHostDisplay (ChangeDetails().withProgramChanged (true));
     }
 
+    if (! r.isPreset && ! r.zones.empty() && splice.on)
+    {
+        // splicer mode: a dropped sample becomes the one that's sliced
+        pushUndo ("splicesample");
+        auto voice = getSelectedZone() != nullptr ? getSelectedZone()->params : r.zones[0].params;
+        auto sample = r.zones[0].sample;
+        splice.cuts = edit::findHits (*sample, 0.6f, 32);
+        if (splice.cuts.size() < 2)
+            splice.cuts = edit::splitEvenly (sample->length(), 8);
+        rebuildSlices (sample, voice);
+        message ("Sliced " + sample->name + " into " + String ((int) splice.cuts.size()) + " slices");
+        publish();
+        return;
+    }
     if (! r.isPreset && ! r.zones.empty())
         pushUndo ("add" + String (nextZoneId));
     if (! r.zones.empty())
@@ -853,6 +1114,7 @@ void EmulonXProcessor::addLoaded (LoadResult&& r, bool autoMapAfter, const File&
         arpSettings = ArpSettings::fromJson (r.arp);
         voiceSettings = VoiceSettings::fromJson (r.voice);
         publishPlayModes();
+        applySpliceJson (r.splice);
     }
 
     if (! r.errors.isEmpty())
@@ -1004,7 +1266,7 @@ void EmulonXProcessor::writeZonesToState()
          .setProperty ("name", z.name, nullptr)
          .setProperty ("root", p.root, nullptr).setProperty ("lo", p.loKey, nullptr).setProperty ("hi", p.hiKey, nullptr)
          .setProperty ("vlo", p.loVel, nullptr).setProperty ("vhi", p.hiVel, nullptr)
-         .setProperty ("loop", (int) p.loopMode, nullptr).setProperty ("ls", p.loopStart, nullptr)
+         .setProperty ("loop", (int) p.loopMode, nullptr).setProperty ("ldir", (int) p.loopDir, nullptr).setProperty ("ls", p.loopStart, nullptr)
          .setProperty ("le", p.loopEnd, nullptr).setProperty ("xf", p.crossfade, nullptr)
          .setProperty ("ss", p.sampleStart, nullptr).setProperty ("se", p.sampleEnd, nullptr)
          .setProperty ("rs", p.randomStart, nullptr).setProperty ("re", p.randomEnd, nullptr)
@@ -1023,6 +1285,7 @@ void EmulonXProcessor::writeZonesToState()
     apvts.state.setProperty ("fx", JSON::toString (fxToJson (true), true), nullptr);
     apvts.state.setProperty ("arp", JSON::toString (arpSettings.toJson(), true), nullptr);
     apvts.state.setProperty ("voice", JSON::toString (voiceSettings.toJson(), true), nullptr);
+    apvts.state.setProperty ("splice", splice.on ? JSON::toString (splice.toJson(), true) : String(), nullptr);
 }
 
 void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
@@ -1046,11 +1309,13 @@ void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
     arpSettings = ArpSettings::fromJson (JSON::parse (apvts.state.getProperty ("arp", "").toString()));
     voiceSettings = VoiceSettings::fromJson (JSON::parse (apvts.state.getProperty ("voice", "").toString()));
     publishPlayModes();
+    splice = SpliceState();
+    const auto spliceJson = JSON::parse (apvts.state.getProperty ("splice", "").toString());
     if (! embedded.isEmpty())
     {
         const auto name = presetName;
         runInBackground<LoadResult> ([embedded, name] { return loader::loadPresetFromMemory (embedded, "project", name); },
-                                     [this, stateFx] (LoadResult& r)
+                                     [this, stateFx, spliceJson] (LoadResult& r)
                                      {
                                          for (auto& lz : r.zones)
                                          {
@@ -1070,6 +1335,7 @@ void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
                                              applyFxJson (stateFx, {}, false);
                                          else
                                              applyFxJson (r.fx, zoneFx, false);
+                                         applySpliceJson (spliceJson);
                                          {
                                              const ScopedLock sl (embedLock);
                                              embedDirty = true;
@@ -1092,6 +1358,7 @@ void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
         auto& p = z.params;
         p.root = c["root"]; p.loKey = c["lo"]; p.hiKey = c["hi"]; p.loVel = c["vlo"]; p.hiVel = c["vhi"];
         p.loopMode = (LoopMode) jlimit (0, 2, (int) c["loop"]);
+        p.loopDir = (LoopDir) jlimit (0, 2, (int) c.getProperty ("ldir", 0));
         p.loopStart = c["ls"]; p.loopEnd = c["le"]; p.crossfade = c["xf"];
         p.sampleStart = c["ss"]; p.sampleEnd = c["se"];
         p.randomStart = c["rs"]; p.randomEnd = c["re"];
@@ -1101,6 +1368,7 @@ void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
         zones.push_back (z);
     }
     applyFxJson (stateFx, {}, false);
+    applySpliceJson (spliceJson);
 
     using Loaded = std::pair<std::shared_ptr<const SampleData>, String>;
     for (auto& z : zones)
@@ -1154,7 +1422,7 @@ void EmulonXProcessor::getStateInformation (MemoryBlock& dest)
 
     MemoryBlock packed;
     const bool allLoaded = std::all_of (zones.begin(), zones.end(), [] (auto& z) { return z.sample != nullptr; });
-    if (settings->getEmbedSamples() && ! zones.empty() && allLoaded)
+    if (needsEmbedding() && ! zones.empty() && allLoaded)
     {
         const ScopedLock sl (embedLock);
         if (embedDirty && MessageManager::existsAndIsCurrentThread())

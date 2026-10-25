@@ -122,6 +122,8 @@ ZoneParams paramsFromJson (const var& j, const SampleData& s, bool v1)
         const auto env = j.getProperty ("envelope", var());
         auto envNum = [&env] (const char* key, double fallback) { const auto v = env.getProperty (key, var()); return v.isVoid() ? fallback : (double) v; };
         p.loopMode  = loopModeFrom (j.getProperty ("loopMode", "off").toString());
+        const auto dir = j.getProperty ("loopDirection", "forward").toString();
+        p.loopDir   = dir == "pingpong" ? LoopDir::pingPong : dir == "backward" ? LoopDir::backward : LoopDir::forward;
         p.loopStart = (int) num ("loopStart", p.loopStart);
         p.loopEnd   = (int) num ("loopEnd", p.loopEnd);
         p.crossfade = (int) num ("loopCrossfade", 0);
@@ -154,6 +156,7 @@ static var paramsToJson (const String& sampleFile, const ZoneParams& p)
     z->setProperty ("loVel", p.loVel);
     z->setProperty ("hiVel", p.hiVel);
     z->setProperty ("loopMode", loopModeName (p.loopMode));
+    z->setProperty ("loopDirection", p.loopDir == LoopDir::pingPong ? "pingpong" : p.loopDir == LoopDir::backward ? "backward" : "forward");
     z->setProperty ("loopStart", p.loopStart);
     z->setProperty ("loopEnd", p.loopEnd);
     z->setProperty ("loopCrossfade", p.crossfade);
@@ -213,6 +216,7 @@ static LoadResult readPreset (ZipFile& zip, const String& sourcePrefix, const St
     r.fx = json.getProperty ("fx", var());
     r.arp = json.getProperty ("arp", var());
     r.voice = json.getProperty ("voice", var());
+    r.splice = json.getProperty ("splice", var());
 
     if (auto* macros = json.getProperty ("macros", var()).getArray())
         for (auto& m : *macros)
@@ -322,8 +326,10 @@ static std::shared_ptr<const SampleData> sampleFromZip (ZipFile& zip, const Stri
     return {};
 }
 
-std::shared_ptr<const SampleData> loadSource (const String& source, String& error)
+std::shared_ptr<const SampleData> loadSource (const String& sourceIn, String& error)
 {
+    // A sample changed in the editor (warped) is normally kept inside the project; if it isn't, the original comes back.
+    const auto source = sourceIn.startsWith ("edited|") ? sourceIn.fromFirstOccurrenceOf ("edited|", false, false) : sourceIn;
     const auto parts = StringArray::fromTokens (source, "|", "");
     if (parts.size() >= 2 && parts[0] == "file")
     {
@@ -435,6 +441,8 @@ MemoryBlock presetToBytes (const PresetToSave& p, String& error)
         root->setProperty ("arp", p.arp);
     if (! p.voice.isVoid())
         root->setProperty ("voice", p.voice);
+    if (! p.splice.isVoid())
+        root->setProperty ("splice", p.splice);
     root->setProperty ("samples", samples);
     root->setProperty ("zones", zones);
     root->setProperty ("createdWith", "Emulon X " EMX_VERSION_STRING);

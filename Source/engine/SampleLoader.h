@@ -26,6 +26,7 @@ struct LoadResult
     MacroList macros;            // from a preset (may be empty)
     juce::var fx;                // FX section (chains, modulation, envelopes)
     juce::var arp, voice;        // arpeggiator and mono / poly settings (may be void)
+    juce::var splice;            // splicer mode: first key, cuts (may be void)
     juce::StringArray errors;
 };
 
@@ -36,7 +37,7 @@ struct PresetToSave
     Interp interp = Interp::sinc;
     std::vector<LoadedZone> zones;
     MacroList macros;
-    juce::var fx, arp, voice;
+    juce::var fx, arp, voice, splice;
 };
 
 struct BankInfo

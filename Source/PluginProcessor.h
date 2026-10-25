@@ -9,6 +9,7 @@
 #include "engine/ReleasePool.h"
 #include "fx/FxEngine.h"
 #include "engine/Arpeggiator.h"
+#include "engine/SampleEdit.h"
 #include "Settings.h"
 
 namespace emx
@@ -26,6 +27,32 @@ struct ModelZone
     ZoneParams params;
     int order = 0;
     fx::Chain fx;   // this zone's own FX channel (runs before the whole-preset chain)
+    // Warps baked into this zone's sample: what each one was, and the sample before it (for "undo last warp").
+    juce::StringArray warps;
+    std::vector<std::shared_ptr<const SampleData>> beforeWarp;
+};
+
+/** Splicer mode: one sample chopped into slices, one slice per key. The slices are ordinary zones
+    (rebuilt from the cuts); the zones from before are kept to go back to. */
+struct SpliceState
+{
+    bool on = false;
+    std::vector<int> cuts;     // slice starts in frames, the first is 0
+    int firstKey = 48;
+    bool toEnd = false;        // each slice plays on to the end of the sample (otherwise only its own part)
+    std::vector<ModelZone> samplerZones;
+    int samplerSelected = 0;
+
+    juce::var toJson() const
+    {
+        auto* o = new juce::DynamicObject();
+        juce::Array<juce::var> c;
+        for (auto x : cuts) c.add (x);
+        o->setProperty ("cuts", c);
+        o->setProperty ("firstKey", firstKey);
+        o->setProperty ("toEnd", toEnd);
+        return juce::var (o);
+    }
 };
 
 /** Mono / poly playing, saved with the preset. */
@@ -137,6 +164,28 @@ public:
     void copyEnvelope (int fromId, int toId);
     void duplicateZone (int id);
 
+    //== Editing the sample (V2) ===================================================
+    /** Bakes a warp into the zone's sample (in splicer mode: into the sliced sample). One undo step. */
+    void warpZone (int id, const edit::Warp&);
+    /** Takes back the zone's last warp. */
+    void unwarpZone (int id);
+
+    /** Splicer mode. Turning it on chops the selected zone's sample (hits found automatically). */
+    const SpliceState& getSplice() const noexcept { return splice; }
+    bool isSplicer() const noexcept { return splice.on; }
+    void setSplicer (bool on);
+    void setSliceCuts (std::vector<int> cuts);
+    void findSliceHits (float sensitivity);
+    void splitSlicesEvenly (int count);
+    void setSliceFirstKey (int key);
+    void setSlicesToEnd (bool);
+    /** Keeps the slices as ordinary zones and goes back to sampler mode. */
+    void slicesToZones();
+    /** The sliced sample (null when not in splicer mode). */
+    std::shared_ptr<const SampleData> getSliceSample() const;
+    /** Pitch, amp, envelope and keep speed from p go to every slice (splicer mode). */
+    void setSliceVoice (const ZoneParams& p);
+
     //== Undo for zone edits ======================================================
     bool canUndo() const noexcept { return ! undoStack.empty(); }
     bool canRedo() const noexcept { return ! redoStack.empty(); }
@@ -239,7 +288,10 @@ private:
     void applyFxJson (const juce::var& fxJson, const std::vector<juce::var>& zoneChainsJson, bool applyVolume);
     fx::Chain copyChainWithNewIds (const fx::Chain&);
 
-    struct UndoState { std::vector<ModelZone> zones; Interp interp; int selected; fx::Setup fx; ArpSettings arp; VoiceSettings voice; };
+    struct UndoState { std::vector<ModelZone> zones; Interp interp; int selected; fx::Setup fx; ArpSettings arp; VoiceSettings voice; SpliceState splice; };
+    void rebuildSlices (std::shared_ptr<const SampleData>, const ZoneParams& voice);
+    bool needsEmbedding() const;
+    void applySpliceJson (const juce::var&);
     void publishPlayModes();
     /** Remembers the zones before a change. Repeated changes with the same tag within a
         moment (one knob drag) become one undo step. */
@@ -264,6 +316,7 @@ private:
     fx::Setup fxSetup;
     ArpSettings arpSettings;
     VoiceSettings voiceSettings;
+    SpliceState splice;
     int nextFxId = 1, fxStructure = 0, learnMacro = -1;
     std::vector<BankEntry> bank;
 

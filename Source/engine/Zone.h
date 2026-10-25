@@ -23,6 +23,8 @@ struct SampleData
 };
 
 enum class LoopMode { off = 0, loop = 1, untilRelease = 2 };
+/** Which way the loop plays: start to end again and again, back and forth, or end to start again and again. */
+enum class LoopDir { forward = 0, pingPong = 1, backward = 2 };
 enum class Interp { linear = 0, cubic = 1, sinc = 2 };
 
 /** Everything that can be set per zone. Same meaning and units as the browser prototype. */
@@ -30,6 +32,7 @@ struct ZoneParams
 {
     int root = 60, loKey = 0, hiKey = 127, loVel = 1, hiVel = 127;
     LoopMode loopMode = LoopMode::off;
+    LoopDir loopDir = LoopDir::forward;
     int loopStart = 0, loopEnd = 0, crossfade = 0;   // in sample frames
     int sampleStart = 0, sampleEnd = 0;              // where playback starts / stops (0 end = whole sample)
     bool randomStart = false;                        // each note starts somewhere between sampleStart and randomEnd
