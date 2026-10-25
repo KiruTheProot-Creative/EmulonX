@@ -290,11 +290,11 @@ std::shared_ptr<SampleData> loadSample (const File& ebl, String& error, bool* lo
         error = ebl.getFileName() + ": sample format not supported yet";
         return {};
     }
-    // the end is where the data stops (some files have one more sample, some don't: take what is there)
+    // the end is where the data stops
     auto frames = [&] (uint32 a, uint32 b)
     {
         if (b < a || base + a >= n) return 0;
-        return (int) jmin ((size_t) (b - a) / 2 + 1, (n - base - a) / 2);
+        return (int) jmin ((size_t) (b - a) / 2, (n - base - a) / 2);   // the end points at the last sample: leave it out (it is often not audio)
     };
     const int len = stereo ? jmin (frames (startL, endL), frames (startR, endR)) : frames (startL, endL);
     if (len <= 0)

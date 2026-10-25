@@ -90,6 +90,36 @@ int main (int argc, char** argv)
 
     emx::EmulonXProcessor proc;
 
+    // EMX_EXB_DIR: load an Emulator X preset through the plugin (like a double-click in the explorer) and play it
+    if (const auto exbDir = SystemStats::getEnvironmentVariable ("EMX_EXB_DIR", {}); exbDir.isNotEmpty())
+    {
+        proc.prepareToPlay (48000.0, 512);
+        for (auto [bank, entry] : { std::pair { "Orbit-3.exb", "332" }, std::pair { "Vintage Keys.exb", "0" } })
+        {
+            proc.loadPresetFromBankFile (File (exbDir).getChildFile (bank), entry, "test");
+            for (int i = 0; i < 200 && proc.isBusy(); ++i)
+                MessageManager::getInstance()->runDispatchLoopUntil (20);
+            MessageManager::getInstance()->runDispatchLoopUntil (100);
+            AudioBuffer<float> b (2, 512);
+            MidiBuffer m;
+            double sum = 0;
+            for (int i = 0; i < 100; ++i)
+            {
+                m.clear();
+                if (i == 0) m.addEvent (MidiMessage::noteOn (1, 60, (uint8) 100), 0);
+                b.clear();
+                proc.processBlock (b, m);
+                sum += b.getRMSLevel (0, 0, 512);
+            }
+            std::printf ("exb %s: preset '%s', %d zones, rms %.5f, voices %d, message '%s'\n", bank, proc.getPresetName().toRawUTF8(),
+                         (int) proc.getZones().size(), sum / 100.0, proc.getActiveVoices(), proc.getLastMessage().toRawUTF8());
+            for (auto& z : proc.getZones())
+                std::printf ("   zone %s keys %d-%d vel %d-%d len %d gain %.1f\n", z.name.toRawUTF8(), z.params.loKey, z.params.hiKey, z.params.loVel, z.params.hiVel,
+                             z.sample ? z.sample->length() : -1, z.params.gainDb);
+        }
+        return 0;
+    }
+
     // Load three demo samples the same way a drag & drop does, then let the loader finish.
     const auto demoDir = File::getSpecialLocation (File::tempDirectory).getChildFile ("emulonx-preview");
     demoDir.createDirectory();
