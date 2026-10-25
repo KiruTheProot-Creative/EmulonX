@@ -173,6 +173,13 @@ jobs:
           $sd = Version 'set\(EMX_SD_VERSION "([^"]+)"\)'
           $hub = Version 'set\(EMX_HUB_VERSION "([^"]+)"\)'
           $list = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          # clean up broken test-build drafts from an earlier version of this step (they lost their tag name)
+          foreach ($r in $list) {
+            if ($r.draft -and $r.tag_name -like 'untagged-*' -and $r.assets.Count -gt 0 -and ($r.assets | Where-Object { $_.name -notlike 'EmulonX-*Setup-*.exe' }).Count -eq 0) {
+              gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/releases/$($r.id)" | Out-Null
+              Write-Output "removed the broken draft $($r.tag_name)"
+            }
+          }
           foreach ($t in @(@{ tag = "v$emx"; title = "Emulon X $emx"; file = "installer-out/EmulonX-Setup-$emx.exe" },
                            @{ tag = "sd-v$sd"; title = "Emulon X SD $sd"; file = "installer-out/EmulonX-SD-Setup-$sd.exe" },
                            @{ tag = "hub-v$hub"; title = "Emulon X Hub $hub"; file = "installer-out/EmulonX-Hub-Setup-$hub.exe" })) {
@@ -181,8 +188,11 @@ jobs:
             if (-not (Test-Path $t.file)) { Write-Output "missing $($t.file)"; continue }
             $notes = "Test build from $env:GITHUB_SHA. Only people who can change this repository see it (the Emulon X Hub shows it in dev mode). Publish this release when it's ready - that creates the tag and everyone gets it."
             if ($rel) {
-              gh api -X PATCH "repos/$env:GITHUB_REPOSITORY/releases/$($rel.id)" -f target_commitish=$env:GITHUB_SHA -f body="$notes" | Out-Null
-              gh release upload $t.tag $t.file --clobber --repo $env:GITHUB_REPOSITORY
+              # keep the tag name in the edit (GitHub turns a draft "untagged" otherwise), then swap the installer
+              gh api -X PATCH "repos/$env:GITHUB_REPOSITORY/releases/$($rel.id)" -f tag_name=$($t.tag) -f target_commitish=$env:GITHUB_SHA | Out-Null
+              $name = Split-Path $t.file -Leaf
+              foreach ($a in $rel.assets) { if ($a.name -eq $name) { gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($a.id)" | Out-Null } }
+              gh api -X POST "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$($rel.id)/assets?name=$name" -H "Content-Type: application/octet-stream" --input $t.file | Out-Null
             } else {
               gh release create $t.tag $t.file --draft --prerelease --title $t.title --notes $notes --target $env:GITHUB_SHA --repo $env:GITHUB_REPOSITORY
             }
