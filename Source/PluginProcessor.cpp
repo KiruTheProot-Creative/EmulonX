@@ -223,6 +223,8 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
     float macros01[numMacros];
     for (int i = 0; i < numMacros; ++i)
         macros01[i] = macroValues[i]->load() / 100.0f;
+    engine.setControllers (macros01);   // E-mu voices: the macros are MIDI A..P
+    engine.setTempo (bpm);
 
     SamplerEngine::Bus buses[maxBuses];
     const fx::Snapshot::ChainRT* busChains[maxBuses];

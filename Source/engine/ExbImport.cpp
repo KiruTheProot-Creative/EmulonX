@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ExbImport.h"
+#include "EmuVoice.h"
 #include <map>
 #include <cmath>
 #include <iterator>
@@ -135,8 +136,8 @@ double rateSeconds (double rate)
                                    { 38.0, 5.138 }, { 43.0, 8.997 }, { 50.0, 20.12 } };
     rate = jlimit (0.0, 127.0, rate);
     if (rate <= 0.0) return 0.0;
-    if (rate < 4.0) return 0.072 * rate / 4.0;
-    for (size_t i = 1; i < std::size (pts); ++i)
+    if (rate <= 4.0) return 0.072 * rate / 4.0;
+    for (size_t i = 2; i < std::size (pts); ++i)
         if (rate <= pts[i][0])
         {
             const double t = (rate - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0]);
@@ -217,6 +218,67 @@ var filterFx (const Chunk& fl, const MemoryBlock& mb)
     return chain;
 }
 } // namespace
+
+/** Everything about a voice's sound for Emulon X's E-mu voice layer. */
+std::shared_ptr<const emu::Design> readDesign (const Chunk& v, const MemoryBlock& mb)
+{
+    const auto* d = static_cast<const uint8*> (mb.getData());
+    auto des = std::make_shared<emu::Design>();
+    for (auto& c : v.kids)
+    {
+        if (c.id == "LIST" && c.listType == "EvL")
+        {
+            int e = 0;
+            for (auto& ev : c.kids)
+                if (ev.id == "E5Ev" && e < 3)
+                {
+                    const auto env = readEnv (ev, mb);
+                    for (int i = 0; i < 6; ++i)
+                    {
+                        des->env[(size_t) e].rate[(size_t) i] = env.time[i] * 127.0f;   // stored as rate / 127
+                        des->env[(size_t) e].level[(size_t) i] = env.level[i];
+                    }
+                    ++e;
+                }
+        }
+        else if (c.id == "E5Fl" && c.size >= 13)
+        {
+            des->filterType = d[c.data + 4];
+            des->cutoff = jlimit (0.0f, 1.0f, beFloat (d + c.data + 5));
+            des->resonance = jlimit (0.0f, 1.0f, beFloat (d + c.data + 9));
+        }
+        else if (c.id == "LIST" && c.listType == "LFOL")
+        {
+            int i = 0;
+            for (auto& l : c.kids)
+                if (l.id == "E5LF" && l.size >= 20 && i < 2)
+                {
+                    // 4-byte version, shape, 3 more bytes, rate (Hz, float), tempo division, ?, variation (%, float), ?, key sync
+                    const auto* q = d + l.data;
+                    auto& f = des->lfo[(size_t) i++];
+                    f.shape = q[4];
+                    f.hz = jlimit (0.0f, 50.0f, beFloat (q + 8));
+                    f.division = q[12];
+                    f.variation = jlimit (0.0f, 100.0f, beFloat (q + 14));
+                    f.keySync = q[19] != 0;
+                }
+        }
+        else if (c.id == "E5MP" && c.size >= 12)
+            des->lagRate = { beFloat (d + c.data + 4), beFloat (d + c.data + 8) };
+        else if (c.id == "LIST" && c.listType == "CrdL")
+        {
+            for (auto& cd : c.kids)
+                if (cd.id == "E5Cd" && cd.size >= 10 && des->cords.size() < 36)
+                    des->cords.push_back ({ d[cd.data + 4], d[cd.data + 5], jlimit (-100.0f, 100.0f, beFloat (d + cd.data + 6)) });
+        }
+        else if (c.id == "E5Oc" && c.size >= 35)
+        {
+            des->chorusWidth = jlimit (0.0f, 100.0f, beFloat (d + c.data + 27));
+            des->chorusAmount = jlimit (0.0f, 100.0f, beFloat (d + c.data + 31));
+        }
+    }
+    return des;
+}
 
 //== Files ===========================================================================
 File bankFile (const File& f)
@@ -382,6 +444,22 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
     // E5P1: 2-byte number, then the preset's chunks (the chunk's own size is 2 more than the table says)
     const size_t presetEnd = preset->offset + 8 + jmax ((size_t) preset->size, (size_t) be32 (d + preset->offset + 4));
     const auto chunks = parse (mb, preset->offset + 10, presetEnd);
+    // MIDI A..P: their names and starting values become Emulon X's 16 macros
+    for (auto& c : chunks)
+        if (c.id == "E5IC" && c.size >= 20)
+        {
+            const Chunk* names = nullptr;
+            for (auto& n : chunks)
+                if (n.id == "E5CL") names = &n;
+            static const char* letters = "ABCDEFGHIJKLMNOP";
+            for (int i = 0; i < 16; ++i)
+            {
+                String name = names != nullptr && names->size >= (size_t) (4 + 32 * (size_t) (i + 1)) ? utf16Name (d + names->data + 4 + 32 * i, 32) : String();
+                if (name.isEmpty()) name = String ("MIDI ") + letters[i];
+                const int value = d[c.data + 4 + (size_t) i];   // 255 = not set
+                r.macros.push_back ({ name.toUpperCase(), value > 127 ? 0.0f : (float) value * 100.0f / 127.0f });
+            }
+        }
     const auto* voices = list (chunks, "E5VL");
     if (voices == nullptr)
     {
@@ -400,6 +478,7 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
         float gainDb = 0.0f, pan = 0.0f;
         Env amp;
         var fx;
+        const auto design = readDesign (v, mb);
         for (auto& c : v.kids)
         {
             if (c.id == "E5Am" && c.size >= 9)
@@ -465,7 +544,9 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
                 ampEnvelope (amp, p);
             p.gainDb = gainDb;
             p.pan = pan;
-            lz.fx = fx;
+            p.design = design;   // envelopes, filter, LFOs and cords run per note in Emulon X's E-mu voice layer
+            lz.fx = var();       // (so no separate filter effect)
+            (void) fx;
             if (entry.second)
             {
                 p.loopMode = LoopMode::loop;

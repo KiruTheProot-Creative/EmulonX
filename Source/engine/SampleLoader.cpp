@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "SampleLoader.h"
 #include "ExbImport.h"
+#include "EmuVoice.h"
 
 namespace emx::loader
 {
@@ -142,6 +143,7 @@ ZoneParams paramsFromJson (const var& j, const SampleData& s, bool v1)
         p.semitones = juce::jlimit (-24, 24, (int) num ("semitones", 0));
         p.keepSpeed = (bool) j.getProperty ("keepSpeed", true);
         p.grainMs   = (float) num ("grainMs", 60);
+        p.design    = emu::Design::fromJson (j.getProperty ("emu", var()));
     }
     p.clampTo (n);
     return p;
@@ -177,6 +179,8 @@ static var paramsToJson (const String& sampleFile, const ZoneParams& p)
     z->setProperty ("semitones", p.semitones);
     z->setProperty ("keepSpeed", p.keepSpeed);
     z->setProperty ("grainMs", p.grainMs);
+    if (p.design != nullptr)
+        z->setProperty ("emu", p.design->toJson());   // E-mu voice (envelopes, filter, LFOs, cords)
     return var (z);
 }
 

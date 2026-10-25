@@ -6,6 +6,7 @@
 namespace emx::emu
 {
 using namespace juce;
+static void prepareFilter (VoiceState&, const Design&, double sr) noexcept;
 
 //== Names ===============================================================================
 const StringArray& filterNames()
@@ -54,17 +55,26 @@ String sourceName (int s)
 
 String destName (int d)
 {
+    // Emulator X's destination list (confirmed against Orbit-3 "amb:Galactic End")
     if (d >= 168 && d < 204) return "Cord " + String (d - 167).paddedLeft ('0', 2) + " Amt";
     switch (d)
     {
-        case 0: return "Off";          case 8: return "Key Sustain"; case 47: return "Fine Pitch";
-        case 48: return "Pitch";       case 56: return "Filter Frequency"; case 57: return "Filter Resonance";
-        case 64: return "Amp Volume";  case 65: return "Amp Pan";    case 66: return "Amp Crossfade";
-        case 72: return "Amp Env Rates"; case 73: return "Amp Env Attack"; case 74: return "Amp Env Decay";
-        case 75: return "Amp Env Release"; case 80: return "Filter Env Rates"; case 81: return "Filter Env Attack";
-        case 82: return "Filter Env Decay"; case 83: return "Filter Env Release"; case 88: return "Aux Env Rates";
-        case 89: return "Aux Env Attack"; case 90: return "Aux Env Decay"; case 91: return "Aux Env Release";
-        case 104: return "LFO 1 Rate";
+        case 0: return "Off";                 case 8: return "Key Sustain";
+        case 47: return "Fine Pitch";         case 48: return "Pitch";            case 49: return "Glide Rate";
+        case 50: return "Chorus Amt";         case 51: return "Chorus Initial ITD"; case 52: return "Sample Start";
+        case 53: return "Sample Loop";        case 54: return "Sample Retrigger (+)"; case 55: return "Sample Retrigger (-)";
+        case 56: return "Filter Frequency";   case 57: return "Filter Resonance"; case 58: return "Realtime Resonance";
+        case 64: return "Amp Volume";         case 65: return "Amp Pan";          case 66: return "Amp Crossfade";
+        case 67: return "Send Main";          case 68: return "Send Aux 1";       case 69: return "Send Aux 2";
+        case 70: return "Send Aux 3";         case 71: return "Wet/Dry Mix";
+        case 72: return "Amp Env Rates";      case 73: return "Amp Env Attack";   case 74: return "Amp Env Decay";
+        case 75: return "Amp Env Release";    case 76: return "Amp Env Sustain";
+        case 80: return "Filter Env Rates";   case 81: return "Filter Env Attack"; case 82: return "Filter Env Decay";
+        case 83: return "Filter Env Release"; case 84: return "Filter Env Sustain"; case 85: return "Filter Env Trigger";
+        case 88: return "Aux Env Rates";      case 89: return "Aux Env Attack";   case 90: return "Aux Env Decay";
+        case 91: return "Aux Env Release";    case 92: return "Aux Env Sustain";  case 93: return "Aux Env Trigger";
+        case 96: return "LFO 1 Frequency";    case 97: return "LFO 1 Trigger";
+        case 104: return "LFO 2 Frequency";   case 105: return "LFO 2 Trigger";
         default: return "Destination " + String (d);
     }
 }
@@ -76,8 +86,8 @@ double rateSeconds (double rate) noexcept
                                    { 38.0, 5.138 }, { 43.0, 8.997 }, { 50.0, 20.12 } };
     rate = jlimit (0.0, 127.0, rate);
     if (rate <= 0.0) return 0.0;
-    if (rate < 4.0) return 0.072 * rate / 4.0;
-    for (size_t i = 1; i < std::size (pts); ++i)
+    if (rate <= 4.0) return 0.072 * rate / 4.0;   // (the log curve starts at the first measured point)
+    for (size_t i = 2; i < std::size (pts); ++i)
         if (rate <= pts[i][0])
         {
             const double t = (rate - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0]);
@@ -174,17 +184,28 @@ void beginStage (EnvState& e, const Envelope& d, int stage, float timeScale, dou
         return;
     e.from = e.level;
     e.pos = 0.0f;
+    if (stage == 3 && d.rate[(size_t) stage] <= 0.0f)
+    {
+        // decay 2 at rate 0 means "no second decay": the level reached by decay 1 is held (E-mu's sustain);
+        // every other stage at rate 0 is instant
+        e.len = 0.0f;
+        e.skip = true;
+        return;
+    }
+    e.skip = false;
     const float target = d.level[(size_t) stage] / 100.0f;
     const double full = rateSeconds (d.rate[(size_t) stage]) * timeScale;
     const double t = stage >= 4 ? (std::abs (target - e.from) > 1.0e-4f ? full : 0.0) : full * std::abs (target - e.from);
     e.len = (float) (t * sr);
 }
 
-void runEnv (EnvState& e, const Envelope& d, float timeScale, double sr, int n)
+void runEnv (EnvState& e, const Envelope& d, float timeScale, double sr, int n, float sustainMod)
 {
     while (e.stage < 6 && n > 0)
     {
-        const float target = d.level[(size_t) e.stage] / 100.0f;
+        float target = e.skip ? e.level : d.level[(size_t) e.stage] / 100.0f;
+        if (e.stage == 3)
+            target = jlimit (-1.0f, 1.0f, (e.skip ? e.level : target) + sustainMod * (e.skip ? 0.0f : 1.0f));
         if (e.len <= 0.5f || e.pos + (float) n >= e.len)
         {
             n -= jmax (0, (int) (e.len - e.pos));
@@ -323,14 +344,14 @@ bool control (VoiceState& s, const Design& d, const Inputs& in, int note, int ve
         const float ts = scale (base, phaseDest);
         if (st.len < 0.0f)
             beginStage (st, d.env[(size_t) e], st.stage, ts, sr);
-        runEnv (st, d.env[(size_t) e], ts, sr, n);
+        runEnv (st, d.env[(size_t) e], ts, sr, n, dest[base + 4]);
     }
 
     // LFOs, noise, lags
     for (int i = 0; i < 2; ++i)
     {
         const auto& l = d.lfo[(size_t) i];
-        const float rateMod = i == 0 ? dest[104] : 0.0f;
+        const float rateMod = dest[i == 0 ? 96 : 104];
         const double hz = jlimit (0.0, 50.0, (double) l.hz * s.lfoRateScale[(size_t) i] * std::exp2 (3.0 * rateMod));
         const double before = s.lfoPhase[(size_t) i];
         s.lfoPhase[(size_t) i] += hz * n / sr;
@@ -346,12 +367,15 @@ bool control (VoiceState& s, const Design& d, const Inputs& in, int note, int ve
 
     // results
     const float ampEnv = jmax (0.0f, s.env[0].level);
-    const float volDb = 48.0f * dest[64];
+    const float volDb = jlimit (-96.0f, 10.0f, 48.0f * dest[64]);   // E-mu's amp volume range tops out at +10 dB
     s.ampGain = ampEnv * Decibels::decibelsToGain (volDb, -100.0f);
     s.pitchSemis = dest[47] + 12.0f * dest[48];
     s.pan = 100.0f * dest[65];
-    s.cutoff = jlimit (0.0f, 1.0f, d.cutoff + dest[56]);
+    // filter frequency cords: 100 % moves half of the 57 Hz - 20 kHz range (so a full Tone knob plus a full
+    // filter envelope doesn't shut a high pass or overshoot); to be checked by ear against Emulator X
+    s.cutoff = jlimit (0.0f, 1.0f, d.cutoff + 0.5f * dest[56]);
     s.resonance = jlimit (0.0f, 1.0f, d.resonance + dest[57]);
+    prepareFilter (s, d, sr);
     return s.env[0].stage < 6;
 }
 
@@ -388,19 +412,96 @@ double cutoffHz (float c) noexcept { return 57.0 * std::pow (20000.0 / 57.0, (do
 const float vowels[5][3] { { 730, 1090, 2440 }, { 530, 1840, 2480 }, { 270, 2290, 3010 }, { 570, 840, 2410 }, { 300, 870, 2240 } };   // ah eh ee oh oo
 } // namespace
 
-void filter (VoiceState& s, const Design& d, double sr, float& L, float& R) noexcept
+namespace
+{
+void storeSvf (float* c, double hz, double q, double sr) noexcept
+{
+    const auto f = makeSvf (hz, q, sr);
+    c[0] = f.g; c[1] = f.k; c[2] = f.a1; c[3] = f.a2; c[4] = f.a3;
+}
+inline Svf loadSvf (const float* c) noexcept { return { c[0], c[1], c[2], c[3], c[4] }; }
+} // namespace
+
+/** Works out the filter's coefficients for the current cutoff and resonance (once per control step). */
+static void prepareFilter (VoiceState& s, const Design& d, double sr) noexcept
 {
     const int t = d.filterType;
-    if (t == 127)
-        return;
     const float res = s.resonance;
     const double hz = cutoffHz (s.cutoff);
+    if (t <= 2 || t == 96 || t == 97 || t == 104 || t == 8 || t == 9)
+    {
+        storeSvf (s.coef[0], hz, 0.5 + res * res * 9.5, sr);   // the resonant stage
+        storeSvf (s.coef[1], hz, 0.54, sr);               // the others
+    }
+    else if (t >= 16 && t <= 18)
+        storeSvf (s.coef[0], hz, 0.7 + res * res * 8.0, sr);
+    else if (t >= 32 && t <= 34)
+    {
+        storeSvf (s.coef[0], hz, t == 32 ? 1.4 : t == 33 ? 1.0 : 0.7, sr);
+        s.aux = Decibels::decibelsToGain (res * 24.0f) - 1.0f;
+    }
+    else if (t >= 64 && t <= 66)
+    {
+        const double w = std::tan (MathConstants<double>::pi * jlimit (20.0, sr * 0.45, hz) / sr);
+        s.aux = (float) ((w - 1.0) / (w + 1.0));
+    }
+    else if (t == 72)
+        s.aux = (float) jlimit (2.0, (double) s.combSize - 2.0, sr / jmax (20.0, hz));
+    else if (t == 80 || t == 81)
+    {
+        // vocal: morph through the vowels with the frequency (ah > ay > ee, or oo > ah)
+        const int path80[3] { 0, 1, 2 }, path81[2] { 4, 0 };
+        const int* path = t == 80 ? path80 : path81;
+        const int steps = t == 80 ? 2 : 1;
+        const float pos = s.cutoff * (float) steps;
+        const int a = jlimit (0, steps - 1, (int) pos);
+        const float u = jlimit (0.0f, 1.0f, pos - (float) a);
+        for (int p = 0; p < 3; ++p)
+            storeSvf (s.coef[p], vowels[path[a]][p] + (vowels[path[a + 1]][p] - vowels[path[a]][p]) * u, 4.0 + res * 16.0, sr);
+    }
+    else if (t != 127)
+    {
+        // E-mu's Z-plane morph filters: approximated as three resonant peaks that move with the frequency.
+        // Each type gets its own character from its number (not exact, but it keeps their colour and movement).
+        const uint32 seed = (uint32) t * 2654435761u;
+        for (int p = 0; p < 3; ++p)
+        {
+            const float spread = (float) ((seed >> (p * 8)) & 255) / 255.0f;
+            const float base = 200.0f * std::pow (2.0f, (float) p * 1.6f + spread * 1.5f);
+            storeSvf (s.coef[p], jlimit (60.0f, (float) sr * 0.42f, base * std::pow (2.0f, (s.cutoff - 0.5f) * 5.0f)), 2.0 + res * 18.0, sr);
+        }
+    }
+}
+
+static void filterRaw (VoiceState& s, const Design& d, float& L, float& R) noexcept;
+
+void filter (VoiceState& s, const Design& d, double sr, float& L, float& R) noexcept
+{
+    (void) sr;
+    if (d.filterType == 127)
+        return;
+    // like E-mu's filters, more resonance makes the rest of the sound quieter (so the peak doesn't explode)
+    const float comp = 1.0f / (1.0f + s.resonance * s.resonance * 2.0f);
+    L *= comp;
+    R *= comp;
+    filterRaw (s, d, L, R);
+    // safety: soft-limit anything far above full scale (a filter pushed hard by its cords)
+    auto limit = [] (float x) { return std::abs (x) < 2.0f ? x : (x > 0.0f ? 1.0f : -1.0f) * (2.0f + std::tanh (std::abs (x) - 2.0f)); };
+    L = limit (L);
+    R = limit (R);
+}
+
+static void filterRaw (VoiceState& s, const Design& d, float& L, float& R) noexcept
+{
+    const int t = d.filterType;
+    const float res = s.resonance;
     float* io[2] { &L, &R };
 
-    auto lowOrHigh = [&] (int stages, bool high)
+    if (t <= 2 || t == 96 || t == 97 || t == 104 || t == 8 || t == 9)
     {
-        const auto f = makeSvf (hz, 0.5 + res * 12.0, sr);
-        const auto soft = makeSvf (hz, 0.54, sr);
+        const bool high = t == 8 || t == 9;
+        const int stages = t == 0 ? 2 : t == 2 ? 3 : t == 9 ? 2 : 1;
+        const auto f = loadSvf (s.coef[0]), soft = loadSvf (s.coef[1]);
         for (int ch = 0; ch < 2; ++ch)
         {
             float x = *io[ch];
@@ -412,10 +513,11 @@ void filter (VoiceState& s, const Design& d, double sr, float& L, float& R) noex
             }
             *io[ch] = x;
         }
-    };
-    auto band = [&] (int stages, bool notch)
+    }
+    else if (t >= 16 && t <= 18)
     {
-        const auto f = makeSvf (hz, 0.7 + res * 10.0, sr);
+        const auto f = loadSvf (s.coef[0]);
+        const int stages = t == 17 ? 2 : 1;
         for (int ch = 0; ch < 2; ++ch)
         {
             float x = *io[ch];
@@ -423,55 +525,26 @@ void filter (VoiceState& s, const Design& d, double sr, float& L, float& R) noex
             {
                 float lp, bp, hp;
                 svf (f, s.z[ch] + st * 2, x, lp, bp, hp);
-                x = notch ? lp + hp : bp * f.k;
+                x = t == 18 ? lp + hp : bp * f.k;
             }
             *io[ch] = x;
         }
-    };
-    auto peaks = [&] (const float* freqs, const float* gains, float q)
-    {
-        for (int ch = 0; ch < 2; ++ch)
-        {
-            const float x = *io[ch];
-            float y = 0.0f;
-            for (int p = 0; p < 3; ++p)
-            {
-                float lp, bp, hp;
-                const auto f = makeSvf (freqs[p], q, sr);
-                svf (f, s.z[ch] + p * 2, x, lp, bp, hp);
-                y += bp * f.k * gains[p];
-            }
-            *io[ch] = y * 1.6f;
-        }
-    };
-
-    if (t <= 2 || t == 96 || t == 97 || t == 104)
-        lowOrHigh (t == 0 ? 2 : t == 2 ? 3 : 1, false);
-    else if (t == 8 || t == 9)
-        lowOrHigh (t == 8 ? 1 : 2, true);
-    else if (t == 16 || t == 17)
-        band (t == 16 ? 1 : 2, false);
-    else if (t == 18)
-        band (1, true);
+    }
     else if (t >= 32 && t <= 34)
     {
-        // swept EQ: a bell that boosts (resonance) at the frequency
-        const float gainDb = res * 24.0f;
-        const auto f = makeSvf (hz, t == 32 ? 1.4 : t == 33 ? 1.0 : 0.7, sr);
-        const float gain = Decibels::decibelsToGain (gainDb) - 1.0f;
+        const auto f = loadSvf (s.coef[0]);
         for (int ch = 0; ch < 2; ++ch)
         {
             float lp, bp, hp;
             svf (f, s.z[ch], *io[ch], lp, bp, hp);
-            *io[ch] += bp * f.k * gain;
+            *io[ch] += bp * f.k * s.aux;
         }
     }
     else if (t >= 64 && t <= 66)
     {
         // phaser: first-order allpass stages around the frequency, mixed with the dry sound (notches)
         const int stages = t == 64 ? 4 : t == 65 ? 6 : 8;
-        const float a = (float) ((std::tan (MathConstants<double>::pi * jlimit (20.0, sr * 0.45, hz) / sr) - 1.0)
-                                 / (std::tan (MathConstants<double>::pi * jlimit (20.0, sr * 0.45, hz) / sr) + 1.0));
+        const float a = s.aux;
         for (int ch = 0; ch < 2; ++ch)
         {
             const float dry = *io[ch];
@@ -492,7 +565,7 @@ void filter (VoiceState& s, const Design& d, double sr, float& L, float& R) noex
         if (s.comb == nullptr || s.combSize < 8)
             return;
         const int size = s.combSize;
-        const float delay = (float) jlimit (2.0, (double) size - 2.0, sr / jmax (20.0, hz));
+        const float delay = s.aux;
         for (int ch = 0; ch < 2; ++ch)
         {
             float* comb = s.comb + ch * size;
@@ -505,35 +578,23 @@ void filter (VoiceState& s, const Design& d, double sr, float& L, float& R) noex
         }
         s.combPos = (s.combPos + 1) % size;
     }
-    else if (t == 80 || t == 81)
-    {
-        // vocal: morph through the vowels with the frequency (ah > ay > ee, or oo > ah)
-        const int path80[3] { 0, 1, 2 }, path81[2] { 4, 0 };
-        const int* path = t == 80 ? path80 : path81;
-        const int steps = t == 80 ? 2 : 1;
-        const float pos = s.cutoff * (float) steps;
-        const int a = jlimit (0, steps - 1, (int) pos);
-        const float u = jlimit (0.0f, 1.0f, pos - (float) a);
-        float freqs[3];
-        const float gains[3] { 1.0f, 0.6f, 0.35f };
-        for (int p = 0; p < 3; ++p)
-            freqs[p] = vowels[path[a]][p] + (vowels[path[a + 1]][p] - vowels[path[a]][p]) * u;
-        peaks (freqs, gains, 4.0f + res * 16.0f);
-    }
     else
     {
-        // E-mu's Z-plane morph filters: approximated as three resonant peaks that move with the frequency.
-        // Each type gets its own character from its number (not exact, but it keeps their colour and movement).
-        const uint32 seed = (uint32) t * 2654435761u;
-        float freqs[3], gains[3];
-        for (int p = 0; p < 3; ++p)
+        // three resonant peaks (vocal and morph types)
+        const float gains[3] { 1.0f, t == 80 || t == 81 ? 0.6f : 0.75f, t == 80 || t == 81 ? 0.35f : 0.5f };
+        for (int ch = 0; ch < 2; ++ch)
         {
-            const float spread = (float) ((seed >> (p * 8)) & 255) / 255.0f;
-            const float base = 200.0f * std::pow (2.0f, (float) p * 1.6f + spread * 1.5f);
-            freqs[p] = jlimit (60.0f, (float) sr * 0.42f, base * std::pow (2.0f, (s.cutoff - 0.5f) * 5.0f));
-            gains[p] = 1.0f - (float) p * 0.25f;
+            const float x = *io[ch];
+            float y = 0.0f;
+            for (int p = 0; p < 3; ++p)
+            {
+                float lp, bp, hp;
+                const auto f = loadSvf (s.coef[p]);
+                svf (f, s.z[ch] + p * 2, x, lp, bp, hp);
+                y += bp * f.k * gains[p];
+            }
+            *io[ch] = y * 1.6f;
         }
-        peaks (freqs, gains, 2.0f + res * 18.0f);
     }
 }
 } // namespace emx::emu

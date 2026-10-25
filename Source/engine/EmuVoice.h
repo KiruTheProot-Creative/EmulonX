@@ -62,6 +62,7 @@ struct EnvState
     int stage = 0;                   // 0..3 while held, 4..5 releasing, 6 done
     float level = 0.0f;              // -1..1
     float from = 0.0f, pos = 0.0f, len = 0.0f;   // current stage: start level, samples done, length
+    bool skip = false;                             // this stage is left out (decay at rate 0)
 };
 
 struct VoiceState
@@ -78,6 +79,10 @@ struct VoiceState
     float ampGain = 1.0f;            // linear, includes the amp envelope and volume cords
     float pitchSemis = 0.0f, pan = 0.0f;
     float cutoff = 1.0f, resonance = 0.0f;
+
+    // filter coefficients, worked out every control step (3 state-variable sets + an allpass / delay value)
+    float coef[3][5] {};
+    float aux = 0.0f;
 
     // filter memory (two channels, up to 6 poles / allpass stages)
     float z[2][12] {};

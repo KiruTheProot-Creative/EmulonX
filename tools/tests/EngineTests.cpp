@@ -353,6 +353,8 @@ static void skinFileTests()
 static int exbScan (const File& dir)
 {
     std::map<String, std::vector<String>> problems;
+    std::map<String, int> reasons;
+    std::map<String, String> reasonExample;
     int presets = 0, fine = 0, partly = 0;
     for (const auto& entry : RangedDirectoryIterator (dir, false, "*.exb", File::findDirectories | File::findFiles))
     {
@@ -385,6 +387,10 @@ static int exbScan (const File& dir)
                 SamplerEngine e;
                 e.prepare (48000.0);
                 e.setZoneSet (set);
+                float knobs[16] {};
+                for (size_t k = 0; k < r.macros.size() && k < 16; ++k)
+                    knobs[k] = r.macros[k].second / 100.0f;
+                e.setControllers (knobs);
                 e.noteOn ((z.params.loKey + z.params.hiKey) / 2, jlimit (1, 127, (z.params.loVel + z.params.hiVel) / 2));
                 float L[256], R[256];
                 double peak = 0;
@@ -393,6 +399,35 @@ static int exbScan (const File& dir)
                     std::fill (L, L + 256, 0.0f); std::fill (R, R + 256, 0.0f);
                     e.render (L, R, 256);
                     for (int k = 0; k < 256; ++k) peak = jmax (peak, (double) std::abs (L[k]), (double) std::abs (R[k]));
+                }
+                if (peak > 8.0 || ! std::isfinite (peak))
+                    problems["unstable or far too loud"].push_back (key + " | " + z.sample->name + " peak " + String (peak, 1));
+                if ((peak < 1.0e-4 || ! std::isfinite (peak)) && z.params.design != nullptr)
+                {
+                    // why: follow the E-mu voice for the same time
+                    emu::Inputs in;
+                    for (size_t k = 0; k < r.macros.size() && k < 16; ++k) in.midi[k] = r.macros[k].second / 100.0f;
+                    emu::VoiceState st;
+                    Random rnd (1);
+                    emu::startNote (st, *z.params.design, rnd);
+                    float maxEnv = 0, maxGain = 0, minCut = 1, maxCut = 0;
+                    for (int step = 0; step < 800; ++step)
+                    {
+                        emu::control (st, *z.params.design, in, (z.params.loKey + z.params.hiKey) / 2, jlimit (1, 127, (z.params.loVel + z.params.hiVel) / 2), 48000.0, 32);
+                        maxEnv = jmax (maxEnv, st.env[0].level); maxGain = jmax (maxGain, st.ampGain);
+                        minCut = jmin (minCut, st.cutoff); maxCut = jmax (maxCut, st.cutoff);
+                    }
+                    const int ft = z.params.design->filterType;
+                    String why = maxEnv < 0.01f ? "amp envelope stays near 0"
+                               : maxGain < 0.01f ? "volume cords turn it down"
+                               : z.params.attack > 0.4f ? "slow attack (fades in later)"
+                               : (ft <= 2 && maxCut < 0.12f) ? "low pass nearly closed"
+                               : ((ft == 8 || ft == 9) && minCut > 0.9f) ? "high pass nearly closed"
+                               : z.params.loVel > 1 && z.params.hiVel < 40 ? "very soft velocity layer"
+                               : "other (filter " + String (ft) + ")";
+                    reasons[why]++;
+                    if (reasonExample.find (why) == reasonExample.end())
+                        reasonExample[why] = key + " | " + z.sample->name;
                 }
                 if (peak < 1.0e-4 || ! std::isfinite (peak))
                 {
@@ -420,6 +455,9 @@ static int exbScan (const File& dir)
         }
     }
     std::printf ("%d presets: %d fine, %d partly\n", presets, fine, partly);
+    std::printf ("silent zones by reason:\n");
+    for (auto& [why, count] : reasons)
+        std::printf ("   %5d  %s   (e.g. %s)\n", count, why.toRawUTF8(), reasonExample[why].toRawUTF8());
     for (auto& [why, list] : problems)
     {
         std::printf ("\n== %s: %d\n", why.toRawUTF8(), (int) list.size());
@@ -429,8 +467,43 @@ static int exbScan (const File& dir)
     return 0;
 }
 
+/** --exb-debug <bank> <preset number> <zone index>: prints what one note's E-mu voice does over time. */
+static int exbDebug (const File& bank, int preset, int zoneIndex)
+{
+    auto r = exb::loadPreset (bank, preset);
+    if (zoneIndex >= (int) r.zones.size()) { std::printf ("only %d zones\n", (int) r.zones.size()); return 1; }
+    const auto& z = r.zones[(size_t) zoneIndex];
+    const auto& d = *z.params.design;
+    std::printf ("%s: zone %d '%s' keys %d-%d vel %d-%d gain %.1f filter %d cut %.3f res %.3f\n", r.presetName.toRawUTF8(), zoneIndex,
+                 z.sample->name.toRawUTF8(), z.params.loKey, z.params.hiKey, z.params.loVel, z.params.hiVel, z.params.gainDb, d.filterType, d.cutoff, d.resonance);
+    for (int e = 0; e < 3; ++e)
+    {
+        std::printf ("  env %d:", e);
+        for (int i = 0; i < 6; ++i) std::printf (" %.1f/%.1f", d.env[(size_t) e].rate[(size_t) i], d.env[(size_t) e].level[(size_t) i]);
+        std::printf ("\n");
+    }
+    for (auto& c : d.cords) std::printf ("  cord %s -> %s %.1f\n", emu::sourceName (c.source).toRawUTF8(), emu::destName (c.dest).toRawUTF8(), c.amount);
+    emu::Inputs in;
+    for (size_t k = 0; k < r.macros.size() && k < 16; ++k) in.midi[k] = r.macros[k].second / 100.0f;
+    emu::VoiceState st;
+    Random rnd (1);
+    emu::startNote (st, d, rnd);
+    const int note = (z.params.loKey + z.params.hiKey) / 2, vel = (z.params.loVel + z.params.hiVel) / 2;
+    for (int step = 0; step < 48000 / 32 * 2; ++step)
+    {
+        if (step == 48000 / 32) emu::releaseNote (st);
+        emu::control (st, d, in, note, vel, 48000.0, 32);
+        if (step % 150 == 0)
+            std::printf ("  %.2fs amp env st%d %.3f  flt env %.3f  gain %.4f  cutoff %.3f res %.3f pitch %+.2f\n", step * 32 / 48000.0, st.env[0].stage, st.env[0].level,
+                         st.env[1].level, st.ampGain, st.cutoff, st.resonance, st.pitchSemis);
+    }
+    return 0;
+}
+
 int main (int argc, char** argv)
 {
+    if (argc > 4 && String (argv[1]) == "--exb-debug")
+        return exbDebug (File (String (argv[2])), String (argv[3]).getIntValue(), String (argv[4]).getIntValue());
     if (argc > 2 && String (argv[1]) == "--exb-scan")
         return exbScan (File (String (argv[2])));
     if (argc > 1 && String (argv[1]) == "--bench")
@@ -1513,6 +1586,10 @@ int main (int argc, char** argv)
             SamplerEngine e;
             e.prepare (48000.0);
             e.setZoneSet (set);
+            float knobs[16] {};
+            for (size_t k = 0; k < preset.macros.size() && k < 16; ++k)
+                knobs[k] = preset.macros[k].second / 100.0f;   // MIDI A..P as the plugin passes its macros
+            e.setControllers (knobs);
             AudioBuffer<float> buf (2, 48000 * (slowChord ? 12 : 9));
             buf.clear();
             std::vector<std::array<int, 3>> notes;   // note, on, off (in 50 ms steps)
@@ -1557,6 +1634,22 @@ int main (int argc, char** argv)
                        && std::abs (ge.zones.back().params.gainDb + 12.0f) < 0.01f && ge.zones.back().params.pan < -70.0f,
                    "exb: Galactic End's volume, pan and amp envelope match Emulator X", ge.errors.joinIntoString ("; "));
             renderPhrase (ge, "GalacticEnd", true);
+            // saved as an Emulon X preset and loaded again: the E-mu voice comes back
+            {
+                PresetToSave ps;
+                ps.name = ge.presetName;
+                ps.zones = ge.zones;
+                ps.macros = ge.macros;
+                String err;
+                const auto bytes = loader::presetToBytes (ps, err);
+                auto back = loader::loadPresetFromMemory (bytes, "test", "test");
+                const auto* d0 = ge.zones.empty() ? nullptr : ge.zones[0].params.design.get();
+                const auto* d1 = back.zones.empty() ? nullptr : back.zones[0].params.design.get();
+                check (d0 != nullptr && d1 != nullptr && d1->cords.size() == d0->cords.size() && d1->filterType == 64
+                           && std::abs (d1->env[1].rate[0] - d0->env[1].rate[0]) < 0.01f && back.macros.size() == 16
+                           && back.macros[7].first == "RATE",
+                       "exb: an imported preset saved as .emxp keeps its E-mu voice and knob names", err);
+            }
         }
 
 
