@@ -219,7 +219,7 @@ void GitHubSignIn::timerCallback()
     auto alive_ = alive;
     Net::get().request ("POST", "https://github.com/login/oauth/access_token",
                         "client_id=" + URL::addEscapeChars (clientId, true) + "&device_code=" + URL::addEscapeChars (deviceCode, true)
-                            + "&grant_type=urn:ietf:params:oauth:grant-type:device_code",
+                            + "&grant_type=" + URL::addEscapeChars ("urn:ietf:params:oauth:grant-type:device_code", true),
                         "Accept: application/json\r\nContent-Type: application/x-www-form-urlencoded\r\n", [this, alive_] (const Response& r)
     {
         if (! *alive_)

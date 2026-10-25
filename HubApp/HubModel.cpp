@@ -373,6 +373,8 @@ Model::Model()
     applyTexts (texts);
     const auto hubJson = JSON::parse (builtIn ("hub.json"));
     clientId = hubJson.getProperty ("githubClientId", "").toString();
+    if (clientId.isEmpty())
+        clientId = settings.get ("githubClientId");
     applyIndexes (JSON::parse (settings.cacheFolder().getChildFile ("skins-index.json")),
                   JSON::parse (settings.cacheFolder().getChildFile ("banks-index.json")));
     applyReleases (JSON::parse (settings.cacheFolder().getChildFile ("releases.json")));
@@ -422,7 +424,10 @@ void Model::refresh (std::function<void()> done)
         if (st->hubJson.isNotEmpty())
             if (auto j = JSON::parse (st->hubJson); j.isObject())
                 if (auto id = j.getProperty ("githubClientId", "").toString(); id.isNotEmpty())
+                {
                     clientId = id;
+                    settings.set ("githubClientId", id);
+                }
         applyIndexes (st->skinsIndex, st->banksIndex);
         applyReleases (st->releases);
         sendChangeMessage();
