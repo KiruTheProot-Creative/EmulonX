@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(EmulonX VERSION 1.2.0 LANGUAGES C CXX)
 # Release tag after the number: ea = early access, af = alpha, bv = beta, bf = bug fix, ff = final (empty for none).
-set(EMX_VERSION_TAG "ea")
+set(EMX_VERSION_TAG "ir")
 set(EMX_FULL_VERSION "${PROJECT_VERSION}${EMX_VERSION_TAG}")
 
 set(CMAKE_CXX_STANDARD 20)
@@ -118,7 +118,7 @@ target_link_libraries(EmulonX
         juce::juce_recommended_warning_flags)
 
 # --- Emulon X SD: the skin designer (a separate app) ---------------------------
-set(EMX_SD_VERSION "0.1af")
+set(EMX_SD_VERSION "1.0ir")
 juce_add_binary_data(EmulonXSDAssets
     HEADER_NAME SdAssets.h
     NAMESPACE   SdAssets
@@ -162,7 +162,7 @@ target_link_libraries(EmulonXSD PRIVATE
     juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 
 # --- Emulon X Hub: the launcher (downloads and updates everything) ------------
-set(EMX_HUB_VERSION "0.2af")
+set(EMX_HUB_VERSION "v1.0ir")
 juce_add_binary_data(EmulonXHubAssets
     HEADER_NAME HubAssets.h
     NAMESPACE   HubAssets
