@@ -349,8 +349,90 @@ static void skinFileTests()
     }
 }
 
+/** --exb-scan <folder>: loads every preset of every Emulator X bank in the folder and plays a note in each zone. */
+static int exbScan (const File& dir)
+{
+    std::map<String, std::vector<String>> problems;
+    int presets = 0, fine = 0, partly = 0;
+    for (const auto& entry : RangedDirectoryIterator (dir, false, "*.exb", File::findDirectories | File::findFiles))
+    {
+        const auto bank = entry.getFile();
+        if (! exb::isExb (bank))
+            continue;
+        const auto info = exb::readInfo (bank);
+        if (info.error.isNotEmpty())
+            problems["bank can't be read: " + info.error].push_back (bank.getFileName());
+        for (int i = 0; i < info.presetEntries.size(); ++i)
+        {
+            ++presets;
+            const auto key = bank.getFileNameWithoutExtension() + " | " + info.presetEntries[i] + " " + info.presetNames[i];
+            auto r = exb::loadPreset (bank, info.presetEntries[i].getIntValue());
+            if (r.zones.empty())
+            {
+                auto why = r.errors.isEmpty() ? String ("no zones") : r.errors[0];
+                // group similar reasons: drop file paths and names
+                if (why.contains (": ")) why = why.fromFirstOccurrenceOf (": ", false, false);
+                if (why.startsWith ("Missing sample")) why = "missing sample file";
+                problems["no zones: " + why].push_back (key + (r.errors.isEmpty() ? String() : "  [" + r.errors.joinIntoString ("; ").substring (0, 140) + "]"));
+                continue;
+            }
+            // play the middle key of every zone (velocity inside the zone) and listen
+            int silent = 0;
+            for (auto& z : r.zones)
+            {
+                auto set = std::make_shared<ZoneSet>();
+                set->zones.push_back ({ 1, z.sample, z.params });
+                SamplerEngine e;
+                e.prepare (48000.0);
+                e.setZoneSet (set);
+                e.noteOn ((z.params.loKey + z.params.hiKey) / 2, jlimit (1, 127, (z.params.loVel + z.params.hiVel) / 2));
+                float L[256], R[256];
+                double peak = 0;
+                for (int b = 0; b < 100; ++b)
+                {
+                    std::fill (L, L + 256, 0.0f); std::fill (R, R + 256, 0.0f);
+                    e.render (L, R, 256);
+                    for (int k = 0; k < 256; ++k) peak = jmax (peak, (double) std::abs (L[k]), (double) std::abs (R[k]));
+                }
+                if (peak < 1.0e-4 || ! std::isfinite (peak))
+                {
+                    ++silent;
+                    if (SystemStats::getEnvironmentVariable ("EMX_EXB_VERBOSE", {}).isNotEmpty())
+                    {
+                        const auto mag = z.sample->audio.getMagnitude (0, z.sample->length());
+                        std::printf ("   silent: %s | %s root %d keys %d-%d vel %d-%d len %d peak %.4f start %d end %d loop %d %d-%d A %.3f gain %.1f rate %.0f\n",
+                                     key.toRawUTF8(), z.sample->name.toRawUTF8(), z.params.root, z.params.loKey, z.params.hiKey, z.params.loVel, z.params.hiVel, z.sample->length(),
+                                     mag, z.params.sampleStart, z.params.sampleEnd, (int) z.params.loopMode, z.params.loopStart, z.params.loopEnd, z.params.attack, z.params.gainDb,
+                                     z.sample->sampleRate);
+                    }
+                }
+            }
+            if (silent == (int) r.zones.size())
+                problems["loads but every zone is silent"].push_back (key);
+            else if (silent > 0 || ! r.errors.isEmpty())
+            {
+                ++partly;
+                problems[silent > 0 ? String ("some zones silent") : "some zones skipped: " + r.errors[0].fromFirstOccurrenceOf (": ", false, false)]
+                    .push_back (key + " (" + String (silent) + " of " + String ((int) r.zones.size()) + " silent)");
+            }
+            else
+                ++fine;
+        }
+    }
+    std::printf ("%d presets: %d fine, %d partly\n", presets, fine, partly);
+    for (auto& [why, list] : problems)
+    {
+        std::printf ("\n== %s: %d\n", why.toRawUTF8(), (int) list.size());
+        for (size_t i = 0; i < list.size() && i < 15; ++i)
+            std::printf ("   %s\n", list[i].toRawUTF8());
+    }
+    return 0;
+}
+
 int main (int argc, char** argv)
 {
+    if (argc > 2 && String (argv[1]) == "--exb-scan")
+        return exbScan (File (String (argv[2])));
     if (argc > 1 && String (argv[1]) == "--bench")
         return bench();
     if (argc > 2 && String (argv[1]) == "--reverb-demo")

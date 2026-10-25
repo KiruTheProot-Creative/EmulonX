@@ -283,9 +283,9 @@ std::shared_ptr<SampleData> loadSample (const File& ebl, String& error, bool* lo
     const uint32 startL = le32 (h + 4), startR = le32 (h + 8), endL = le32 (h + 12), endR = le32 (h + 16);
     const uint32 loopL = le32 (h + 20), loopEndL = le32 (h + 28);
     const uint32 rate = le32 (h + 36);
-    const uint8* flags = h + 44;   // [1] 1 = no loop, [2] 1 = left, 2 = right, 3 = stereo
+    const uint8* flags = h + 44;   // [0] 0 or 1 (both plain 16-bit), [1] 1 = no loop, [2] 1 = left, 2 = right, 3 = stereo
     const bool stereo = flags[2] == 3;
-    if (flags[0] != 1)
+    if (flags[0] > 1)
     {
         error = ebl.getFileName() + ": sample format not supported yet";
         return {};
@@ -389,6 +389,7 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
         return r;
     }
     std::map<String, std::pair<std::shared_ptr<const SampleData>, bool>> cache;
+    int missing = 0;
     for (auto& v : voices->kids)
     {
         if (v.id != "E5V1")
@@ -423,6 +424,8 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
                 continue;
             const auto* zh = d + z.data;
             const int sampleNumber = be16 (zh + 4);
+            if (sampleNumber == 0)
+                continue;   // a zone without a sample (Emulator X keeps these as placeholders)
             const int root = jlimit (0, 127, (int) zh[10]);
             int loKey = vLoKey, hiKey = vHiKey, loVel = vLoVel, hiVel = vHiVel;
             if (i + 1 < zl->kids.size() && zl->kids[i + 1].id == "LIST" && zl->kids[i + 1].listType == "TWL")
@@ -431,6 +434,11 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
                 continue;   // no key / velocity left for this zone
 
             const auto ebl = eblFor (sampleNumber);
+            if (! ebl.existsAsFile())
+            {
+                ++missing;   // some sound sets refer to samples they don't include
+                continue;
+            }
             auto& entry = cache[ebl.getFullPathName()];
             if (entry.first == nullptr)
             {
@@ -471,7 +479,7 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
         }
     }
     if (r.zones.empty() && r.errors.isEmpty())
-        r.errors.add (preset->name + ": no playable zones");
+        r.errors.add (preset->name + ": no playable zones" + (missing > 0 ? " (its samples aren't in this sound set)" : ""));
     return r;
 }
 } // namespace emx::exb
