@@ -1445,9 +1445,7 @@ void HubComponent::buildProduct (Product& p)
     {
         ib->status = "Installed: " + have + (rel.found ? " " + middot + " up to date" : "");
         ib->dotColour = look::ok;
-        ib->big.setButtonText ("INSTALLED");
-        ib->big.style = Style::quiet;
-        ib->big.setEnabled (false);
+        ib->big.setButtonText (isEmx ? "LAUNCH EMULON X" : "LAUNCH EMULON X SD");
     }
     else if (rel.found && rel.assetUrl.isNotEmpty())
     {
@@ -1464,7 +1462,10 @@ void HubComponent::buildProduct (Product& p)
     }
     if (have.isNotEmpty())
         ib->folder = folderText (model.installedFolder (p.key));
-    ib->big.onClick = [this, key = p.key] { install (key); };
+    const bool launchable = have.isNotEmpty() && ! update && ! busy;
+    ib->big.onClick = [this, key = p.key, launchable] { if (launchable) launch (key); else install (key); };
+    if (update)
+        ib->addLink ("Launch", [this, key = p.key] { launch (key); });
     ib->addLink (showLog ? "Hide" : "What's new", [this] { showLog = ! showLog; rebuild(); });
     ib->addLink (checkStatus.isNotEmpty() ? checkStatus : String ("Check for updates"), [this] { checkStatus = "Checking..."; rebuild(); refreshNow (false); });
     if (have.isNotEmpty() && ! busy)
@@ -2289,6 +2290,22 @@ void HubComponent::message (const String& heading, const String& t)
     d->para (t);
     d->action ("OK", Style::hot, [this] { closeDialog(); });
     showDialog (std::move (d));
+}
+
+//== Launching ======================================================================
+void HubComponent::launch (const String& key)
+{
+    const auto app = model.appFile (key);
+    if (! app.exists())
+    {
+        message ("CAN'T FIND IT", key == "emx" ? String ("The Emulon X standalone app isn't where it was installed. Reinstall Emulon X (with the standalone app) to fix it.")
+                                               : String ("Emulon X SD isn't where it was installed. Reinstall it to fix it."));
+        return;
+    }
+    if (app.startAsProcess())
+        flash (key == "emx" ? String ("Starting Emulon X...") : String ("Starting Emulon X SD..."));
+    else
+        message ("CAN'T START IT", "Windows didn't start " + app.getFullPathName() + ".");
 }
 
 //== Installing =====================================================================

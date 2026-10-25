@@ -826,6 +826,31 @@ File Model::installedFolder (const String& key) const
     return path.isEmpty() ? File() : File (path).getParentDirectory();
 }
 
+File Model::appFile (const String& key) const
+{
+   #if JUCE_WINDOWS
+    if (key == "emx")
+    {
+        // the standalone app goes into its own folder (picked when installing), not the VST3 folder
+        auto dir = emxRegistry ("StandaloneFolder");
+        if (dir.isEmpty()) dir = settings.get ("where.emx.1");
+        if (dir.isEmpty()) dir = programs().getChildFile ("Emulon X").getFullPathName();
+        return File (dir).getChildFile ("Emulon X.exe");
+    }
+    if (key == "sd")
+    {
+        auto dir = installedFolder ("sd");
+        if (dir == File()) dir = programs().getChildFile ("Emulon X SD");
+        return dir.getChildFile ("Emulon X SD.exe");
+    }
+   #elif JUCE_MAC
+    if (key == "emx") return File ("/Applications/Emulon X.app");
+    if (key == "sd")  return File ("/Applications/Emulon X SD.app");
+   #endif
+    ignoreUnused (key);
+    return {};
+}
+
 std::vector<Model::Place> Model::placesFor (const String& key) const
 {
     std::vector<Place> p;

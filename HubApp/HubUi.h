@@ -73,6 +73,7 @@ private:
     void signIn (std::function<void (juce::String login)> then);
     void devLogin();
     void install (const juce::String& key);
+    void launch (const juce::String& key);
     void pickPicture (std::function<void (juce::String name)>);
     void drawCover (juce::Graphics&, juce::Rectangle<float>, const BankItem&, bool small) const;
     void drawImageCover (juce::Graphics&, juce::Rectangle<float>, const juce::Image&, bool fit, float radius) const;

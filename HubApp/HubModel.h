@@ -148,6 +148,8 @@ public:
     //== Installed things =========================================================
     juce::String installedVersion (const juce::String& key) const;   // "emx", "sd", "hub", "skin:<id>", "bank:<id>"
     juce::File installedFolder (const juce::String& key) const;
+    /** The program to start: the Emulon X standalone app ("emx") or Emulon X SD ("sd"). */
+    juce::File appFile (const juce::String& key) const;
     struct Place { juce::String label, note; juce::File folder; };
     /** The folders an install of `key` asks about, filled in with where it is now (or the usual place). */
     std::vector<Place> placesFor (const juce::String& key) const;
