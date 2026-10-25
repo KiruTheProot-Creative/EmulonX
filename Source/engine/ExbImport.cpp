@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "ExbImport.h"
 #include <map>
+#include <cmath>
+#include <iterator>
 
 namespace emx::exb
 {
@@ -118,6 +120,101 @@ void windows (const Chunk* twl, const MemoryBlock& mb, int& loKey, int& hiKey, i
         else if (n == 1) { loVel = jmax (loVel, jmax (1, lo)); hiVel = jmin (hiVel, hi); }
         ++n;
     }
+}
+} // namespace
+
+//== Voice settings: amp, envelope, filter ==========================================
+// Worked out by comparing the files with what Emulator X shows (Orbit-3 "amb:Galactic End").
+namespace
+{
+/** E-mu envelope rate (0..127, stored as rate / 127) -> seconds for a full 0..100 % move.
+    Measured points from Emulator X, joined smoothly (log scale) in between. */
+double rateSeconds (double rate)
+{
+    static const double pts[][2] { { 0.0, 0.0 }, { 4.0, 0.072 }, { 23.5, 0.995 }, { 28.5, 1.763 }, { 32.0, 2.622 },
+                                   { 38.0, 5.138 }, { 43.0, 8.997 }, { 50.0, 20.12 } };
+    rate = jlimit (0.0, 127.0, rate);
+    if (rate <= 0.0) return 0.0;
+    if (rate < 4.0) return 0.072 * rate / 4.0;
+    for (size_t i = 1; i < std::size (pts); ++i)
+        if (rate <= pts[i][0])
+        {
+            const double t = (rate - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0]);
+            return std::exp (std::log (pts[i - 1][1]) + t * (std::log (pts[i][1]) - std::log (pts[i - 1][1])));
+        }
+    // beyond the measured range: keep the last growth rate, up to E-mu's longest times
+    return jmin (163.0, 20.12 * std::exp ((rate - 50.0) * std::log (20.12 / 8.997) / 7.0));
+}
+
+struct Env { float time[6] {}, level[6] {}; bool valid = false; };
+
+Env readEnv (const Chunk& ev, const MemoryBlock& mb)
+{
+    // E5Ev: 4-byte version, 5 bytes (mode...), then 6 stages of: 1 byte, time (rate / 127, float), level (%, float)
+    Env e;
+    if (ev.id != "E5Ev" || ev.size < 4 + 5 + 6 * 9)
+        return e;
+    const auto* p = static_cast<const uint8*> (mb.getData()) + ev.data + 4 + 5;
+    for (int i = 0; i < 6; ++i)
+    {
+        const auto* q = p + i * 9 + 1;
+        uint32 t = be32 (q), l = be32 (q + 4);
+        float tf, lf;
+        memcpy (&tf, &t, 4); memcpy (&lf, &l, 4);
+        e.time[i] = std::isfinite (tf) ? jlimit (0.0f, 1.0f, tf) : 0.0f;
+        e.level[i] = std::isfinite (lf) ? jlimit (-100.0f, 100.0f, lf) : 0.0f;
+    }
+    e.valid = true;
+    return e;
+}
+
+/** Stages 0..5 = attack 1, attack 2, decay 1, decay 2, release 1, release 2. Attack and decay times
+    depend on how far the level moves; release times are as shown in Emulator X. */
+void ampEnvelope (const Env& e, ZoneParams& p)
+{
+    auto seg = [&] (int i, float from) { return (float) (rateSeconds (e.time[i] * 127.0) * std::abs (e.level[i] - from) / 100.0); };
+    const float l1 = e.level[0], l2 = e.level[1], l3 = e.level[2], l4 = e.level[3];
+    p.attack = jmax (0.001f, seg (0, 0.0f) + seg (1, l1));
+    const float peak = jmax (1.0f, jmax (l1, l2));
+    p.decay = jmax (0.001f, seg (2, l2) + seg (3, l3));
+    p.sustain = jlimit (0.0f, 1.0f, l4 / peak);
+    p.release = jmax (0.005f, (float) (rateSeconds (e.time[4] * 127.0) + (e.level[4] > 0.5f ? rateSeconds (e.time[5] * 127.0) : 0.0)));
+}
+
+float beFloat (const uint8* p) { const uint32 u = be32 (p); float f; memcpy (&f, &u, 4); return std::isfinite (f) ? f : 0.0f; }
+
+/** The voice's filter as an Emulon X filter effect (only the classic types so far). */
+var filterFx (const Chunk& fl, const MemoryBlock& mb)
+{
+    if (fl.id != "E5Fl" || fl.size < 13)
+        return {};
+    const auto* p = static_cast<const uint8*> (mb.getData()) + fl.data + 4;
+    const int type = p[0];
+    const float cut = jlimit (0.0f, 1.0f, beFloat (p + 1)), res = jlimit (0.0f, 1.0f, beFloat (p + 5));
+    // E-mu's filter numbers: 0-2 low pass (4, 2, 6 pole), 8-9 high pass, 16-18 band pass, 127 off
+    int mode = -1, slope = 1;
+    if (type <= 2)                  { mode = 0; slope = type == 1 ? 0 : 1; }
+    else if (type == 8 || type == 9) { mode = 1; slope = type == 8 ? 0 : 1; }
+    else if (type >= 16 && type <= 18) { mode = 2; slope = type == 16 ? 0 : 1; }
+    if (mode < 0 || (mode == 0 && cut >= 0.999f && res < 0.01f))
+        return {};   // off, wide open, or a type Emulon X doesn't have yet
+    const double hz = 57.0 * std::pow (20000.0 / 57.0, (double) cut);   // E-mu's range, approximate until checked
+    auto* settings = new DynamicObject();
+    settings->setProperty ("mode", mode);
+    settings->setProperty ("slope", slope);
+    auto* params = new DynamicObject();
+    params->setProperty ("cut", jlimit (20.0, 20000.0, hz));
+    params->setProperty ("res", res * 0.9f);
+    params->setProperty ("drive", 0.0f);
+    params->setProperty ("mix", 1.0f);
+    auto* m = new DynamicObject();
+    m->setProperty ("type", "filter");
+    m->setProperty ("on", true);
+    m->setProperty ("settings", var (settings));
+    m->setProperty ("params", var (params));
+    Array<var> chain;
+    chain.add (var (m));
+    return chain;
 }
 } // namespace
 
@@ -298,6 +395,23 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
             continue;
         int vLoKey = 0, vHiKey = 127, vLoVel = 1, vHiVel = 127;
         windows (list (v.kids, "TWL"), mb, vLoKey, vHiKey, vLoVel, vHiVel);
+        // the voice's sound: volume (dB) and pan, amp envelope, filter
+        float gainDb = 0.0f, pan = 0.0f;
+        Env amp;
+        var fx;
+        for (auto& c : v.kids)
+        {
+            if (c.id == "E5Am" && c.size >= 9)
+            {
+                gainDb = jlimit (-48.0f, 24.0f, beFloat (d + c.data + 4));
+                pan = jlimit (-100.0f, 100.0f, (float) (int8) d[c.data + 8] * 100.0f / 64.0f);   // E-mu pan -64..+63
+            }
+            if (c.id == "E5Fl")
+                fx = filterFx (c, mb);
+            if (c.id == "LIST" && c.listType == "EvL")
+                for (auto& ev : c.kids)
+                    if (ev.id == "E5Ev") { amp = readEnv (ev, mb); break; }   // the first one is the amp envelope
+        }
         const auto* zl = list (v.kids, "E5ZL");
         if (zl == nullptr)
             continue;
@@ -339,6 +453,11 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
             p.loVel = loVel; p.hiVel = hiVel;
             p.keepSpeed = false;   // classic sampler: pitch changes the speed
             p.attack = 0.001f; p.decay = 0.3f; p.sustain = 1.0f; p.release = 0.3f;
+            if (amp.valid)
+                ampEnvelope (amp, p);
+            p.gainDb = gainDb;
+            p.pan = pan;
+            lz.fx = fx;
             if (entry.second)
             {
                 p.loopMode = LoopMode::loop;

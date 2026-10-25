@@ -1418,40 +1418,66 @@ int main (int argc, char** argv)
                          z.params.loopStart, z.params.loopEnd);
         check (keys.presetName == "apo:PlusDXep" && keys.zones.size() >= 20 && minKey == 21 && maxKey == 108 && looped > 0,
                "exb: keyboard preset = zones across the keys, with loops");
-        // EMX_EXB_RENDER=<file.wav>: play a little phrase with the imported preset, to listen to it
-        if (const auto out = SystemStats::getEnvironmentVariable ("EMX_EXB_RENDER", {}); out.isNotEmpty())
+        // EMX_EXB_RENDER=<folder>: play a little phrase with imported presets, to listen to them
+        auto renderPhrase = [] (const LoadResult& preset, const String& name, bool slowChord)
         {
+            const auto outDir = SystemStats::getEnvironmentVariable ("EMX_EXB_RENDER", {});
+            if (outDir.isEmpty() || preset.zones.empty())
+                return;
             auto set = std::make_shared<ZoneSet>();
             int id = 1;
-            for (auto& z : keys.zones)
+            for (auto& z : preset.zones)
                 set->zones.push_back ({ id++, z.sample, z.params });
             SamplerEngine e;
             e.prepare (48000.0);
             e.setZoneSet (set);
-            AudioBuffer<float> buf (2, 48000 * 9);
+            AudioBuffer<float> buf (2, 48000 * (slowChord ? 12 : 9));
             buf.clear();
-            const int notes[][3] { { 48, 0, 60 }, { 55, 0, 60 }, { 60, 0, 60 }, { 64, 0, 60 },   // C major, then up the keyboard
-                                   { 36, 66, 90 }, { 72, 66, 90 }, { 84, 96, 120 }, { 96, 126, 150 }, { 60, 156, 210 }, { 67, 156, 210 }, { 76, 156, 210 } };
-            const int N = 128;
-            for (int b = 0; b * N < buf.getNumSamples() - N; ++b)
+            std::vector<std::array<int, 3>> notes;   // note, on, off (in 50 ms steps)
+            if (slowChord)
+                notes = { { 48, 0, 120 }, { 55, 0, 120 }, { 63, 0, 120 }, { 70, 0, 120 }, { 60, 130, 200 }, { 67, 130, 200 }, { 75, 130, 200 } };
+            else
+                notes = { { 48, 0, 60 }, { 55, 0, 60 }, { 60, 0, 60 }, { 64, 0, 60 }, { 36, 66, 90 }, { 72, 66, 90 }, { 84, 96, 120 },
+                          { 96, 126, 150 }, { 60, 156, 210 }, { 67, 156, 210 }, { 76, 156, 210 } };
+            const int N = 120;   // 2400 samples (50 ms) = 20 blocks
+            for (int b = 0; (b + 1) * N <= buf.getNumSamples(); ++b)
             {
-                const int tick = b * N / 2400;   // 50 ms steps
-                for (auto& n : notes)
-                {
-                    if (b * N / 2400 != (b - 1) * N / 2400 || b == 0)
+                if (b % 20 == 0)
+                    for (auto& n : notes)
                     {
-                        if (tick == n[1]) e.noteOn (n[0], 100);
-                        if (tick == n[2]) e.noteOff (n[0]);
+                        if (b / 20 == n[1]) e.noteOn (n[0], 100);
+                        if (b / 20 == n[2]) e.noteOff (n[0]);
                     }
-                }
                 e.render (buf.getWritePointer (0, b * N), buf.getWritePointer (1, b * N), N);
             }
-            buf.applyGain (0.6f);
-            File (out).deleteFile();
-            if (auto w = std::unique_ptr<AudioFormatWriter> (WavAudioFormat().createWriterFor (new FileOutputStream (File (out)), 48000.0, 2, 16, {}, 0)))
+            buf.applyGain (0.8f / jmax (0.05f, buf.getMagnitude (0, buf.getNumSamples())));
+            const File out = File (outDir).getChildFile (name + ".wav");
+            out.deleteFile();
+            if (auto w = std::unique_ptr<AudioFormatWriter> (WavAudioFormat().createWriterFor (new FileOutputStream (out), 48000.0, 2, 16, {}, 0)))
                 w->writeFromAudioSampleBuffer (buf, 0, buf.getNumSamples());
-            std::printf ("  rendered %s\n", out.toRawUTF8());
+            std::printf ("  rendered %s\n", out.getFullPathName().toRawUTF8());
+        };
+        renderPhrase (keys, "PlusDXep", false);
+
+        // Orbit-3 "amb:Galactic End", compared with Emulator X's own screens
+        {
+            const File orbit = File (dir).getChildFile ("Orbit-3.exb");
+            const auto oi = exb::readInfo (orbit);
+            const int idx = oi.presetNames.indexOf ("amb:Galactic End");
+            auto ge = exb::loadPreset (orbit, idx >= 0 ? oi.presetEntries[idx].getIntValue() : -1);
+            for (auto& z : ge.zones)
+                std::printf ("    %-18s keys %3d-%3d root %3d  vol %+5.1f dB pan %+4.0f  A %.3f D %.3f S %.3f R %.3f  fx %s\n", z.sample->name.toRawUTF8(),
+                             z.params.loKey, z.params.hiKey, z.params.root, z.params.gainDb, z.params.pan, z.params.attack, z.params.decay,
+                             z.params.sustain, z.params.release, JSON::toString (z.fx, true).toRawUTF8());
+            const auto* first = ge.zones.empty() ? nullptr : &ge.zones.front().params;
+            check (ge.zones.size() == 7 && first != nullptr && std::abs (first->gainDb + 18.0f) < 0.01f && std::abs (first->attack - 0.072f) < 0.01f
+                       && std::abs (first->decay - 0.425f) < 0.03f && std::abs (first->sustain - 0.953f) < 0.01f && std::abs (first->release - 0.995f) < 0.02f
+                       && std::abs (ge.zones.back().params.gainDb + 12.0f) < 0.01f && ge.zones.back().params.pan < -70.0f,
+                   "exb: Galactic End's volume, pan and amp envelope match Emulator X", ge.errors.joinIntoString ("; "));
+            renderPhrase (ge, "GalacticEnd", true);
         }
+
+
     }
 
     std::printf ("\n%d passed, %d failed\n", passes, failures);
