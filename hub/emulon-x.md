@@ -15,12 +15,13 @@ A sampler in the spirit of E-mu's Emulator X, while also easy to use. Load your 
 - 7 skins, plus your own
 
 ## Screenshots
-- main.jpg | Main page · bank and preset browser
-- editor.jpg | Sample editor · zones, loops and envelopes
-- fx.jpg | Effects rack
-- arp.jpg | Arpeggiator
-- banks.jpg | Banks open in the grid view
-- settings.jpg | Settings · customization and skins
+- screenshot-2026-10-26-152153.png | Arranger tab in the EMULON X
+- screenshot-2026-10-26-152144.png | MACHINE Tab in the EMULON X
+- screenshot-2026-10-26-152135.png | ARPEGGIATOR tab in the EMULON X
+- screenshot-2026-10-26-152124.png | PROCESSOR tab in the EMULON X
+- screenshot-2026-10-26-152112.png | EDITOR tab in the EMULON X
+- screenshot-2026-10-26-152104.png | SAVER tab in the EMULON X
+- screenshot-2026-10-26-152055.png | MAIN tab in the EMULON X
 
 ## What's new
 - **2.0.0ea · SuperSampler (early access)**
