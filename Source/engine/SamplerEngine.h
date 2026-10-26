@@ -40,6 +40,10 @@ public:
     //== MIDI ==================================================================
     void handleMidi (const juce::MidiMessage&) noexcept;
     void noteOn (int note, int velocity) noexcept;
+
+    /** V3 Machine: what a note's pad does to it (level, pan, tune, decay, choke group). */
+    struct PadMod { bool used = false; float gain = 1.0f, pan = 0.0f, semis = 0.0f, decay = 1.0f; int choke = 0; };
+    void setPadMods (const std::array<PadMod, 128>& m) noexcept { padMods = m; }
     void noteOff (int note) noexcept;
     void setSustain (bool down) noexcept;
     void setPitchBend (float minusOneToOne) noexcept { bend = minusOneToOne; }
@@ -96,6 +100,8 @@ private:
         juce::uint64 age = 0;
         emu::VoiceState emu;                  // used when the zone has an E-mu design
         float emuGain = 0.0f;                 // gain at the end of the last control step (ramped from here)
+        float padGain = 1.0f, padPan = 0.0f, padSemis = 0.0f, padFade = 1.0f, padFadeCoef = 1.0f;   // Machine pad
+        juce::int64 padAge = 0, padFadeAt = -1;
         double chorusPos = 0.0;               // E-mu chorus: play position of the detuned second copy
         bool chorusInLoop = false;
     };
@@ -126,5 +132,6 @@ private:
     int numPitchMods = 0;
     emu::Inputs emuIn;
     std::vector<float> combMemory;            // flanger delay lines for the E-mu voices
+    std::array<PadMod, 128> padMods {};
 };
 } // namespace emx

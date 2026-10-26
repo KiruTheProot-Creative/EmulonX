@@ -573,6 +573,26 @@ int main (int argc, char** argv)
     }
     editor.showPage (3);
     save ("preview-arp");
+    // V3: Machine (4 x 4, then 8 x 8)
+    editor.showPage (4);
+    save ("preview-machine");
+    {
+        auto m = proc.getMachineSettings();
+        m.grid = 8;
+        proc.setMachineSettings (m);
+        save ("preview-machine-8x8");
+        m.grid = 4;
+        proc.setMachineSettings (m);
+    }
+    // V3: Processor with the new effects, and an AUX bus
+    proc.addFx (0, emx::fx::Type::spectral);
+    proc.addFx (emx::EmulonXProcessor::auxChainId (0), emx::fx::Type::reverb);
+    proc.setAuxSend (0, 0.25f);
+    editor.showPage (2);
+    save ("preview-processor-spectral");
+    editor.getFxPage().setChannel (emx::EmulonXProcessor::auxChainId (0));
+    save ("preview-processor-aux");
+    editor.getFxPage().setChannel (0);
     editor.showPage (2);
     save ("preview-fx-master");
     {

@@ -81,6 +81,7 @@ set(EMX_SOURCES
     Source/engine/SamplerEngine.cpp
     Source/engine/SampleLoader.cpp
     Source/engine/Arpeggiator.cpp
+    Source/engine/Machine.cpp
     Source/engine/SampleEdit.cpp
     Source/engine/ExbImport.cpp
     Source/engine/EmuVoice.cpp
@@ -98,6 +99,7 @@ set(EMX_SOURCES
     Source/ui/MainPage.cpp
     Source/ui/PlayKeys.cpp
     Source/ui/EmuEditor.cpp
+    Source/ui/MachinePage.cpp
     Source/ui/SkinFile.cpp
     Source/ui/SkinDraw.cpp)
 
@@ -232,6 +234,7 @@ if(EMX_BUILD_TESTS)
         Source/engine/SamplerEngine.cpp
         Source/engine/SampleLoader.cpp
         Source/engine/Arpeggiator.cpp
+    Source/engine/Machine.cpp
         Source/engine/SampleEdit.cpp
         Source/engine/ExbImport.cpp
         Source/engine/EmuVoice.cpp

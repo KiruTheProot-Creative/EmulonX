@@ -35,7 +35,7 @@ private:
     int editPattern = 0, shownPlayingPattern = -2;
     std::optional<ArpPattern> clipboard;
 
-    juce::TextButton onButton { "ARP OFF" }, latchButton { "LATCH" };
+    juce::TextButton onButton { "ARP OFF" }, latchButton { "HOLD" };
     juce::TextButton velPattern { "PATTERN" }, velPlayed { "AS PLAYED" };
     juce::ComboBox modeBox, denBox;
     juce::TextButton dots[3] { juce::TextButton ("STR"), juce::TextButton ("DOT"), juce::TextButton ("TRI") };

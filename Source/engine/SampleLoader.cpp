@@ -222,6 +222,7 @@ static LoadResult readPreset (ZipFile& zip, const String& sourcePrefix, const St
     r.arp = json.getProperty ("arp", var());
     r.voice = json.getProperty ("voice", var());
     r.splice = json.getProperty ("splice", var());
+    r.machine = json.getProperty ("machine", var());
 
     if (auto* macros = json.getProperty ("macros", var()).getArray())
         for (auto& m : *macros)
@@ -452,6 +453,8 @@ MemoryBlock presetToBytes (const PresetToSave& p, String& error)
         root->setProperty ("voice", p.voice);
     if (! p.splice.isVoid())
         root->setProperty ("splice", p.splice);
+    if (! p.machine.isVoid())
+        root->setProperty ("machine", p.machine);
     root->setProperty ("samples", samples);
     root->setProperty ("zones", zones);
     root->setProperty ("createdWith", "Emulon X " EMX_VERSION_STRING);

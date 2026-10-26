@@ -19,8 +19,14 @@ EmulonXEditor::Root::Root (EmulonXEditor& e)
       editorPage (e.proc),
       fxPage (e.proc),
       arpPage (e.proc),
+      machinePage (e.proc),
       keys (e.proc)
 {
+    // on the Machine tab the keyboard shows which keys the pads play
+    keys.keyTint = [this] (int note)
+    {
+        return page == 4 && owner.proc.getMachineSettings().padForNote (note) >= 0 ? theme::red.withAlpha (0.55f) : Colours::transparentBlack;
+    };
     pages[0] = &mainPage; pages[1] = &editorPage; pages[2] = &fxPage;
     pages[3] = &arpPage;  pages[4] = &machinePage; pages[5] = &arrangerPage;
     for (int i = 0; i < numPages; ++i)
@@ -431,6 +437,8 @@ void EmulonXEditor::timerCallback()
         root->fxPage.tick();
     if (root->arpPage.isVisible())
         root->arpPage.tick();
+    if (root->machinePage.isVisible())
+        root->machinePage.tick();
 }
 
 } // namespace emx

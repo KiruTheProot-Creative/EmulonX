@@ -258,6 +258,16 @@ void SamplerEngine::startVoicesFor (int note, int velocity, float glideFrom, con
     if (zoneSet == nullptr)
         return;
 
+    // Machine: a pad in a choke group cuts off the other pads of its group (closed hat stops the open one)
+    const auto& pad = padMods[(size_t) juce::jlimit (0, 127, note)];
+    if (pad.used && pad.choke > 0)
+        for (auto& o : voices)
+            if (o.active && o.note != note && padMods[(size_t) o.note].used && padMods[(size_t) o.note].choke == pad.choke)
+            {
+                o.stolen = true;
+                o.released = true;
+            }
+
     for (size_t zi = 0; zi < zoneSet->zones.size(); ++zi)
     {
         const auto& z = zoneSet->zones[zi];
@@ -274,6 +284,14 @@ void SamplerEngine::startVoicesFor (int note, int velocity, float glideFrom, con
         v.active = true;
         v.note = note;
         v.velocity = velocity;
+        v.padGain = pad.used ? pad.gain : 1.0f;
+        v.padPan = pad.used ? pad.pan : 0.0f;
+        v.padSemis = pad.used ? pad.semis : 0.0f;
+        v.padFade = 1.0f;
+        v.padAge = 0;
+        // decay below 100 %: the sound fades out after a while (shorter = sooner and faster)
+        v.padFadeAt = pad.used && pad.decay < 0.999f ? (juce::int64) (sampleRate * 0.02 + sampleRate * 3.0 * pad.decay * pad.decay) : -1;
+        v.padFadeCoef = (float) std::exp (-4.6 / (sampleRate * (0.03 + 0.6 * pad.decay)));
         v.zoneId = z.id;
         v.sample = z.sample;
         v.params = p;
@@ -411,7 +429,7 @@ void SamplerEngine::renderEmuVoice (Voice& v, const ZoneParams& z, float* L, flo
     }
 
     const float vol = juce::Decibels::decibelsToGain (z.gainDb, -100.0f);
-    const float panAngle = (juce::jlimit (-100.0f, 100.0f, z.pan + v.emu.pan) / 100.0f + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+    const float panAngle = (juce::jlimit (-100.0f, 100.0f, z.pan + v.emu.pan + v.padPan * 100.0f) / 100.0f + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
     const float gl = vol * std::cos (panAngle) * juce::MathConstants<float>::sqrt2 * 0.5f;   // 0.5 = headroom, as for other zones
     const float gr = vol * std::sin (panAngle) * juce::MathConstants<float>::sqrt2 * 0.5f;
     for (int i = 0; i < N; ++i)
@@ -446,7 +464,7 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
         bendSemis = bend * (bend >= 0.0f ? z.design->bendUp : z.design->bendDown);
         emuSemis = v.emu.pitchSemis;
     }
-    const double ratio = std::pow (2.0, (v.note + v.glide + semis - z.root + (z.tuneCents + globalTuneCents) / 100.0 + bendSemis + emuSemis) / 12.0);
+    const double ratio = std::pow (2.0, (v.note + v.glide + semis - z.root + (z.tuneCents + globalTuneCents) / 100.0 + bendSemis + emuSemis + v.padSemis) / 12.0);
     if (std::abs (v.glide) > 0.0f)
     {
         // Glide: slide the remaining distance toward the note at a steady speed.
@@ -512,12 +530,12 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
     const float releaseCoef = v.stolen ? (float) std::exp (-4.6 / (0.006 * sr))
                                        : (float) std::exp (-4.6 / juce::jmax (1.0, z.release * sr));
 
-    const float gain = rawForEmu ? juce::MathConstants<float>::sqrt2 : juce::Decibels::decibelsToGain (z.gainDb, -100.0f) * (float) v.velocity / 127.0f;
-    const float panAngle = (juce::jlimit (-100.0f, 100.0f, z.pan) / 100.0f + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+    const float gain = (rawForEmu ? juce::MathConstants<float>::sqrt2 : juce::Decibels::decibelsToGain (z.gainDb, -100.0f) * (float) v.velocity / 127.0f) * v.padGain;
+    const float panAngle = (juce::jlimit (-100.0f, 100.0f, z.pan + v.padPan * 100.0f) / 100.0f + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
     float gl = gain * std::cos (panAngle) * juce::MathConstants<float>::sqrt2 * 0.5f;   // 0.5 = headroom, as in the prototype
     float gr = gain * std::sin (panAngle) * juce::MathConstants<float>::sqrt2 * 0.5f;
     if (rawForEmu)
-        gl = gr = 1.0f;   // the E-mu layer adds gain and pan
+        gl = gr = v.padGain;   // the E-mu layer adds gain and pan (the pad's pan joins it there)
 
     if (v.released && ! rawForEmu)
         v.stage = 3;
@@ -617,8 +635,13 @@ void SamplerEngine::renderVoice (Voice& v, const ZoneParams& z, float* L, float*
             return;
         }
 
-        L[i] += a * v.level * gl;
-        R[i] += b * v.level * gr;
+        if (v.padFadeAt >= 0 && ++v.padAge > v.padFadeAt)
+        {
+            v.padFade *= v.padFadeCoef;
+            if (v.padFade < 1.0e-4f) { v.active = false; return; }
+        }
+        L[i] += a * v.level * gl * v.padFade;
+        R[i] += b * v.level * gr * v.padFade;
     }
 }
 } // namespace emx

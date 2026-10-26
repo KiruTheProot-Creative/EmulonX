@@ -16,6 +16,7 @@
 #include "ui/ArpPage.h"
 #include "ui/MasterBar.h"
 #include "ui/PlayKeys.h"
+#include "ui/MachinePage.h"
 #include "ui/Theme.h"
 
 namespace emx
@@ -80,7 +81,7 @@ private:
         EditorPage editorPage;
         FxPage fxPage;
         ArpPage arpPage;
-        ComingSoonPanel machinePage { "Machine", "drum pads and sequencer", "Coming in the next build" };
+        MachinePage machinePage;
         ComingSoonPanel arrangerPage { "Arranger", "16 parts by MIDI channel", "Coming in the next build" };
         PlayKeys keys;
         std::unique_ptr<SettingsPanel> settingsPanel;

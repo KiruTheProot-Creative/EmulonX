@@ -27,6 +27,7 @@ struct LoadResult
     juce::var fx;                // FX section (chains, modulation, envelopes)
     juce::var arp, voice;        // arpeggiator and mono / poly settings (may be void)
     juce::var splice;            // splicer mode: first key, cuts (may be void)
+    juce::var machine;           // V3 Machine: pads and step patterns (may be void)
     juce::StringArray errors;
 };
 
@@ -37,7 +38,7 @@ struct PresetToSave
     Interp interp = Interp::sinc;
     std::vector<LoadedZone> zones;
     MacroList macros;
-    juce::var fx, arp, voice, splice;
+    juce::var fx, arp, voice, splice, machine;
 };
 
 struct BankInfo

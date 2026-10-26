@@ -126,6 +126,8 @@ void EmulonXProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
     currentSampleRate = sampleRate;
     engine.prepare (sampleRate);
     arp.prepare (sampleRate);
+    machineSeq.prepare (sampleRate);
+    machineMidi.ensureSize (8192);
     processedMidi.ensureSize (8192);
     arpMidi.ensureSize (8192);
     loadMeasurer.reset (sampleRate, maxBlockSize);
@@ -191,6 +193,12 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
             {
                 arp.setSettings (pendingArp);
                 arpChanged = false;
+            }
+            if (machineChanged)
+            {
+                machineSeq.setSettings (pendingMachine);
+                engine.setPadMods (pendingPadMods);
+                machineChanged = false;
             }
             if (previewChanged)
             {
@@ -265,6 +273,16 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
     {
         arp.process (processedMidi, arpMidi, n, bpm, hostPpq);
         notes = &arpMidi;
+    }
+    // Machine: its step sequencer adds the pads' notes (not through the arpeggiator)
+    {
+        machineMidi.clear();
+        machineSeq.process (machineMidi, n, bpm, hostPpq);
+        if (! machineMidi.isEmpty())
+        {
+            machineMidi.addEvents (*notes, 0, n, 0);
+            notes = &machineMidi;
+        }
     }
     const float masterDbNow = masterDb->load();
     auto midiIt = notes->begin();
@@ -491,6 +509,7 @@ PresetToSave EmulonXProcessor::makePresetToSave() const
     p.macros = currentMacros();
     p.fx = fxToJson (false);
     p.arp = arpSettings.toJson();
+    p.machine = machineSettings.toJson();
     p.voice = voiceSettings.toJson();
     if (splice.on)
         p.splice = splice.toJson();
@@ -1197,6 +1216,11 @@ void EmulonXProcessor::addLoaded (LoadResult&& r, bool autoMapAfter, const File&
         arpSettings = ArpSettings::fromJson (r.arp);
         voiceSettings = VoiceSettings::fromJson (r.voice);
         publishPlayModes();
+        {
+            auto m = r.machine.isObject() ? MachineSettings::fromJson (r.machine) : MachineSettings();
+            m.playing = machineSettings.playing && r.machine.isObject();   // a new preset doesn't start the sequencer by itself
+            setMachineSettings (m);
+        }
         applySpliceJson (r.splice);
     }
 
@@ -1297,6 +1321,33 @@ void EmulonXProcessor::openBank (const File& file)
                                  bank = std::move (l.second);
                                  message ("Opened bank " + bankName + " (" + String ((int) bank.size()) + " presets)");
                              });
+}
+
+void EmulonXProcessor::setMachineSettings (const MachineSettings& m)
+{
+    machineSettings = m;
+    std::array<SamplerEngine::PadMod, 128> mods {};
+    for (int i = 0; i < m.padCount(); ++i)
+    {
+        const auto& p = m.pads[(size_t) i];
+        auto& d = mods[(size_t) jlimit (0, 127, p.note)];
+        // only pads that change something touch their note
+        const bool neutral = p.level >= 0.999f && std::abs (p.pan) < 0.001f && std::abs (p.tune) < 0.001f && p.decay >= 0.999f && p.choke == 0;
+        if (! neutral)
+            d = { true, p.level * p.level, p.pan, p.tune, p.decay, p.choke };
+    }
+    {
+        const SpinLock::ScopedLockType sl (snapshotLock);
+        pendingMachine = m;
+        pendingPadMods = mods;
+        machineChanged = true;
+    }
+    apvts.state.setProperty ("machine", JSON::toString (m.toJson(), true), nullptr);
+    {
+        const ScopedLock sl (embedLock);
+        embedDirty = true;
+    }
+    sendChangeMessage();
 }
 
 int EmulonXProcessor::readScope (float* lo, float* hi) const noexcept
@@ -1448,6 +1499,8 @@ void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
     // Projects saved with "samples inside the project": everything comes from the packed preset.
     const auto stateFx = JSON::parse (apvts.state.getProperty ("fx", "").toString());
     arpSettings = ArpSettings::fromJson (JSON::parse (apvts.state.getProperty ("arp", "").toString()));
+    if (apvts.state.hasProperty ("machine"))
+        setMachineSettings (MachineSettings::fromJson (JSON::parse (apvts.state.getProperty ("machine", "").toString())));
     voiceSettings = VoiceSettings::fromJson (JSON::parse (apvts.state.getProperty ("voice", "").toString()));
     publishPlayModes();
     splice = SpliceState();

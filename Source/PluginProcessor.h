@@ -10,6 +10,7 @@
 #include "fx/FxEngine.h"
 #include "engine/Arpeggiator.h"
 #include "engine/SampleEdit.h"
+#include "engine/Machine.h"
 #include "Settings.h"
 
 namespace emx
@@ -254,6 +255,11 @@ public:
     void setVoiceSettings (const VoiceSettings&);
     Arpeggiator& getArp() noexcept { return arp; }
 
+    //== Machine (V3): drum pads and step sequencer ===============================
+    const MachineSettings& getMachineSettings() const noexcept { return machineSettings; }
+    void setMachineSettings (const MachineSettings&);
+    int getMachineStep() const noexcept { return machineSeq.currentStep.load(); }
+
     /** Where the newest voice of each zone is playing (for the waveform). */
     int getPlayheads (SamplerEngine::Playhead* out, int maxCount) const noexcept;
 
@@ -357,6 +363,9 @@ private:
     std::shared_ptr<const fx::Snapshot> pendingFx, audioFx;
     ArpSettings pendingArp;
     bool arpChanged = false;
+    MachineSettings machineSettings, pendingMachine;
+    std::array<SamplerEngine::PadMod, 128> pendingPadMods {};
+    bool machineChanged = false;
     bool previewChanged = false;
     double previewPos = 0.0;
     ReleasePool releasePool;
@@ -377,7 +386,8 @@ private:
     SamplerEngine engine;
     fx::Engine fxEngine;
     Arpeggiator arp;
-    juce::MidiBuffer processedMidi, arpMidi;
+    MachineSequencer machineSeq;
+    juce::MidiBuffer processedMidi, arpMidi, machineMidi;
     static constexpr int subBlock = 64, maxBuses = 32;
     float busData[maxBuses][2][subBlock] {};
     float mixL[subBlock] {}, mixR[subBlock] {};
