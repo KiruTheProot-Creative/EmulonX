@@ -2,9 +2,9 @@
 # Licensed under the GNU AGPLv3 (see LICENSE).
 
 cmake_minimum_required(VERSION 3.22)
-project(EmulonX VERSION 2.0.0 LANGUAGES C CXX)
+project(EmulonX VERSION 3.0.0 LANGUAGES C CXX)
 # Release tag after the number: ea = early access, af = alpha, bv = beta, bf = bug fix, ff = final (empty for none).
-set(EMX_VERSION_TAG "ea")
+set(EMX_VERSION_TAG "bv")
 set(EMX_FULL_VERSION "${PROJECT_VERSION}${EMX_VERSION_TAG}")
 
 set(CMAKE_CXX_STANDARD 20)
