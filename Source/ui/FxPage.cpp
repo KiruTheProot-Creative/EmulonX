@@ -453,13 +453,18 @@ public:
         if (E == nullptr)
             return;
         const auto geo = geometry();
-        const int G = ! E->ahdsr && E->grid > 0 ? E->grid : 4;
+        // steps: one column per step (every 4th brighter, like beats); random: one per new value
+        const bool timed = E->kind == fx::Envelope::steps || E->kind == fx::Envelope::random;
+        const int G = timed ? 4 : (! E->ahdsr && E->grid > 0 ? E->grid : 4);
+        const int GX = E->kind == fx::Envelope::steps ? jlimit (1, 16, E->numSteps) : E->kind == fx::Envelope::random ? 8 : G;
+        for (int i = 0; i <= GX; ++i)
+        {
+            g.setColour (theme::red.withAlpha (timed && i % 4 == 0 ? 0.28f : 0.13f));
+            g.fillRect (std::round (geo.X ((float) i / GX)), geo.p, 1.0f, geo.H - 2 * geo.p);
+        }
         g.setColour (theme::red.withAlpha (0.13f));
         for (int i = 0; i <= G; ++i)
-        {
-            g.fillRect (std::round (geo.X ((float) i / G)), geo.p, 1.0f, geo.H - 2 * geo.p);
             g.fillRect (geo.p, std::round (geo.Y ((float) i / G)), geo.W - 2 * geo.p, 1.0f);
-        }
 
         if (E->kind == fx::Envelope::steps)
         {
@@ -485,7 +490,7 @@ public:
             Random r (7);
             Path p;
             float prev = 0.5f, y = 0.5f;
-            const int segs = 12;
+            const int segs = 8;   // one per grid column
             for (int i = 0; i <= segs * 8; ++i)
             {
                 const float u = (float) i / (float) (segs * 8);

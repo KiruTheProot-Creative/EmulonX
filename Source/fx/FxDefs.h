@@ -63,4 +63,5 @@ const ParamSpec& masterVolumeSpec();
 //== Envelope helpers shared by the engine and the UI ============================
 float curve (float u, float c) noexcept;   // c in -1..1 bends the segment
 double syncSeconds (int num, int den, int dot, double bpm) noexcept;   // dot: 0 straight, 1 dotted, 2 triplet
+double syncBeats (int num, int den, int dot) noexcept;                // the same length in quarter notes
 } // namespace emx::fx

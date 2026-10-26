@@ -616,6 +616,19 @@ int main (int argc, char** argv)
     proc.setAuxSend (0, 0.25f);
     editor.showPage (3);
     save ("preview-processor-spectral");
+    {
+        // STEPS and RANDOM envelopes (the grid follows the steps)
+        const auto before = proc.getFxSetup().envelopes[0];
+        auto e = before;
+        e.kind = emx::fx::Envelope::steps; e.numSteps = 16; e.sync = true; e.num = 1; e.den = 16;
+        for (int k = 0; k < 16; ++k) e.stepValues[(size_t) k] = 0.25f + 0.7f * (float) ((k * 5) % 16) / 16.0f;
+        proc.setEnvelope (0, e);
+        save ("preview-processor-steps");
+        e.kind = emx::fx::Envelope::random; e.randomType = emx::fx::Envelope::smooth;
+        proc.setEnvelope (0, e);
+        save ("preview-processor-random");
+        proc.setEnvelope (0, before);
+    }
     editor.getFxPage().setChannel (emx::EmulonXProcessor::auxChainId (0));
     save ("preview-processor-aux");
     editor.getFxPage().setChannel (0);

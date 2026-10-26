@@ -90,8 +90,10 @@ float Engine::modulated (float base, const std::vector<Snapshot::RouteRT>& route
 }
 
 void Engine::beginBlock (int numSamples, double sampleRate, double bpm, juce::uint32 noteOns, bool gateOpen,
-                         const float* macros01, int numMacros, float modWheel) noexcept
+                         const float* macros01, int numMacros, float modWheel, double hostBeat) noexcept
 {
+    if (hostBeat >= 0.0)
+        beat = hostBeat;   // locked to the DAW's bars and beats
     sr = sampleRate;
     bpmNow = bpm;
     bpmUsed.store ((float) bpm, std::memory_order_relaxed);
@@ -109,7 +111,7 @@ void Engine::beginBlock (int numSamples, double sampleRate, double bpm, juce::ui
         for (int i = 0; i < numEnv; ++i)
         {
             auto& s = env[i];
-            s.t0 = T; s.l0 = s.last; s.gate = true; s.trig = true;
+            s.t0 = T; s.b0 = beat; s.l0 = s.last; s.gate = true; s.trig = true;
         }
     }
     if (lastGate && ! gateOpen)
@@ -129,9 +131,23 @@ void Engine::beginBlock (int numSamples, double sampleRate, double bpm, juce::ui
         float v = 0.0f, x = 0.0f;
         if (E.kind == Envelope::steps || E.kind == Envelope::random)
         {
-            // timed like a shape: one period = one step (steps) or one new value (random)
-            const double period = juce::jmax (0.001, E.sync ? syncSeconds (E.num, E.den, E.dot, bpmNow) : 1.0 / E.hz);
-            double t = (double) (E.trigger == Envelope::retrig ? T - s.t0 : T) / sr / period;
+            // one period = one step (steps) or one new value (random)
+            double t;
+            if (E.sync)
+            {
+                // on the grid: steps change exactly on the beat divisions of the song. RETRIG starts the
+                // pattern again at the grid line nearest the note (a slightly early note waits for it).
+                const double pb = juce::jmax (1.0e-4, syncBeats (E.num, E.den, E.dot));
+                if (E.trigger == Envelope::retrig)
+                {
+                    const double start = std::round (s.b0 / pb) * pb;
+                    t = juce::jmax (0.0, (beat - start) / pb);
+                }
+                else
+                    t = beat / pb;
+            }
+            else
+                t = (double) (E.trigger == Envelope::retrig ? T - s.t0 : T) / sr * juce::jmin (1000.0, (double) E.hz);
             const int count = juce::jlimit (1, 16, E.numSteps);
             if (E.kind == Envelope::steps)
             {
@@ -196,8 +212,14 @@ void Engine::beginBlock (int numSamples, double sampleRate, double bpm, juce::ui
         }
         else
         {
-            const double period = juce::jmax (0.001, E.sync ? syncSeconds (E.num, E.den, E.dot, bpmNow) : 1.0 / E.hz);
-            double ph = (double) (E.trigger == Envelope::retrig ? T - s.t0 : T) / sr / period;
+            double ph;
+            if (E.sync)
+            {
+                const double pb = juce::jmax (1.0e-4, syncBeats (E.num, E.den, E.dot));
+                ph = (E.trigger == Envelope::retrig ? beat - s.b0 : beat) / pb;   // FREE follows the song's bars
+            }
+            else
+                ph = (double) (E.trigger == Envelope::retrig ? T - s.t0 : T) / sr * juce::jmin (1000.0, (double) E.hz);
             ph = E.loop ? ph - std::floor (ph) : juce::jmin (ph, 1.0);
             x = (float) ph;
             v = E.shapeAt (x);
@@ -209,6 +231,7 @@ void Engine::beginBlock (int numSamples, double sampleRate, double bpm, juce::ui
         envStage[i].store (s.gate ? 1 : s.trig ? 2 : 0, std::memory_order_relaxed);
     }
     T += numSamples;
+    beat += (double) numSamples * juce::jmax (1.0, bpmNow) / 60.0 / sr;   // until the next block says where the DAW is
 }
 
 void Engine::processChain (const Snapshot::ChainRT& chain, float* L, float* R, int n) noexcept

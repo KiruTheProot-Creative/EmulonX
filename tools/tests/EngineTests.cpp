@@ -1472,6 +1472,40 @@ int main (int argc, char** argv)
                    "macro and envelope modulate a knob", String (atStart, 3) + " then " + String (half, 3));
         }
 
+        // STEPS envelopes follow the song's grid (1/16 steps at 120 BPM, 64-sample blocks).
+        {
+            auto stepIndexAt = [&] (int trigger, double noteBeat, double atBeat) -> int
+            {
+                Setup setup;
+                setup.envelopes = { makeEnvelope (false, "Saw Up") };
+                auto& e = setup.envelopes[0];
+                e.kind = Envelope::steps; e.numSteps = 16; e.sync = true; e.num = 1; e.den = 16; e.dot = 0;
+                e.trigger = trigger; e.loop = true;
+                for (int k = 0; k < 16; ++k) e.stepValues[(size_t) k] = (float) k / 16.0f;
+                auto snap = Snapshot::build (setup, {});
+                Engine eng;
+                eng.setSnapshot (snap.get());
+                float macros[20] {};
+                const double beatsPerBlock = 64.0 * 120.0 / 60.0 / SR;
+                double b = 0.0;
+                juce::uint32 notes = 0;
+                for (; b < atBeat; b += beatsPerBlock)
+                {
+                    if (notes == 0 && b >= noteBeat) notes = 1;
+                    eng.beginBlock (64, SR, 120, notes, notes > 0, macros, 20, 0.0f, b);
+                }
+                return roundToInt (eng.envValue[0].load() * 16.0f);
+            };
+            // FREE: the step is the song position's 16th note (whenever the note came)
+            const bool freeOk = stepIndexAt (Envelope::free, 0.37, 2.0 + 0.30) == (int) std::floor ((2.0 + 0.30 - 64.0 * 2.0 / SR) / 0.25) % 16;
+            // RETRIG: a note a little late on beat 1 starts step 1 there, and step 2 comes exactly on the next 16th
+            const int r1 = stepIndexAt (Envelope::retrig, 1.03, 1.20);
+            const int r2 = stepIndexAt (Envelope::retrig, 1.03, 1.27);
+            const int r3 = stepIndexAt (Envelope::retrig, 1.03, 2.02);
+            check (freeOk && r1 == 0 && r2 == 1 && r3 == 4, "STEPS envelopes change on the song's grid (FREE and RETRIG)",
+                   String (r1) + " " + String (r2) + " " + String (r3));
+        }
+
         // JSON round trip (prototype format).
         {
             std::map<String, int> idMap;

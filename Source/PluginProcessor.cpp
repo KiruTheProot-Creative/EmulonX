@@ -445,7 +445,8 @@ void EmulonXProcessor::renderOwnPart (AudioBuffer<float>& buffer, MidiBuffer& mi
 
         // Effects: each zone's own channel first, then the whole-preset chain.
         fxEngine.beginBlock (len, currentSampleRate, bpm, engine.getNoteOnCount(), engine.isGateOpen(),
-                             macros01, numMacros, engine.getModWheel());
+                             macros01, numMacros, engine.getModWheel(),
+                             hostPpq.has_value() ? *hostPpq + (double) start * bpm / 60.0 / currentSampleRate : -1.0);
         {
             // Modulated SEMI knobs (used from the next step on, ~1 ms later).
             std::pair<int, float> pm[64];

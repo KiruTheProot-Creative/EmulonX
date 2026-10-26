@@ -215,6 +215,12 @@ float curve (float u, float c) noexcept
     return (std::exp (k * u) - 1.0f) / (std::exp (k) - 1.0f);
 }
 
+double syncBeats (int num, int den, int dot) noexcept
+{
+    static const double mult[] { 1.0, 1.5, 2.0 / 3.0 };
+    return (double) num / (double) juce::jmax (1, den) * 4.0 * mult[juce::jlimit (0, 2, dot)];
+}
+
 double syncSeconds (int num, int den, int dot, double bpm) noexcept
 {
     static const double mult[] { 1.0, 1.5, 2.0 / 3.0 };

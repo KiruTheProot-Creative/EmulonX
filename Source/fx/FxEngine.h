@@ -48,9 +48,10 @@ public:
     void setSnapshot (const Snapshot* s) noexcept { snap = s; }
     const Snapshot* getSnapshot() const noexcept { return snap; }
 
-    /** Call once per sub-block before processing chains. */
+    /** Call once per sub-block before processing chains. hostBeat: the DAW's position in quarter notes
+        at the start of this sub-block (negative = not playing; synced envelopes then keep their own beat clock). */
     void beginBlock (int numSamples, double sampleRate, double bpm, juce::uint32 noteOnCount, bool gateOpen,
-                     const float* macros01, int numMacros, float modWheel) noexcept;
+                     const float* macros01, int numMacros, float modWheel, double hostBeat = -1.0) noexcept;
     void processChain (const Snapshot::ChainRT&, float* L, float* R, int n) noexcept;
     /** Modulated SEMI knobs: fills (zone id, semitones). Returns how many. */
     int modulateZonePitch (std::pair<int, float>* out, int maxCount) noexcept;
@@ -82,6 +83,7 @@ private:
     const Snapshot* snap = nullptr;
     double sr = 44100.0, bpmNow = 120.0;
     juce::int64 T = 0;
+    double beat = 0.0;   // quarter notes: the DAW's position while it plays, else counted here
     juce::uint32 lastNoteOns = 0;
     bool lastGate = false;
     const float* macros = nullptr;
@@ -92,6 +94,7 @@ private:
     struct EnvState
     {
         bool gate = false, trig = false; juce::int64 t0 = 0, tr0 = 0; float l0 = 0, lr = 0, last = 0;
+        double b0 = 0.0;   // beat of the last note-on
         juce::int64 cycle = -1; float rPrev = 0.5f, rNext = 0.5f; juce::uint32 seed = 12345u;   // random kind
     };
     EnvState env[maxEnvelopes];
