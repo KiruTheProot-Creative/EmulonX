@@ -15,6 +15,7 @@
 #include "ui/FxPage.h"
 #include "ui/ArpPage.h"
 #include "ui/MasterBar.h"
+#include "ui/PlayKeys.h"
 #include "ui/Theme.h"
 
 namespace emx
@@ -62,10 +63,16 @@ private:
         void paintOverChildren (juce::Graphics&) override;
         void resized() override;
         void showPage (int index);
+        void showSaveMenu();
+        void showPartMenu();
 
+        // V3 tabs: MAIN, EDITOR, PROCESSOR, ARPEGGIATOR, MACHINE, ARRANGER
+        static constexpr int numPages = 6;
         EmulonXEditor& owner;
-        juce::TextButton tabMain { "MAIN" }, tabEditor { "EDITOR" }, tabFx { "FX" }, tabArp { "ARP" };
-        LedDisplay voicesLed, cpuLed;
+        juce::TextButton tabs[numPages] { juce::TextButton ("MAIN"), juce::TextButton ("EDITOR"), juce::TextButton ("PROCESSOR"),
+                                          juce::TextButton ("ARPEGGIATOR"), juce::TextButton ("MACHINE"), juce::TextButton ("ARRANGER") };
+        juce::TextButton saveButton { "SAVE" }, partButton;
+        LedDisplay statusLed, voicesLed, cpuLed;
         MasterBar masterBar;
         GearButton gear;
         Explorer explorer;
@@ -73,8 +80,14 @@ private:
         EditorPage editorPage;
         FxPage fxPage;
         ArpPage arpPage;
+        ComingSoonPanel machinePage { "Machine", "drum pads and sequencer", "Coming in the next build" };
+        ComingSoonPanel arrangerPage { "Arranger", "16 parts by MIDI channel", "Coming in the next build" };
+        PlayKeys keys;
         std::unique_ptr<SettingsPanel> settingsPanel;
+        std::unique_ptr<juce::FileChooser> chooser;
         juce::Rectangle<float> titleArea;
+        int page = 0;
+        juce::Component* pages[numPages] {};
     };
 
     EmulonXProcessor& proc;

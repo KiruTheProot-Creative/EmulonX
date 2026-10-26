@@ -131,6 +131,11 @@ void EmulonXProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
     loadMeasurer.reset (sampleRate, maxBlockSize);
     masterGain.reset (sampleRate, 0.02);
     masterGain.setCurrentAndTargetValue (dbToGain (masterDb->load()));
+    for (auto* g : { &partGainL, &partGainR })
+    {
+        g->reset (sampleRate, 0.02);
+        g->setCurrentAndTargetValue (1.0f);
+    }
 
     // Effects keep their buffers sized for the sample rate they were made at; resize them now
     // (audio is stopped while the host calls this).
@@ -205,6 +210,11 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
 
     // Notes from the on-screen keyboard join the incoming MIDI (and the keyboard shows what is held).
     keyboardState.processNextMidiBuffer (midi, 0, n, true);
+    // ... and so do the on-screen pitch and mod wheels
+    if (uiBendDirty.exchange (false))
+        midi.addEvent (MidiMessage::pitchWheel (getKeyboardChannel(), jlimit (0, 16383, 8192 + roundToInt (uiBend.load() * 8191.0f))), 0);
+    if (uiModDirty.exchange (false))
+        midi.addEvent (MidiMessage::controllerEvent (getKeyboardChannel(), 1, jlimit (0, 127, roundToInt (uiMod.load() * 127.0f))), 0);
 
     // What the FX need this block: tempo (from the host if it has one), macros, zone channels.
     const fx::Snapshot* fxs = audioFx.get();
@@ -344,16 +354,35 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
         const auto& vs = fx::masterVolumeSpec();
         const float volDb = vs.fromNorm (fxEngine.modulateVolume (vs.toNorm (jmax (-60.0f, masterDbNow))));
         masterGain.setTargetValue (dbToGain (masterDbNow <= -59.9f ? -60.0f : volDb));
+        {
+            // the part's own volume and pan (equal-power, centre = unchanged)
+            const float pv = partVolumeDb.load(), pp = partPan.load();
+            const float pg = pv <= -59.9f ? 0.0f : dbToGain (pv);
+            const float a = (pp + 1.0f) * MathConstants<float>::pi * 0.25f;
+            partGainL.setTargetValue (pg * std::cos (a) * MathConstants<float>::sqrt2);
+            partGainR.setTargetValue (pg * std::sin (a) * MathConstants<float>::sqrt2);
+        }
+        float lo = 0.0f, hi = 0.0f;
         for (int i = 0; i < len; ++i)
         {
             const float g = masterGain.getNextValue();
+            const float l = mixL[i] * g * partGainL.getNextValue(), r = mixR[i] * g * partGainR.getNextValue();
+            const float m = (l + r) * 0.5f;
+            lo = jmin (lo, m);
+            hi = jmax (hi, m);
             if (outR != nullptr)
             {
-                outL[start + i] = mixL[i] * g;
-                outR[start + i] = mixR[i] * g;
+                outL[start + i] = l;
+                outR[start + i] = r;
             }
             else
-                outL[start + i] = (mixL[i] + mixR[i]) * 0.5f * g;
+                outL[start + i] = m;
+        }
+        {
+            const int w = scopeWrite.load (std::memory_order_relaxed);
+            scopeLo[w].store (lo, std::memory_order_relaxed);
+            scopeHi[w].store (hi, std::memory_order_relaxed);
+            scopeWrite.store ((w + 1) % scopeSize, std::memory_order_release);
         }
     }
 
@@ -504,6 +533,7 @@ void EmulonXProcessor::newPreset()
     zones.clear();
     presetName = "Init";
     presetFile = File();
+    presetSource = {};
     fxSetup = fx::Setup();
     arpSettings = ArpSettings();
     voiceSettings = VoiceSettings();
@@ -1045,7 +1075,16 @@ void EmulonXProcessor::loadPresetFromBankFile (const File& bankFile, const Strin
     if (exb::isExb (bankFile))   // Emulator X bank (experimental): the entry is the preset's number
     {
         runInBackground<LoadResult> ([bankFile, entry] { return exb::loadPreset (bankFile, entry.getIntValue()); },
-                                     [this] (LoadResult& r) { addLoaded (std::move (r), false); });
+                                     [this, bankFile, entry] (LoadResult& r)
+                                     {
+                                         const bool ok = ! r.zones.empty();
+                                         addLoaded (std::move (r), false);
+                                         if (ok)
+                                         {
+                                             presetSource = { exb::bankFile (bankFile).getFileNameWithoutExtension(), entry.getIntValue() };
+                                             sendChangeMessage();
+                                         }
+                                     });
         return;
     }
     runInBackground<LoadResult> ([bankFile, entry, name]
@@ -1059,7 +1098,17 @@ void EmulonXProcessor::loadPresetFromBankFile (const File& bankFile, const Strin
                                      }
                                      return loader::loadPresetFromMemory (bytes, "emxb|" + bankFile.getFullPathName() + "|" + entry, name);
                                  },
-                                 [this] (LoadResult& r) { addLoaded (std::move (r), false); });
+                                 [this, bankFile, entry] (LoadResult& r)
+                                 {
+                                     const bool ok = ! r.zones.empty();
+                                     addLoaded (std::move (r), false);
+                                     if (ok)
+                                     {
+                                         const auto info = loader::readBankInfo (bankFile);
+                                         presetSource = { bankFile.getFileNameWithoutExtension(), info.presetEntries.indexOf (entry) };
+                                         sendChangeMessage();
+                                     }
+                                 });
 }
 
 void EmulonXProcessor::addLoaded (LoadResult&& r, bool autoMapAfter, const File& fromFile)
@@ -1076,6 +1125,7 @@ void EmulonXProcessor::addLoaded (LoadResult&& r, bool autoMapAfter, const File&
         splice = SpliceState();
         presetName = r.presetName;
         presetFile = loader::isPresetFile (fromFile) ? fromFile : File();
+        presetSource = {};   // a bank load fills this in afterwards
         if (r.interp >= 0)
             interp = (Interp) r.interp;
         if (! r.macros.empty())
@@ -1222,6 +1272,59 @@ void EmulonXProcessor::openBank (const File& file)
                                  bankName = l.first.name;
                                  bank = std::move (l.second);
                                  message ("Opened bank " + bankName + " (" + String ((int) bank.size()) + " presets)");
+                             });
+}
+
+int EmulonXProcessor::readScope (float* lo, float* hi) const noexcept
+{
+    const int w = scopeWrite.load (std::memory_order_acquire);
+    for (int i = 0; i < scopeSize; ++i)
+    {
+        const int k = (w + i) % scopeSize;
+        lo[i] = scopeLo[k].load (std::memory_order_relaxed);
+        hi[i] = scopeHi[k].load (std::memory_order_relaxed);
+    }
+    return scopeSize;
+}
+
+void EmulonXProcessor::setPartVolume (float db)
+{
+    partVolumeDb.store (jlimit (-60.0f, 6.0f, db));
+    apvts.state.setProperty ("partVolume", partVolumeDb.load(), nullptr);
+}
+
+void EmulonXProcessor::setPartPan (float pan)
+{
+    partPan.store (jlimit (-1.0f, 1.0f, pan));
+    apvts.state.setProperty ("partPan", partPan.load(), nullptr);
+}
+
+void EmulonXProcessor::mergePresetFilesIntoBank (const Array<File>& presets, const File& file)
+{
+    if (presets.isEmpty())
+        return;
+    runInBackground<String> ([file, presets]
+                             {
+                                 std::vector<std::pair<String, MemoryBlock>> items;
+                                 for (auto& f : presets)
+                                 {
+                                     MemoryBlock mb;
+                                     if (! f.loadFileAsData (mb))
+                                         return "Can't read " + f.getFileName();
+                                     auto name = f.getFileName();
+                                     for (auto ext : { ".emxp.zip", ".emxp" })
+                                         if (name.endsWithIgnoreCase (ext))
+                                             name = name.dropLastCharacters ((int) strlen (ext));
+                                     items.emplace_back (name, std::move (mb));
+                                 }
+                                 String err;
+                                 return loader::saveBank (file, file.getFileNameWithoutExtension(), items, err) ? String() : err;
+                             },
+                             [this, file, count = presets.size()] (String& err)
+                             {
+                                 if (err.isEmpty())
+                                     ++filesWritten;
+                                 message (err.isEmpty() ? "Merged " + String (count) + " presets into " + file.getFileName() : err);
                              });
 }
 
@@ -1486,6 +1589,8 @@ void EmulonXProcessor::setStateInformation (const void* data, int size)
         return;
 
     apvts.replaceState (ValueTree::fromXml (*xml));
+    partVolumeDb.store (jlimit (-60.0f, 6.0f, (float) (double) apvts.state.getProperty ("partVolume", 0.0)));
+    partPan.store (jlimit (-1.0f, 1.0f, (float) (double) apvts.state.getProperty ("partPan", 0.0)));
     {
         const ScopedLock sl (embedLock);
         embeddedPreset = packed;

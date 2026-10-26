@@ -134,8 +134,29 @@ public:
     double getCpuLoad() const noexcept    { return loadMeasurer.getLoadAsProportion(); }
     void panic() noexcept                 { panicRequested = true; keyboardState.allNotesOff (0); }
 
+    //== V3: on-screen wheels, output scope, the part's own level ====================
+    /** Pitch wheel from the on-screen keyboard, -1..1 (springs back to 0 on release). */
+    void setUiPitchBend (float v) noexcept { uiBend.store (juce::jlimit (-1.0f, 1.0f, v)); uiBendDirty.store (true); }
+    /** Mod wheel from the on-screen keyboard, 0..1. */
+    void setUiModWheel (float v) noexcept  { uiMod.store (juce::jlimit (0.0f, 1.0f, v)); uiModDirty.store (true); }
+    float getUiPitchBend() const noexcept  { return uiBend.load(); }
+    float getUiModWheel() const noexcept   { return uiMod.load(); }
+    /** The output as min / max per short step, oldest first (for the Main page's LCD). Returns the count. */
+    static constexpr int scopeSize = 256;
+    int readScope (float* lo, float* hi) const noexcept;
+    /** The preset's own volume (dB, -60 = off) and pan (-1..1), after the effects and before the master. */
+    float getPartVolume() const noexcept { return partVolumeDb.load(); }
+    float getPartPan() const noexcept    { return partPan.load(); }
+    void setPartVolume (float db);
+    void setPartPan (float pan);
+    /** Writes the chosen preset files into one bank (.emxb), in the background. */
+    void mergePresetFilesIntoBank (const juce::Array<juce::File>& presets, const juce::File& bankFile);
+
     //== Preset ==================================================================
     const juce::String& getPresetName() const noexcept { return presetName; }
+    /** Where the current preset came from (for the Main page's LCD): bank name and the preset's number in it. */
+    struct PresetSource { juce::String bank; int number = -1; };
+    const PresetSource& getPresetSource() const noexcept { return presetSource; }
     void setPresetName (const juce::String&);
     void newPreset();
     /** Saves the current preset (samples packed inside) in the background. */
@@ -313,6 +334,7 @@ private:
     int nextZoneId = 1, nextOrder = 0, filesWritten = 0, selectedZoneId = 0;
     juce::String presetName { "Init" }, lastMessage, bankName { "My Bank" };
     juce::File presetFile;
+    PresetSource presetSource;
     fx::Setup fxSetup;
     ArpSettings arpSettings;
     VoiceSettings voiceSettings;
@@ -363,6 +385,11 @@ private:
     std::atomic<float>* macroValues[numMacros] {};
     std::atomic<float> peak[2] { 0.0f, 0.0f };
     std::atomic<int> activeVoices { 0 };
+    std::atomic<float> uiBend { 0.0f }, uiMod { 0.0f }, partVolumeDb { 0.0f }, partPan { 0.0f };
+    std::atomic<bool> uiBendDirty { false }, uiModDirty { false };
+    std::atomic<float> scopeLo[scopeSize] {}, scopeHi[scopeSize] {};
+    std::atomic<int> scopeWrite { 0 };
+    juce::SmoothedValue<float> partGainL, partGainR;
     static constexpr int maxPlayheads = 16;
     std::atomic<int> playheadCount { 0 }, playheadZone[maxPlayheads] {};
     std::atomic<double> playheadPos[maxPlayheads] {};

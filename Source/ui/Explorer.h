@@ -18,7 +18,8 @@ public:
 };
 
 class Explorer final : public juce::Component,
-                       private juce::ChangeListener
+                       private juce::ChangeListener,
+                       private juce::Timer
 {
 public:
     explicit Explorer (EmulonXProcessor&);
@@ -38,12 +39,15 @@ public:
 
 private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
+    void timerCallback() override;   // search: runs a moment after typing stops
+    void buildSearchResults (juce::TreeViewItem& root, const juce::String& query);
     void chooseFolderFor (Settings::Folder);
 
     juce::SharedResourcePointer<Settings> settings;
     FolderAddButton addButton;
     juce::TextButton tabSamples { "SAMPLES" }, tabBanks { "BANKS" };
     juce::TreeView tree;
+    juce::TextEditor search;
     std::unique_ptr<juce::TreeViewItem> rootItem;
     std::unique_ptr<juce::XmlElement> openness[2];
     std::unique_ptr<juce::FileChooser> chooser;

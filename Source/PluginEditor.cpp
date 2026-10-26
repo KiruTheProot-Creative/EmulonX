@@ -10,6 +10,7 @@ using namespace juce;
 //== Root ========================================================================
 EmulonXEditor::Root::Root (EmulonXEditor& e)
     : owner (e),
+      statusLed ([&e] { return e.proc.getLastMessage().toUpperCase(); }, 8.0f),
       voicesLed ([&e] { return "VOICES " + String (e.proc.getActiveVoices()); }),
       cpuLed ([&e] { return "CPU " + String (roundToInt (e.proc.getCpuLoad() * 100.0)) + "%"; }),
       masterBar (e.proc),
@@ -17,64 +18,168 @@ EmulonXEditor::Root::Root (EmulonXEditor& e)
       mainPage (e.proc),
       editorPage (e.proc),
       fxPage (e.proc),
-      arpPage (e.proc)
+      arpPage (e.proc),
+      keys (e.proc)
 {
-    int index = 0;
-    for (auto* b : { &tabMain, &tabEditor, &tabFx, &tabArp })
+    pages[0] = &mainPage; pages[1] = &editorPage; pages[2] = &fxPage;
+    pages[3] = &arpPage;  pages[4] = &machinePage; pages[5] = &arrangerPage;
+    for (int i = 0; i < numPages; ++i)
     {
-        b->setClickingTogglesState (false);
-        b->getProperties().set ("emxTab", true);   // the XP skin draws these like taskbar buttons
-        b->onClick = [this, index] { showPage (index); };
+        auto& b = tabs[i];
+        b.setClickingTogglesState (false);
+        b.getProperties().set ("emxTab", true);   // the XP skin draws these like taskbar buttons
+        b.onClick = [this, i] { showPage (i); };
         addAndMakeVisible (b);
-        ++index;
+        addChildComponent (pages[i]);
     }
 
+    saveButton.setButtonText (String::fromUTF8 ("SAVE \xe2\x96\xbe"));
+    saveButton.setTooltip ("New, load and save presets - and merge preset files into one bank (.emxb)");
+    saveButton.onClick = [this] { showSaveMenu(); };
+    partButton.setTooltip ("The Arranger part you are playing and editing");
+    partButton.onClick = [this] { showPartMenu(); };
+    statusLed.setTooltip ("What Emulon X did last");
     gear.onClick = [this] { owner.showSettings (settingsPanel == nullptr); };
-    for (Component* c : { (Component*) &masterBar, (Component*) &voicesLed, (Component*) &cpuLed, (Component*) &gear, (Component*) &explorer,
-                          (Component*) &mainPage, (Component*) &editorPage, (Component*) &fxPage, (Component*) &arpPage })
+    for (Component* c : { (Component*) &saveButton, (Component*) &partButton, (Component*) &statusLed, (Component*) &masterBar,
+                          (Component*) &voicesLed, (Component*) &cpuLed, (Component*) &gear, (Component*) &explorer, (Component*) &keys })
         addAndMakeVisible (c);
 
-    mainPage.getPresetPanel().onOpenZone = [this] { showPage (1); };
     showPage (0);
 }
 
 void EmulonXEditor::Root::showPage (int index)
 {
-    tabMain.setToggleState (index == 0, dontSendNotification);
-    tabEditor.setToggleState (index == 1, dontSendNotification);
-    tabFx.setToggleState (index == 2, dontSendNotification);
-    tabArp.setToggleState (index == 3, dontSendNotification);
-    mainPage.setVisible (index == 0);
-    editorPage.setVisible (index == 1);
-    fxPage.setVisible (index == 2);
-    arpPage.setVisible (index == 3);
+    page = jlimit (0, numPages - 1, index);
+    for (int i = 0; i < numPages; ++i)
+    {
+        tabs[i].setToggleState (i == page, dontSendNotification);
+        pages[i]->setVisible (i == page);
+    }
+    keys.setVisible (page != 1);   // the Editor has its own keyboard and needs the height
+    resized();
+}
+
+void EmulonXEditor::Root::showSaveMenu()
+{
+    auto& proc = owner.proc;
+    PopupMenu m;
+    m.addItem ("New preset", [&proc] { proc.newPreset(); });
+    m.addItem ("Load preset or samples...", [this, &proc]
+    {
+        chooser = std::make_unique<FileChooser> ("Open a preset or add samples", proc.getSettings().getUserPresetFolder(), loader::supportedWildcards());
+        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::canSelectMultipleItems,
+                              [&proc] (const FileChooser& fc) { if (! fc.getResults().isEmpty()) proc.loadFiles (fc.getResults()); });
+    });
+    m.addSeparator();
+    auto saveAs = [this, &proc]
+    {
+        const auto start = proc.getSettings().getUserPresetFolder().getChildFile (loader::safeFileName (proc.getPresetName()) + ".emxp");
+        chooser = std::make_unique<FileChooser> ("Save preset", start, "*.emxp");
+        chooser->launchAsync (FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::warnAboutOverwriting,
+                              [&proc] (const FileChooser& fc)
+                              {
+                                  auto f = fc.getResult();
+                                  if (f == File())
+                                      return;
+                                  if (! f.hasFileExtension ("emxp"))
+                                      f = f.withFileExtension ("emxp");
+                                  proc.savePresetAs (f);
+                              });
+    };
+    m.addItem ("Save preset", [&proc, saveAs]
+    {
+        const auto f = proc.getPresetFile();
+        if (f != File() && f.getParentDirectory().isDirectory() && f.getFileNameWithoutExtension() == loader::safeFileName (proc.getPresetName()))
+            proc.savePresetAs (f);
+        else
+            saveAs();
+    });
+    m.addItem ("Save preset as...", saveAs);
+    m.addSeparator();
+    m.addItem ("Merge presets into a bank (.emxb)...", [this, &proc]
+    {
+        // pick the presets (several at once), then where the bank goes
+        chooser = std::make_unique<FileChooser> ("Choose the presets for the bank", proc.getSettings().getUserPresetFolder(), "*.emxp");
+        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::canSelectMultipleItems,
+                              [this, &proc] (const FileChooser& fc)
+                              {
+                                  const auto presets = fc.getResults();
+                                  if (presets.isEmpty())
+                                      return;
+                                  Component::SafePointer<Root> safe (this);
+                                  MessageManager::callAsync ([safe, presets, &proc]
+                                  {
+                                      if (safe == nullptr)
+                                          return;
+                                      const auto start = proc.getSettings().getUserPresetFolder().getChildFile ("My Bank.emxb");
+                                      safe->chooser = std::make_unique<FileChooser> ("Save the bank", start, "*.emxb");
+                                      safe->chooser->launchAsync (FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::warnAboutOverwriting,
+                                                                  [presets, &proc] (const FileChooser& fc2)
+                                                                  {
+                                                                      auto f = fc2.getResult();
+                                                                      if (f == File())
+                                                                          return;
+                                                                      if (! f.hasFileExtension ("emxb"))
+                                                                          f = f.withFileExtension ("emxb");
+                                                                      proc.mergePresetFilesIntoBank (presets, f);
+                                                                  });
+                                  });
+                              });
+    });
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&saveButton));
+}
+
+void EmulonXEditor::Root::showPartMenu()
+{
+    PopupMenu m;
+    m.addSectionHeader ("Arranger parts arrive with the Arranger tab");
+    m.addItem ("Open the Arranger", [this] { showPage (5); });
+    m.showMenuAsync (PopupMenu::Options().withTargetComponent (&partButton));
 }
 
 void EmulonXEditor::Root::resized()
 {
     auto r = getLocalBounds().reduced (46, 40);
 
+    // toolbar: logo, SAVE menu, part, status ... volume, voices, CPU, settings
     auto header = r.removeFromTop (34);
     titleArea = header.removeFromLeft (190).toFloat();
+    header.removeFromLeft (14);
+    saveButton.setBounds (header.removeFromLeft (84).withSizeKeepingCentre (84, 28));
     header.removeFromLeft (8);
-    for (auto* b : { &tabMain, &tabEditor, &tabFx, &tabArp })
-    {
-        b->setBounds (header.removeFromLeft (84).withSizeKeepingCentre (84, 28));
-        header.removeFromLeft (6);
-    }
+    partButton.setButtonText ("PART 01 - CH " + String (owner.proc.getKeyboardChannel()));
+    partButton.setBounds (header.removeFromLeft (124).withSizeKeepingCentre (124, 28));
+    header.removeFromLeft (8);
     gear.setBounds (header.removeFromRight (34).withSizeKeepingCentre (34, 28));
     header.removeFromRight (8);
-    cpuLed.setBounds (header.removeFromRight (78).withSizeKeepingCentre (78, 24));
-    header.removeFromRight (8);
-    voicesLed.setBounds (header.removeFromRight (100).withSizeKeepingCentre (100, 24));
-    header.removeFromRight (16);
-    masterBar.setBounds (header.removeFromRight (jmin (330, header.getWidth())));
+    cpuLed.setBounds (header.removeFromRight (70).withSizeKeepingCentre (70, 24));
+    header.removeFromRight (6);
+    voicesLed.setBounds (header.removeFromRight (86).withSizeKeepingCentre (86, 24));
+    header.removeFromRight (10);
+    masterBar.setBounds (header.removeFromRight (jmin (290, header.getWidth())));
+    header.removeFromRight (10);
+    statusLed.setBounds (header.withSizeKeepingCentre (header.getWidth(), 24));
 
     r.removeFromTop (8);
     explorer.setBounds (r.removeFromLeft (225));
     r.removeFromLeft (8);
-    for (auto* page : { (Component*) &mainPage, (Component*) &editorPage, (Component*) &fxPage, (Component*) &arpPage })
-        page->setBounds (r);
+
+    // tabs along the top of the right side, the keyboard along the bottom (not on the Editor)
+    auto tabRow = r.removeFromTop (30);
+    const int tw = (tabRow.getWidth() - (numPages - 1) * 6) / numPages;
+    for (int i = 0; i < numPages; ++i)
+    {
+        tabs[i].setBounds (tabRow.removeFromLeft (tw).withSizeKeepingCentre (tw, 28));
+        tabRow.removeFromLeft (6);
+    }
+    r.removeFromTop (6);
+    if (keys.isVisible())
+    {
+        keys.setBounds (r.removeFromBottom (92));
+        r.removeFromBottom (8);
+    }
+    for (auto* p : pages)
+        p->setBounds (r);
     if (settingsPanel != nullptr)
         settingsPanel->setBounds (getLocalBounds());
 }
@@ -271,7 +376,8 @@ void EmulonXEditor::filesDropped (const StringArray& files, int, int)
     if (! list.isEmpty())
     {
         proc.loadFiles (list);
-        root->showPage (0);
+        if (root->page != 1)
+            root->showPage (0);
     }
 }
 
@@ -311,9 +417,12 @@ bool EmulonXEditor::keyPressed (const KeyPress& k)
 
 void EmulonXEditor::timerCallback()
 {
+    root->statusLed.refresh();
     root->voicesLed.refresh();
     root->cpuLed.refresh();
     root->masterBar.tick();
+    if (root->keys.isVisible())
+        root->keys.tick();
     if (root->mainPage.isVisible())
         root->mainPage.tick();
     if (root->editorPage.isVisible())

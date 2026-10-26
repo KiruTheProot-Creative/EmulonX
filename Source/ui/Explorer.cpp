@@ -71,6 +71,7 @@ public:
     Settings::Folder rootFolder {};   // for folders added in the settings (can be removed from the list)
     bool isRootFolder = false;
     String bankEntry;                 // for presets inside a bank
+    String detail;                    // shown dimmer after the name (search results: which bank)
 
     bool mightContainSubItems() override
     {
@@ -111,7 +112,16 @@ public:
         r.removeFromLeft (4.0f);
         g.setColour (isSelected() ? theme::hue (0xffff7070) : (kind == Kind::folder || kind == Kind::bank ? theme::hue (0xffe0d8d8) : theme::listText));
         g.setFont (theme::font (9.0f, 500, 0.03f));
-        g.drawText (label, r, Justification::centredLeft, true);
+        if (detail.isEmpty())
+        {
+            g.drawText (label, r, Justification::centredLeft, true);
+            return;
+        }
+        const float w = jmin (r.getWidth() * 0.7f, GlyphArrangement::getStringWidth (g.getCurrentFont(), label) + 6.0f);
+        g.drawText (label, r.removeFromLeft (w), Justification::centredLeft, true);
+        g.setColour (theme::textMuted);
+        g.setFont (theme::font (8.0f, 500, 0.03f));
+        g.drawText (detail, r, Justification::centredLeft, true);
     }
 
     void itemOpennessChanged (bool isNowOpen) override
@@ -304,6 +314,19 @@ Explorer::Explorer (EmulonXProcessor& p) : proc (p)
     addAndMakeVisible (tabSamples);
     addAndMakeVisible (tabBanks);
 
+    search.setTextToShowWhenEmpty ("SEARCH NAME, CATEGORY, BANK...", theme::textMuted);
+    search.setFont (theme::font (9.0f, 500, 0.06f));
+    search.setJustification (Justification::centredLeft);
+    search.setIndents (6, 0);
+    search.setColour (TextEditor::backgroundColourId, theme::ledBg);
+    search.setColour (TextEditor::textColourId, theme::ledText);
+    search.setColour (TextEditor::outlineColourId, theme::edge);
+    search.setColour (TextEditor::focusedOutlineColourId, theme::red);
+    search.setTooltip ("Finds presets in your banks and preset folders (also inside banks)");
+    search.onTextChange = [this] { startTimer (250); };
+    search.onEscapeKey = [this] { search.clear(); rescan(); };
+    addChildComponent (search);
+
     tree.setColour (TreeView::backgroundColourId, Colours::transparentBlack);
     tree.setColour (TreeView::selectedItemBackgroundColourId, Colours::transparentBlack);
     tree.setRootItemVisible (false);
@@ -345,6 +368,8 @@ void Explorer::showTab (int index)
     tabSamples.setToggleState (tab == 0, dontSendNotification);
     tabBanks.setToggleState (tab == 1, dontSendNotification);
     hint = tab == 0 ? "CLICK TO PREVIEW - DOUBLE-CLICK TO ADD" : "DOUBLE-CLICK A PRESET TO LOAD IT";
+    search.setVisible (tab == 1);
+    resized();
     rescan();
 }
 
@@ -377,11 +402,13 @@ void Explorer::rescan()
 
     if (tab == 0)
         addCategory ("SAMPLE FOLDERS", Settings::Folder::samples, Show::samples, "NO FOLDERS - PRESS THE FOLDER + BUTTON");
+    else if (search.getText().trim().isNotEmpty())
+        buildSearchResults (*root, search.getText().trim());
     else
     {
-        addCategory ("BASE BANKS", Settings::Folder::base, Show::banks, "NONE YET");
-        addCategory ("OTHER BANKS", Settings::Folder::other, Show::banks, "NO FOLDERS - PRESS FOLDER +");
-        addCategory ("USER", Settings::Folder::user, Show::presets, "NO FOLDERS - PRESS FOLDER +");
+        addCategory ("OFFICIAL BANKS", Settings::Folder::base, Show::banks, "NONE YET");
+        addCategory ("USER BANKS", Settings::Folder::other, Show::banks, "NO FOLDERS - PRESS FOLDER +");
+        addCategory ("USER PRESETS", Settings::Folder::user, Show::presets, "NO FOLDERS - PRESS FOLDER +");
     }
 
     rootItem = std::move (root);
@@ -389,6 +416,86 @@ void Explorer::rescan()
     if (openness[tab] != nullptr)
         tree.restoreOpennessState (*openness[tab], true);
     repaint();
+}
+
+void Explorer::timerCallback()
+{
+    stopTimer();
+    rescan();
+}
+
+void Explorer::buildSearchResults (TreeViewItem& root, const String& query)
+{
+    // every word has to appear in the name, the bank's name or the category prefix ("amb:", "pad:")
+    StringArray words;
+    words.addTokens (query.toLowerCase(), " ", "\"");
+    words.removeEmptyStrings();
+    auto matches = [&words] (const String& text)
+    {
+        const auto t = text.toLowerCase();
+        for (auto& w : words)
+            if (! t.contains (w))
+                return false;
+        return true;
+    };
+
+    auto* cat = new Item (*this, Kind::category, "RESULTS FOR \"" + query.toUpperCase() + "\"");
+    root.addSubItem (cat);
+    constexpr int maxResults = 400;
+    int found = 0, scanned = 0;
+    // bank contents are cached (Emulator X banks are big to read)
+    static std::map<String, std::pair<int64, BankInfo>> bankCache;
+
+    std::function<void (const File&, int, Show)> walk = [&] (const File& dir, int depth, Show show)
+    {
+        if (depth > 6 || found >= maxResults)
+            return;
+        for (const auto& entry : RangedDirectoryIterator (dir, false, "*", File::findFilesAndDirectories | File::ignoreHiddenFiles))
+        {
+            if (found >= maxResults || ++scanned > 20000)
+                return;
+            const auto& f = entry.getFile();
+            const bool isBank = loader::isBankFile (f) || exb::isExb (f);
+            if (entry.isDirectory() && ! exb::isExb (f))
+            {
+                walk (f, depth + 1, show);
+                continue;
+            }
+            if (isBank)
+            {
+                const auto key = f.getFullPathName();
+                const auto stamp = (exb::isExb (f) ? exb::bankFile (f) : f).getLastModificationTime().toMilliseconds();
+                auto it = bankCache.find (key);
+                if (it == bankCache.end() || it->second.first != stamp)
+                    it = bankCache.insert_or_assign (key, std::make_pair (stamp, loader::readBankInfo (f))).first;
+                const auto& info = it->second.second;
+                const auto bankName = f.getFileNameWithoutExtension();
+                for (int i = 0; i < info.presetNames.size() && found < maxResults; ++i)
+                    if (matches (info.presetNames[i] + " " + bankName))
+                    {
+                        auto* item = new Item (*this, Kind::bankPreset, info.presetNames[i], f, show);
+                        item->bankEntry = info.presetEntries[i];
+                        item->detail = bankName.toUpperCase();
+                        cat->addSubItem (item);
+                        ++found;
+                    }
+            }
+            else if (loader::isPresetFile (f) && matches (f.getFileNameWithoutExtension()))
+            {
+                cat->addSubItem (new Item (*this, Kind::preset, f.getFileNameWithoutExtension(), f, show));
+                ++found;
+            }
+        }
+    };
+    for (auto which : { Settings::Folder::base, Settings::Folder::other, Settings::Folder::user })
+        for (auto& path : settings->getFolders (which))
+            walk (File (path), 0, which == Settings::Folder::user ? Show::presets : Show::banks);
+
+    if (found == 0)
+        cat->addSubItem (new Item (*this, Kind::placeholder, "NOTHING FOUND"));
+    else if (found >= maxResults)
+        cat->addSubItem (new Item (*this, Kind::placeholder, "MORE THAN " + String (maxResults) + " - TYPE MORE"));
+    cat->setOpen (true);
 }
 
 void Explorer::addFolder()
@@ -443,6 +550,11 @@ void Explorer::resized()
     tabSamples.setBounds (tabs.removeFromLeft (w));
     tabBanks.setBounds (tabs.removeFromRight (w));
     r.removeFromTop (8);
+    if (search.isVisible())
+    {
+        search.setBounds (r.removeFromTop (22));
+        r.removeFromTop (6);
+    }
     hintArea = r.removeFromBottom (30).toFloat();
     r.removeFromBottom (6);
     treeArea = r.toFloat();
