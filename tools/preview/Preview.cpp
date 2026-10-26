@@ -534,6 +534,23 @@ int main (int argc, char** argv)
         editor.showPage (1);
         ed.scrollTo (400);
         save ("preview-editor-scrolled");
+        // V3: the EMU engine panels on a zone (filter, 6-stage envelopes, LFOs, cords)
+        if (auto* sz = proc.getSelectedZone())
+        {
+            auto q = sz->params;
+            auto d = emx::emu::makeDesign (q.attack, q.decay, q.sustain, q.release);
+            d->filterType = 64; d->cutoff = 0.45f; d->resonance = 0.6f; d->chorusAmount = 12.0f;
+            d->env[0].rate = { 4.0f, 0.0f, 30.0f, 43.0f, 23.5f, 0.0f };
+            d->env[0].level = { 100.0f, 100.0f, 80.0f, 60.0f, 0.0f, 0.0f };
+            d->cords = { { 17, 56, -33.0f }, { 96, 47, 15.0f }, { 20, 56, 32.0f }, { 80, 56, 40.0f }, { 105, 65, 87.0f }, { 10, 73, 19.0f } };
+            d->lfo[1].sync = true; d->lfo[1].division = 25; d->lfo[1].keySync = true;
+            q.design = d;
+            proc.setZoneParams (sz->id, q);
+            ed.scrollTo (520);
+            save ("preview-editor-emu");
+            ed.scrollTo (900);
+            save ("preview-editor-emu2");
+        }
         ed.scrollTo (0);
         ed.showTab (emx::EditorPage::Tab::warp);
         save ("preview-editor-warp");

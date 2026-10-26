@@ -97,6 +97,7 @@ set(EMX_SOURCES
     Source/ui/MasterBar.cpp
     Source/ui/MainPage.cpp
     Source/ui/PlayKeys.cpp
+    Source/ui/EmuEditor.cpp
     Source/ui/SkinFile.cpp
     Source/ui/SkinDraw.cpp)
 

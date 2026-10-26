@@ -176,6 +176,93 @@ std::shared_ptr<const Design> Design::fromJson (const var& j)
     return d;
 }
 
+double rateFromSeconds (double seconds) noexcept
+{
+    if (seconds <= 0.0)
+        return 0.0;
+    double lo = 0.0, hi = 127.0;
+    for (int i = 0; i < 40; ++i)
+    {
+        const double mid = 0.5 * (lo + hi);
+        if (rateSeconds (mid) < seconds) lo = mid; else hi = mid;
+    }
+    return 0.5 * (lo + hi);
+}
+
+void setAmpFromAdsr (Design& d, float attack, float decay, float sustain, float release)
+{
+    auto& e = d.env[0];
+    const float s = jlimit (0.0f, 100.0f, sustain * 100.0f);
+    e.rate  = { (float) rateFromSeconds (attack), 0.0f, (float) rateFromSeconds (decay * 100.0f / jmax (1.0f, 100.0f - s)), 0.0f,
+                (float) rateFromSeconds (release), 0.0f };
+    e.level = { 100.0f, 100.0f, s, s, 0.0f, 0.0f };
+}
+
+void adsrFromAmp (const Design& d, float& attack, float& decay, float& sustain, float& release)
+{
+    const auto& e = d.env[0];
+    auto seg = [&] (int i, float from) { return (float) (rateSeconds (e.rate[(size_t) i]) * std::abs (e.level[(size_t) i] - from) / 100.0); };
+    const float l1 = e.level[0], l2 = e.level[1], l3 = e.level[2], l4 = e.rate[3] <= 0.0f ? l3 : e.level[3];
+    attack = jmax (0.001f, seg (0, 0.0f) + seg (1, l1));
+    const float peak = jmax (1.0f, jmax (l1, l2));
+    decay = jmax (0.001f, seg (2, l2) + (e.rate[3] > 0.0f ? seg (3, l3) : 0.0f));
+    sustain = jlimit (0.0f, 1.0f, l4 / peak);
+    release = jmax (0.005f, (float) (rateSeconds (e.rate[4]) + (e.level[4] > 0.5f ? rateSeconds (e.rate[5]) : 0.0)));
+}
+
+std::shared_ptr<Design> makeDesign (float attack, float decay, float sustain, float release)
+{
+    auto d = std::make_shared<Design>();
+    setAmpFromAdsr (*d, attack, decay, sustain, release);
+    for (int i = 1; i < 3; ++i)
+    {
+        d->env[(size_t) i].rate  = { 20.0f, 0.0f, 30.0f, 0.0f, 25.0f, 0.0f };
+        d->env[(size_t) i].level = { 100.0f, 100.0f, 50.0f, 50.0f, 0.0f, 0.0f };
+    }
+    d->filterType = 127;
+    d->cutoff = 1.0f;
+    d->resonance = 0.0f;
+    d->lfo[0].shape = 1; d->lfo[0].hz = 4.0f;
+    d->lfo[1].shape = 0; d->lfo[1].hz = 0.5f;
+    d->ampEnvRange = 60.0f;
+    return d;
+}
+
+const StringArray& lfoShapeNames()
+{
+    static const StringArray n { "Sine", "Triangle", "Square", "Saw", "Random" };
+    return n;
+}
+
+String divisionName (int division)
+{
+    static const char* names[numDivisions] { "1/64 T", "1/64", "1/32 T", "1/64 D", "1/16 Q", "1/64", "1/32 T", "1/32", "1/16 T", "1/32 D",
+                                             "1/16", "1/8 T", "1/16 D", "1/8", "1/4 T", "1/8 D", "1/4", "1/2 T", "1/4 D", "1/2",
+                                             "1/1 T", "1/2 D", "1/1", "2/1", "4/1", "8/1" };
+    return names[jlimit (0, numDivisions - 1, division)];
+}
+
+const std::vector<int>& sourceIds()
+{
+    static const std::vector<int> ids { 0, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 22, 23,
+                                        20, 21, 32, 33, 34, 35, 36, 37, 40, 41, 42, 43, 44, 45, 46, 47,
+                                        72, 73, 74, 80, 81, 82, 88, 89, 90, 96, 97, 104, 105, 98, 99, 100, 101, 144 };
+    return ids;
+}
+
+const std::vector<int>& destIds()
+{
+    static const std::vector<int> ids = []
+    {
+        std::vector<int> v { 0, 47, 48, 49, 52, 53, 54, 55, 56, 57, 58, 64, 65, 66, 50, 51, 68, 69, 71, 8,
+                             72, 73, 74, 75, 76, 80, 81, 82, 83, 84, 85, 88, 89, 90, 91, 92, 93, 96, 97, 104, 105 };
+        for (int i = 168; i < 204; ++i)
+            v.push_back (i);
+        return v;
+    }();
+    return ids;
+}
+
 //== Envelopes ===========================================================================
 namespace
 {

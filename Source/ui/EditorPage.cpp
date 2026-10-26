@@ -776,8 +776,22 @@ void KeymapView::layoutLanes()
     }
     laneH = laneStep;
     keysTop = (float) getHeight() - keysHeight - labelsHeight;
-    if (! proc.isSplicer())
-        laneH = jlimit (16.0f, laneStep, (keysTop - 10.0f) / (float) numLanes);
+}
+
+float KeymapView::velY (int velocity) const
+{
+    // Kontakt style: key across, velocity up (127 at the top)
+    const float top = 5.0f, bottom = keysTop - 9.0f;
+    return bottom - (float) jlimit (0, 128, velocity) / 128.0f * (bottom - top);
+}
+
+KeymapView::Drag KeymapView::edgeAt (Rectangle<float> r, Point<float> p) const
+{
+    if (p.x < r.getX() + 6.0f) return Drag::resizeLo;
+    if (p.x > r.getRight() - 6.0f) return Drag::resizeHi;
+    if (p.y < r.getY() + 5.0f) return Drag::resizeVelHi;
+    if (p.y > r.getBottom() - 5.0f) return Drag::resizeVelLo;
+    return Drag::move;
 }
 
 int KeymapView::getPreferredHeight()
@@ -804,7 +818,8 @@ int KeymapView::getPreferredHeight()
         }
         count = jlimit (1, 6, (int) laneEnd.size());
     }
-    const float mapH = proc.isSplicer() ? 110.0f : jmax (2, count) * laneStep + 10.0f;
+    (void) count;
+    const float mapH = proc.isSplicer() ? 110.0f : 150.0f;   // key x velocity map
     return roundToInt (mapH + 6.0f + keysHeight + labelsHeight);
 }
 
@@ -819,7 +834,8 @@ Rectangle<float> KeymapView::barRect (size_t i) const
         const float step = (float) getWidth() / (float) jmax (1, lastNote - firstNote + 1);
         return { (float) (p.loKey - firstNote) * step + 1.0f, 5.0f, jmax (4.0f, step - 2.0f), keysTop - 16.0f };
     }
-    return { a.x + 1.0f, 5.0f + (float) lanes[i] * laneH, jmax (6.0f, b.x + b.w - a.x - 2.0f), laneH - 6.0f };
+    const float top = velY (p.hiVel + 1), bottom = velY (p.loVel);
+    return { a.x + 1.0f, top, jmax (6.0f, b.x + b.w - a.x - 2.0f), jmax (6.0f, bottom - top) };
 }
 
 void KeymapView::tick()
@@ -871,9 +887,10 @@ void KeymapView::paint (Graphics& g)
                 for (int n = p.loKey; n <= p.hiKey && ! sounding; ++n)
                     sounding = held[(size_t) n];
                 const auto c = zoneColour ((int) i);
-                g.setColour (c.withAlpha (on ? 1.0f : 0.82f).brighter (sounding ? 0.35f : 0.0f));
+                // see-through, so overlapping zones (velocity layers, stacked keys) all stay visible
+                g.setColour (c.withAlpha (splicer ? (on ? 1.0f : 0.82f) : (on ? 0.72f : 0.42f)).brighter (sounding ? 0.35f : 0.0f));
                 g.fillRoundedRectangle (r, 4.0f);
-                g.setColour (on ? Colours::white : Colours::black.withAlpha (0.8f));
+                g.setColour (on ? Colours::white : c.brighter (0.4f).withAlpha (0.9f));
                 g.drawRoundedRectangle (r.reduced (on ? 1.0f : 0.5f), 4.0f, on ? 2.0f : 1.0f);
 
                 const auto tc = theme::textOn (c);
@@ -891,18 +908,18 @@ void KeymapView::paint (Graphics& g)
                     g.setColour (Colours::white.withAlpha (0.85f));
                     g.fillRect (k.x + k.w * 0.5f - 1.0f, r.getBottom() - 9.0f, 2.0f, 6.0f);
                 }
-                if (r.getWidth() > 26.0f)
+                if (r.getWidth() > 26.0f && r.getHeight() > 14.0f)
                 {
-                    auto t = r.reduced (7.0f, 4.0f);
-                    g.setColour (tc);
-                    g.setFont (theme::font (jmin (10.5f, laneH * 0.3f), 800, 0.04f));
-                    g.drawText (zs[i].name.toUpperCase(), t.removeFromTop (jmin (14.0f, laneH * 0.4f)), Justification::centredLeft, true);
-                    if (laneH >= 34.0f)
+                    auto t = r.reduced (6.0f, 3.0f);
+                    g.setColour (Colours::white);
+                    g.setFont (theme::font (9.5f, 800, 0.04f));
+                    g.drawText (zs[i].name.toUpperCase(), t.removeFromTop (13.0f), Justification::centredLeft, true);
+                    if (r.getHeight() >= 32.0f)
                     {
-                        g.setColour (tc.withAlpha (0.8f));
-                        g.setFont (theme::font (8.0f, 500, 0.04f));
-                        g.drawText (noteName (p.loKey) + "-" + noteName (p.hiKey) + "  ROOT " + noteName (p.root), t.removeFromTop (12.0f),
-                                    Justification::centredLeft, true);
+                        g.setColour (Colours::white.withAlpha (0.8f));
+                        g.setFont (theme::font (7.5f, 500, 0.04f));
+                        g.drawText (noteName (p.loKey) + "-" + noteName (p.hiKey) + "  VEL " + String (p.loVel) + "-" + String (p.hiVel),
+                                    t.removeFromTop (11.0f), Justification::centredLeft, true);
                     }
                 }
             }
@@ -974,9 +991,9 @@ void KeymapView::mouseMove (const MouseEvent& e)
                     return;
                 }
                 const auto r = barRect (i);
-                const bool edge = sel != nullptr && proc.getZones()[i].id == sel->id
-                                  && (e.position.x < r.getX() + 7.0f || e.position.x > r.getRight() - 7.0f);
-                setMouseCursor (edge ? MouseCursor::LeftRightResizeCursor : MouseCursor::DraggingHandCursor);
+                const auto d = sel != nullptr && proc.getZones()[i].id == sel->id ? edgeAt (r, e.position) : Drag::move;
+                setMouseCursor (d == Drag::resizeLo || d == Drag::resizeHi ? MouseCursor::LeftRightResizeCursor
+                                : d == Drag::resizeVelLo || d == Drag::resizeVelHi ? MouseCursor::UpDownResizeCursor : MouseCursor::DraggingHandCursor);
                 return;
             }
     setMouseCursor (e.position.y >= keysTop ? MouseCursor::PointingHandCursor : MouseCursor::NormalCursor);
@@ -990,27 +1007,38 @@ void KeymapView::mouseDown (const MouseEvent& e)
     if (e.position.y < keysTop)
     {
         const auto* sel = proc.getSelectedZone();
-        // Selected bar first (it is drawn on top), then the others.
-        for (int pass = 0; pass < 2 && drag == Drag::none; ++pass)
-            for (size_t i = 0; i < zs.size(); ++i)
+        clickCandidates.clear();
+        cycleOnClick = false;
+        for (size_t i = 0; i < zs.size(); ++i)
+            if (barRect (i).contains (e.position))
+                clickCandidates.push_back (zs[i].id);
+        if (clickCandidates.empty())
+            return;
+        if (proc.isSplicer())
+        {
+            proc.selectZone (clickCandidates.front());
+            return;
+        }
+        // the selected zone wins (it is drawn on top); a plain click on it again reaches the one below
+        int pick = clickCandidates.back();
+        if (sel != nullptr && std::find (clickCandidates.begin(), clickCandidates.end(), sel->id) != clickCandidates.end())
+        {
+            pick = sel->id;
+            cycleOnClick = clickCandidates.size() > 1;
+        }
+        for (size_t i = 0; i < zs.size(); ++i)
+            if (zs[i].id == pick)
             {
-                const bool isSel = sel != nullptr && zs[i].id == sel->id;
-                if (isSel != (pass == 0) || ! barRect (i).contains (e.position))
-                    continue;
-                if (proc.isSplicer())
-                {
-                    proc.selectZone (zs[i].id);
-                    return;
-                }
-                const auto r = barRect (i);
-                drag = isSel && e.position.x < r.getX() + 7.0f ? Drag::resizeLo
-                     : isSel && e.position.x > r.getRight() - 7.0f ? Drag::resizeHi : Drag::move;
-                dragZone = zs[i].id;
+                drag = sel != nullptr && pick == sel->id ? edgeAt (barRect (i), e.position) : Drag::move;
+                if (drag != Drag::move)
+                    cycleOnClick = false;
+                dragZone = pick;
                 dragLo = zs[i].params.loKey;
                 dragHi = zs[i].params.hiKey;
-                proc.selectZone (dragZone);
-                break;
+                dragLoVel = zs[i].params.loVel;
+                dragHiVel = zs[i].params.hiVel;
             }
+        proc.selectZone (pick);
         return;
     }
 
@@ -1059,11 +1087,26 @@ void KeymapView::mouseDrag (const MouseEvent& e)
     if (z == nullptr)
         return;
     auto p = z->params;
+    if (e.getDistanceFromDragStart() > 3)
+        cycleOnClick = false;
+    const float velStep = (velY (0) - velY (128)) / 128.0f;
     if (drag == Drag::move)
     {
         const int d = jlimit (-dragLo, 127 - dragHi, roundToInt ((float) e.getDistanceFromDragStartX() / (keyW * 7.0f / 12.0f)));
         p.loKey = dragLo + d;
         p.hiKey = dragHi + d;
+        if (std::abs (e.getDistanceFromDragStartY()) > 6)   // dragging up / down moves the velocity window
+        {
+            const int dv = jlimit (1 - dragLoVel, 127 - dragHiVel, -roundToInt ((float) e.getDistanceFromDragStartY() / jmax (0.5f, velStep)));
+            p.loVel = dragLoVel + dv;
+            p.hiVel = dragHiVel + dv;
+        }
+    }
+    else if (drag == Drag::resizeVelLo || drag == Drag::resizeVelHi)
+    {
+        const int v = jlimit (1, 127, roundToInt ((velY (0) - e.position.y) / jmax (0.5f, velStep)));
+        if (drag == Drag::resizeVelLo) p.loVel = jmin (v, p.hiVel);
+        else                           p.hiVel = jmax (v, p.loVel);
     }
     else
     {
@@ -1073,12 +1116,20 @@ void KeymapView::mouseDrag (const MouseEvent& e)
         if (drag == Drag::resizeLo) p.loKey = jmin (note, p.hiKey);
         else                        p.hiKey = jmax (note, p.loKey);
     }
-    if (p.loKey != z->params.loKey || p.hiKey != z->params.hiKey)
+    if (p.loKey != z->params.loKey || p.hiKey != z->params.hiKey || p.loVel != z->params.loVel || p.hiVel != z->params.hiVel)
         proc.setZoneParams (dragZone, p);
 }
 
-void KeymapView::mouseUp (const MouseEvent&)
+void KeymapView::mouseUp (const MouseEvent& e)
 {
+    if (cycleOnClick && e.mouseWasClicked() && clickCandidates.size() > 1)
+    {
+        // Kontakt style: clicking the selected zone again picks the next one under the mouse
+        auto it = std::find (clickCandidates.begin(), clickCandidates.end(), dragZone);
+        const auto next = it == clickCandidates.end() || std::next (it) == clickCandidates.end() ? clickCandidates.front() : *std::next (it);
+        proc.selectZone (next);
+    }
+    cycleOnClick = false;
     if (drag == Drag::play && playingNote >= 0)
         proc.keyboardState.noteOff (proc.getKeyboardChannel(), playingNote, 0.0f);
     playingNote = -1;
@@ -1131,7 +1182,47 @@ EditorPage::EditorPage (EmulonXProcessor& p)
                  + "  -  " + noteName (z->params.loKey) + "-" + noteName (z->params.hiKey);
       }, 10.0f),
       stack (std::make_unique<Stack> (*this)),
-      wave (p), closeUp (p), keymap (p)
+      wave (p), closeUp (p),
+      emuCtx { p,
+               [this]() -> const emu::Design* { const auto* z = proc.getSelectedZone(); return z != nullptr ? z->params.design.get() : nullptr; },
+               [this] (std::function<void (emu::Design&)> f) { editDesign (std::move (f)); },
+               [this]
+               {
+                   // the zone's ADSR becomes the amp envelope; nothing else changes the sound until edited
+                   if (const auto* z = proc.getSelectedZone())
+                   {
+                       auto q = z->params;
+                       q.design = emu::makeDesign (q.attack, q.decay, q.sustain, q.release);
+                       proc.setZoneParams (z->id, q);
+                   }
+               },
+               [this]
+               {
+                   if (const auto* z = proc.getSelectedZone())
+                   {
+                       auto q = z->params;
+                       q.design.reset();
+                       proc.setZoneParams (z->id, q);
+                   }
+               },
+               [this]
+               {
+                   const auto* z = proc.getSelectedZone();
+                   if (z == nullptr || z->params.design == nullptr)
+                       return;
+                   const auto d = z->params.design;
+                   const int from = z->id;
+                   for (auto& other : std::vector<ModelZone> (proc.getZones()))
+                       if (other.id != from)
+                       {
+                           auto q = other.params;
+                           q.design = d;
+                           emu::adsrFromAmp (*d, q.attack, q.decay, q.sustain, q.release);
+                           proc.setZoneParams (other.id, q);
+                       }
+               } },
+      emuFilter (emuCtx), emuEnv (emuCtx), emuLfo (emuCtx), emuCords (emuCtx),
+      keymap (p)
 {
     //== Strip =====================================================================
     const char* modeTips[] { "Sampler: zones spread over the keys, each with its own sample",
@@ -1330,12 +1421,12 @@ EditorPage::EditorPage (EmulonXProcessor& p)
     }
     attack.slider.setDoubleClickReturnValue (true, 0.002);
     decay.slider.setDoubleClickReturnValue (true, 0.3);
-    attack.onChange  = [this] (double v) { edit ([v] (ZoneParams& q) { q.attack = (float) v; }); };
-    decay.onChange   = [this] (double v) { edit ([v] (ZoneParams& q) { q.decay = (float) v; }); };
-    release.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.release = (float) v; }); };
+    attack.onChange  = [this] (double v) { edit ([v] (ZoneParams& q) { q.attack = (float) v; }, true); };
+    decay.onChange   = [this] (double v) { edit ([v] (ZoneParams& q) { q.decay = (float) v; }, true); };
+    release.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.release = (float) v; }, true); };
     sustain.setRange (NormalisableRange<double> (0.0, 1.0, 0.001), 1.0);
     sustain.format = [] (double v) { return String (roundToInt (v * 100.0)) + "%"; };
-    sustain.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.sustain = (float) v; }); };
+    sustain.onChange = [this] (double v) { edit ([v] (ZoneParams& q) { q.sustain = (float) v; }, true); };
     attack.slider.setTooltip ("Fade-in time when a key is pressed");
     decay.slider.setTooltip ("Time to fall to the sustain level");
     sustain.slider.setTooltip ("Level while the key is held");
@@ -1422,6 +1513,11 @@ EditorPage::EditorPage (EmulonXProcessor& p)
         stackItems.push_back (&b);
     for (auto* c : stackItems)
         stack->addChildComponent (c);
+    for (EmuPanel* e : { (EmuPanel*) &emuFilter, (EmuPanel*) &emuEnv, (EmuPanel*) &emuLfo, (EmuPanel*) &emuCords })
+    {
+        e->onFold = [this] { layoutStack(); };
+        stack->addChildComponent (e);
+    }
 
     proc.addChangeListener (this);
     settings->addChangeListener (this);
@@ -1436,12 +1532,32 @@ EditorPage::~EditorPage()
 
 void EditorPage::changeListenerCallback (ChangeBroadcaster*) { refresh(); }
 
-void EditorPage::edit (std::function<void (ZoneParams&)> change)
+void EditorPage::editDesign (std::function<void (emu::Design&)> change)
+{
+    const auto* z = proc.getSelectedZone();
+    if (z == nullptr || z->params.design == nullptr)
+        return;
+    auto q = z->params;
+    auto d = std::make_shared<emu::Design> (*q.design);
+    change (*d);
+    emu::adsrFromAmp (*d, q.attack, q.decay, q.sustain, q.release);   // the VOICE panel's ADSR shows the same envelope
+    q.design = d;
+    proc.setZoneParams (z->id, q);
+}
+
+void EditorPage::edit (std::function<void (ZoneParams&)> change, bool adsr)
 {
     if (const auto* z = proc.getSelectedZone())
     {
         auto q = z->params;
         change (q);
+        if (adsr && q.design != nullptr)
+        {
+            // EMU engine zones: the ADSR faders write the 6-stage amp envelope
+            auto d = std::make_shared<emu::Design> (*q.design);
+            emu::setAmpFromAdsr (*d, q.attack, q.decay, q.sustain, q.release);
+            q.design = d;
+        }
         if (proc.isSplicer())
             proc.setSliceVoice (q);   // the VOICE panel is for all slices
         else
@@ -1644,6 +1760,8 @@ void EditorPage::refresh()
     for (auto* c : { &semi, &tune, &grain, &gain, &pan, &glide })
         c->setSensitivity (sens);
 
+    for (EmuPanel* e : { (EmuPanel*) &emuFilter, (EmuPanel*) &emuEnv, (EmuPanel*) &emuLfo, (EmuPanel*) &emuCords })
+        e->refresh();
     updateWarpPreview();
     layoutStack();
     keymap.layoutLanes();
@@ -1944,6 +2062,18 @@ void EditorPage::layoutStack()
         y += h + gap;
     }
 
+    //== EMU ENGINE (V3) ===========================================================
+    for (EmuPanel* e : { (EmuPanel*) &emuFilter, (EmuPanel*) &emuEnv, (EmuPanel*) &emuLfo, (EmuPanel*) &emuCords })
+    {
+        const bool use = ! splicer && (e == &emuFilter || (z != nullptr && z->params.design != nullptr));
+        e->setVisible (use);
+        if (! use)
+            continue;
+        const int h = e->getPreferredHeight();
+        e->setBounds (0, y, W, h);
+        y += h + gap;
+    }
+
     //== KEYMAP ====================================================================
     {
         const int mapH = shown[2] ? keymap.getPreferredHeight() : 0;
@@ -1953,7 +2083,7 @@ void EditorPage::layoutStack()
         auto head = inner.removeFromTop (headH);
         headArea[2] = head.toFloat();
         texts.push_back ({ head.toFloat(), "KEYMAP|" + String (splicer ? "one slice per key - click a slice or play its key"
-                                                                       : "drag a zone to move it, its ends to resize it - click the keys to play, shift-click sets the root"),
+                                                                       : "key across, velocity up - drag to move, edges resize - click again for the zone below - shift-click a key sets the root"),
                            false, Justification::centredLeft, 2 });
         if (shown[2])
         {

@@ -57,6 +57,24 @@ juce::String sourceName (int);
 juce::String destName (int);
 /** E-mu envelope rate (0..127) -> seconds for a full 0..100 % move (measured from Emulator X). */
 double rateSeconds (double rate) noexcept;
+/** The other way: seconds -> rate (0..127). */
+double rateFromSeconds (double seconds) noexcept;
+
+//== For editing (the Editor's EMU engine panels) =====================================
+/** A plain design for a zone that starts using the EMU engine: its amp envelope from the zone's ADSR,
+    no filter, gentle LFOs, empty cords. */
+std::shared_ptr<Design> makeDesign (float attack, float decay, float sustain, float release);
+/** Writes an ADSR into the amp envelope (attack 1 / decay 1 / release 1; attack 2, decay 2 and release 2 off). */
+void setAmpFromAdsr (Design&, float attack, float decay, float sustain, float release);
+/** The amp envelope seen as an ADSR (what the VOICE panel's faders show). */
+void adsrFromAmp (const Design&, float& attack, float& decay, float& sustain, float& release);
+const juce::StringArray& lfoShapeNames();          // index = Lfo::shape
+juce::String divisionName (int division);           // tempo-synced LFO rate, e.g. "1/8 D"
+constexpr int numDivisions = 26;
+/** The lists the Cords panel offers, in a sensible order (ids as in Emulator X). */
+const std::vector<int>& sourceIds();
+const std::vector<int>& destIds();
+constexpr int maxCords = 36;
 
 //== What every note keeps while it plays ===============================================
 struct EnvState

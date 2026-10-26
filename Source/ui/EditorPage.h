@@ -9,6 +9,7 @@
 #include "../Settings.h"
 #include "../engine/Zone.h"
 #include "../engine/SampleEdit.h"
+#include "../engine/EmuVoice.h"
 
 namespace emx
 {
@@ -149,11 +150,19 @@ private:
     float keyW = 12.0f, laneH = laneStep, keysTop = 0.0f;
     std::bitset<128> held;
 
-    enum class Drag { none, move, resizeLo, resizeHi, play };
+    enum class Drag { none, move, resizeLo, resizeHi, resizeVelLo, resizeVelHi, play };
     Drag drag = Drag::none;
-    int dragZone = 0, dragLo = 0, dragHi = 0, playingNote = -1;
+    int dragZone = 0, dragLo = 0, dragHi = 0, dragLoVel = 1, dragHiVel = 127, playingNote = -1;
+    std::vector<int> clickCandidates;   // zones under the mouse (Kontakt-style: click again to reach the one below)
+    bool cycleOnClick = false;
+    float velY (int velocity) const;    // y of a velocity in the map (127 at the top)
+    Drag edgeAt (juce::Rectangle<float> bar, juce::Point<float>) const;
 };
 
+} // namespace emx
+#include "EmuEditor.h"
+namespace emx
+{
 //== The page =====================================================================
 class EditorPage final : public juce::Component,
                          private juce::ChangeListener
@@ -179,7 +188,8 @@ private:
     void layoutStack();
     void paintStack (juce::Graphics&);
     void stackClicked (juce::Point<int>);
-    void edit (std::function<void (ZoneParams&)>);
+    void edit (std::function<void (ZoneParams&)>, bool adsr = false);
+    void editDesign (std::function<void (emu::Design&)>);
     void setLoopPoint (int which, int frame, bool exact);
     edit::Warp currentWarp() const;
     void updateWarpPreview();
@@ -233,6 +243,13 @@ private:
                  sustain { "Sustain", ValueControl::Style::fader, 84 }, release { "Release", ValueControl::Style::fader, 84 };
     juce::TextButton polyButton { "POLY" }, monoButton { "MONO" }, legatoButton { "LEGATO" };
     ValueControl glide { "Glide", ValueControl::Style::knob };
+
+    // EMU ENGINE (V3): filter & chorus, 6-stage envelopes, LFOs, cords
+    EmuContext emuCtx;
+    EmuFilterPanel emuFilter;
+    EmuEnvPanel emuEnv;
+    EmuLfoPanel emuLfo;
+    EmuCordsPanel emuCords;
 
     // KEYMAP
     KeymapView keymap;
