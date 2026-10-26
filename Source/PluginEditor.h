@@ -17,6 +17,7 @@
 #include "ui/MasterBar.h"
 #include "ui/PlayKeys.h"
 #include "ui/MachinePage.h"
+#include "ui/ArrangerPage.h"
 #include "ui/Theme.h"
 
 namespace emx
@@ -52,6 +53,7 @@ private:
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;   // settings
     bool applyHue();   // true if the colours changed
+    void rebuildForPart();   // the edited Arranger part changed: the whole UI now shows that part
     int appliedGeneration = -1;
     void updateTooltips();
 
@@ -59,7 +61,7 @@ private:
     class Root final : public juce::Component
     {
     public:
-        explicit Root (EmulonXEditor&);
+        Root (EmulonXEditor&, EmulonXProcessor& part);
         void paint (juce::Graphics&) override;
         void paintOverChildren (juce::Graphics&) override;
         void resized() override;
@@ -70,6 +72,7 @@ private:
         // V3 tabs: MAIN, EDITOR, PROCESSOR, ARPEGGIATOR, MACHINE, ARRANGER
         static constexpr int numPages = 6;
         EmulonXEditor& owner;
+        EmulonXProcessor& proc;   // the part this window edits (part 1 = the plugin itself)
         juce::TextButton tabs[numPages] { juce::TextButton ("MAIN"), juce::TextButton ("EDITOR"), juce::TextButton ("PROCESSOR"),
                                           juce::TextButton ("ARPEGGIATOR"), juce::TextButton ("MACHINE"), juce::TextButton ("ARRANGER") };
         juce::TextButton saveButton { "SAVE" }, partButton;
@@ -82,7 +85,7 @@ private:
         FxPage fxPage;
         ArpPage arpPage;
         MachinePage machinePage;
-        ComingSoonPanel arrangerPage { "Arranger", "16 parts by MIDI channel", "Coming in the next build" };
+        ArrangerPage arrangerPage;
         PlayKeys keys;
         std::unique_ptr<SettingsPanel> settingsPanel;
         std::unique_ptr<juce::FileChooser> chooser;
@@ -95,7 +98,7 @@ private:
     juce::SharedResourcePointer<Settings> settings;
     EmxLookAndFeel lnf;
     std::unique_ptr<juce::TooltipWindow> tooltips;
-    std::unique_ptr<Root> root;
+    std::unique_ptr<Root> root, retiredRoot;
     float uiScale = 1.0f;
     bool dragging = false;
 

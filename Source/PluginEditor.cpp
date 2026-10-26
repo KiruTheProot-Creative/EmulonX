@@ -8,24 +8,25 @@ namespace emx
 using namespace juce;
 
 //== Root ========================================================================
-EmulonXEditor::Root::Root (EmulonXEditor& e)
-    : owner (e),
-      statusLed ([&e] { return e.proc.getLastMessage().toUpperCase(); }, 8.0f),
-      voicesLed ([&e] { return "VOICES " + String (e.proc.getActiveVoices()); }),
-      cpuLed ([&e] { return "CPU " + String (roundToInt (e.proc.getCpuLoad() * 100.0)) + "%"; }),
-      masterBar (e.proc),
-      explorer (e.proc),
-      mainPage (e.proc),
-      editorPage (e.proc),
-      fxPage (e.proc),
-      arpPage (e.proc),
-      machinePage (e.proc),
-      keys (e.proc)
+EmulonXEditor::Root::Root (EmulonXEditor& e, EmulonXProcessor& p)
+    : owner (e), proc (p),
+      statusLed ([&p] { return p.getLastMessage().toUpperCase(); }, 8.0f),
+      voicesLed ([&p] { return "VOICES " + String (p.getActiveVoices()); }),
+      cpuLed ([&p] { return "CPU " + String (roundToInt (p.getCpuLoad() * 100.0)) + "%"; }),
+      masterBar (e.proc),   // the master volume is the plugin's, for every part
+      explorer (p),
+      mainPage (p),
+      editorPage (p),
+      fxPage (p),
+      arpPage (p),
+      machinePage (p),
+      arrangerPage (e.proc),
+      keys (p)
 {
     // on the Machine tab the keyboard shows which keys the pads play
     keys.keyTint = [this] (int note)
     {
-        return page == 4 && owner.proc.getMachineSettings().padForNote (note) >= 0 ? theme::red.withAlpha (0.55f) : Colours::transparentBlack;
+        return page == 4 && proc.getMachineSettings().padForNote (note) >= 0 ? theme::red.withAlpha (0.55f) : Colours::transparentBlack;
     };
     pages[0] = &mainPage; pages[1] = &editorPage; pages[2] = &fxPage;
     pages[3] = &arpPage;  pages[4] = &machinePage; pages[5] = &arrangerPage;
@@ -67,7 +68,7 @@ void EmulonXEditor::Root::showPage (int index)
 
 void EmulonXEditor::Root::showSaveMenu()
 {
-    auto& proc = owner.proc;
+    auto& proc = this->proc;
     PopupMenu m;
     m.addItem ("New preset", [&proc] { proc.newPreset(); });
     m.addItem ("Load preset or samples...", [this, &proc]
@@ -137,8 +138,19 @@ void EmulonXEditor::Root::showSaveMenu()
 
 void EmulonXEditor::Root::showPartMenu()
 {
+    auto& main = owner.proc;
     PopupMenu m;
-    m.addSectionHeader ("Arranger parts arrive with the Arranger tab");
+    m.addSectionHeader ("Edit and play part");
+    for (int k = 0; k < EmulonXProcessor::numParts; ++k)
+    {
+        auto* p = main.getPart (k);
+        const auto info = main.getPartInfo (k);
+        const auto label = "PART " + String (k + 1).paddedLeft ('0', 2) + "  -  "
+                         + (info.channel == 0 ? String ("ALL CH") : "CH " + String (info.channel)) + "  -  "
+                         + (p != nullptr ? p->getPresetName() : String ("(empty)"));
+        m.addItem (label, true, k == main.getEditedPartIndex(), [&main, k] { main.setEditedPart (k); });
+    }
+    m.addSeparator();
     m.addItem ("Open the Arranger", [this] { showPage (5); });
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (&partButton));
 }
@@ -153,7 +165,12 @@ void EmulonXEditor::Root::resized()
     header.removeFromLeft (14);
     saveButton.setBounds (header.removeFromLeft (84).withSizeKeepingCentre (84, 28));
     header.removeFromLeft (8);
-    partButton.setButtonText ("PART 01 - CH " + String (owner.proc.getKeyboardChannel()));
+    {
+        auto& main = owner.proc;
+        const int k = main.getEditedPartIndex();
+        partButton.setButtonText (main.isArrangerOn() ? "PART " + String (k + 1).paddedLeft ('0', 2) + " - CH " + String (proc.getKeyboardChannel())
+                                                      : "SINGLE - CH " + String (proc.getKeyboardChannel()));
+    }
     partButton.setBounds (header.removeFromLeft (124).withSizeKeepingCentre (124, 28));
     header.removeFromLeft (8);
     gear.setBounds (header.removeFromRight (34).withSizeKeepingCentre (34, 28));
@@ -208,8 +225,9 @@ EmulonXEditor::EmulonXEditor (EmulonXProcessor& p)
 {
     applyHue();
     setLookAndFeel (&lnf);
-    root = std::make_unique<Root> (*this);
+    root = std::make_unique<Root> (*this, p.getEditedPart());
     addAndMakeVisible (*root);
+    proc.addChangeListener (this);
     setResizable (false, false);
     setWantsKeyboardFocus (true);
     setUiScale (settings->getUiScale());
@@ -222,12 +240,22 @@ EmulonXEditor::~EmulonXEditor()
 {
     stopTimer();
     settings->removeChangeListener (this);
+    proc.removeChangeListener (this);
     root.reset();
+    retiredRoot.reset();
     setLookAndFeel (nullptr);
 }
 
-void EmulonXEditor::changeListenerCallback (ChangeBroadcaster*)
+void EmulonXEditor::changeListenerCallback (ChangeBroadcaster* source)
 {
+    if (source == &proc)
+    {
+        if (&root->proc != &proc.getEditedPart())
+            rebuildForPart();
+        else if (root->partButton.isShowing())
+            root->resized();   // the part button's text
+        return;
+    }
     if (std::abs (settings->getUiScale() - uiScale) > 0.001f)
         setUiScale (settings->getUiScale());
     if (getMiddleCOctave() != settings->getMiddleCOctave())
@@ -308,13 +336,33 @@ void EmulonXEditor::updateTooltips()
         tooltips.reset();
 }
 
+void EmulonXEditor::rebuildForPart()
+{
+    // This can run inside a click on the old UI, so the old one is only hidden now and deleted
+    // a moment later (before the part it showed, which the processor also lets go of later).
+    const int page = root->page;
+    root->settingsPanel.reset();
+    root->setVisible (false);
+    removeChildComponent (root.get());
+    retiredRoot = std::move (root);
+    Component::SafePointer<EmulonXEditor> safe (this);
+    MessageManager::callAsync ([safe] { if (safe != nullptr) safe->retiredRoot.reset(); });
+
+    root = std::make_unique<Root> (*this, proc.getEditedPart());
+    addAndMakeVisible (*root);
+    root->setTransform (AffineTransform::scale (uiScale));
+    root->setBounds (0, 0, baseWidth, baseHeight);
+    root->showPage (page);
+    root->gear.setToggleState (false, dontSendNotification);
+}
+
 void EmulonXEditor::showSettings (bool show, int page)
 {
     if (show)
     {
         if (root->settingsPanel == nullptr)
         {
-            root->settingsPanel = std::make_unique<SettingsPanel> (proc);
+            root->settingsPanel = std::make_unique<SettingsPanel> (root->proc);
             root->settingsPanel->onClose = [this]
             {
                 // Closing from inside one of its own callbacks: delete it afterwards.
@@ -381,7 +429,7 @@ void EmulonXEditor::filesDropped (const StringArray& files, int, int)
     }
     if (! list.isEmpty())
     {
-        proc.loadFiles (list);
+        root->proc.loadFiles (list);
         if (root->page != 1)
             root->showPage (0);
     }
@@ -402,6 +450,7 @@ void EmulonXEditor::paintOverChildren (Graphics& g)
 
 bool EmulonXEditor::keyPressed (const KeyPress& k)
 {
+    auto& proc = root->proc;
     if (k == KeyPress::escapeKey && proc.getLearnMacro() >= 0)
     {
         proc.setLearnMacro (-1);
@@ -439,6 +488,8 @@ void EmulonXEditor::timerCallback()
         root->arpPage.tick();
     if (root->machinePage.isVisible())
         root->machinePage.tick();
+    if (root->arrangerPage.isVisible())
+        root->arrangerPage.tick();
 }
 
 } // namespace emx

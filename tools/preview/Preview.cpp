@@ -9,6 +9,7 @@
 #include "ui/SkinFile.h"
 
 using namespace juce;
+static int arrangerFailures = 0;
 
 /** A grayscale "brushed metal" texture for the test skin (made here, so no picture file is needed). */
 static MemoryBlock brushedTexturePng()
@@ -593,6 +594,88 @@ int main (int argc, char** argv)
     editor.getFxPage().setChannel (emx::EmulonXProcessor::auxChainId (0));
     save ("preview-processor-aux");
     editor.getFxPage().setChannel (0);
+    {
+        // V3: Arranger with a few parts, then part 3 being edited
+        proc.setArrangerOn (true);
+        for (int k : { 1, 2, 4, 9 })
+            proc.copyPartTo (0, k);
+        auto pi = proc.getPartInfo (1); pi.keyHi = 59; proc.setPartInfo (1, pi);
+        pi = proc.getPartInfo (2); pi.keyLo = 60; pi.output = 2; proc.setPartInfo (2, pi);
+        pi = proc.getPartInfo (4); pi.mute = true; proc.setPartInfo (4, pi);
+        proc.getPart (9)->setPartVolume (-8.5f);
+        proc.getPart (9)->setPartPan (-0.4f);
+        for (int i = 0; i < 60; ++i)
+            MessageManager::getInstance()->runDispatchLoopUntil (30);   // the parts load their samples in the background
+
+        // Audio checks: each DAW channel plays its own part, key splits, mute, outputs, saving
+        float pk[16] {};
+        float o = 0.0f;
+        auto report = [&] (bool ok, const String& what)
+        {
+            std::printf ("%s  arranger: %s\n", ok ? "PASS" : "FAIL", what.toRawUTF8());
+            if (! ok)
+            {
+                arrangerFailures++;
+                std::printf ("      out %.6f  parts %.4f %.4f %.4f %.4f %.4f\n", o, pk[0], pk[1], pk[2], pk[3], pk[4]);
+            }
+        };
+        proc.prepareToPlay (48000.0, 512);
+        auto play = [&] (int ch, int note) -> float
+        {
+            for (int k = 0; k < emx::EmulonXProcessor::numParts; ++k)
+                proc.takePartPeak (k);
+            AudioBuffer<float> buf (2, 512);
+            float peakOut = 0.0f;
+            for (int b = 0; b < 40; ++b)
+            {
+                MidiBuffer m;
+                if (b == 0) m.addEvent (MidiMessage::noteOn (ch, note, (uint8) 110), 0);
+                if (b == 30) m.addEvent (MidiMessage::noteOff (ch, note), 0);
+                proc.processBlock (buf, m);
+                peakOut = jmax (peakOut, buf.getMagnitude (0, 512));
+            }
+            for (int b = 0; b < 1200; ++b) { MidiBuffer m; proc.processBlock (buf, m); }   // let it (and its reverb) ring out
+            return peakOut;
+        };
+        auto peaks = [&] { for (int k = 0; k < 16; ++k) pk[k] = proc.takePartPeak (k); };
+        o = play (2, 48); peaks();
+        report (o > 0.01f && pk[1] > 0.01f && pk[0] < 1.0e-6f && pk[2] < 1.0e-6f, "channel 2 plays part 2 only (" + String (o, 3) + ")");
+        o = play (3, 48); peaks();
+        report (o < 1.0e-6f, "part 3's split (C3 and up) ignores a low note");
+        o = play (3, 72); peaks();
+        report (o > 0.01f && pk[2] > 0.01f, "part 3 plays a high note (its OUT 3 is off in the host, so it uses MAIN)");
+        o = play (5, 60); peaks();
+        report (o < 1.0e-6f && pk[4] > 0.01f, "a muted part plays but is not heard");
+        o = play (1, 60); peaks();
+        report (o > 0.01f && pk[0] > 0.01f && pk[1] < 1.0e-6f, "channel 1 plays part 1 only");
+        o = play (11, 60);
+        report (o < 1.0e-6f, "a channel without a part is silent");
+        {
+            MemoryBlock st;
+            proc.getStateInformation (st);
+            emx::EmulonXProcessor copy;
+            copy.setStateInformation (st.getData(), (int) st.getSize());
+            for (int i = 0; i < 40; ++i)
+                MessageManager::getInstance()->runDispatchLoopUntil (30);
+            report (copy.isArrangerOn() && copy.isPartUsed (1) && copy.isPartUsed (2) && copy.isPartUsed (4) && copy.isPartUsed (9) && ! copy.isPartUsed (3),
+                    "the project keeps which parts are used");
+            report (copy.getPartInfo (2).keyLo == 60 && copy.getPartInfo (2).output == 2 && copy.getPartInfo (4).mute
+                    && std::abs (copy.getPart (9)->getPartVolume() + 8.5f) < 0.01f, "the project keeps each part's settings");
+            report (copy.getPart (2) != nullptr && copy.getPart (2)->getZones().size() == proc.getZones().size(), "a part's preset comes back with the project");
+        }
+        editor.showPage (5);
+        save ("preview-arranger");
+        proc.setEditedPart (2);
+        save ("preview-arranger-part3");
+        editor.showPage (0);
+        save ("preview-main-part3");
+        proc.setEditedPart (0);
+        for (int k = 1; k < emx::EmulonXProcessor::numParts; ++k)
+            proc.clearPart (k);
+        proc.setArrangerOn (false);
+        editor.showPage (5);
+        save ("preview-arranger-single");
+    }
     editor.showPage (2);
     save ("preview-fx-master");
     {
@@ -754,5 +837,5 @@ int main (int argc, char** argv)
     }
     editor.setUiScale (1.0f);
     demoDir.deleteRecursively();
-    return 0;
+    return arrangerFailures > 0 ? 1 : 0;
 }

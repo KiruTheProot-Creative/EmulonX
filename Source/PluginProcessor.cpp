@@ -36,10 +36,22 @@ AudioProcessorValueTreeState::ParameterLayout EmulonXProcessor::createParameterL
     return layout;
 }
 
-EmulonXProcessor::EmulonXProcessor()
-    : AudioProcessor (BusesProperties().withOutput ("Output", AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "EmulonX", createParameterLayout())
+AudioProcessor::BusesProperties EmulonXProcessor::makeBuses (bool asPart)
 {
+    auto b = BusesProperties().withOutput ("Output", AudioChannelSet::stereo(), true);
+    if (! asPart)   // extra stereo outs for the Arranger's parts (off until the DAW turns them on)
+        for (int k = 2; k <= EmulonXProcessor::numOutputs; ++k)
+            b = b.withOutput ("Out " + String (k), AudioChannelSet::stereo(), false);
+    return b;
+}
+
+EmulonXProcessor::EmulonXProcessor (bool asPart)
+    : AudioProcessor (makeBuses (asPart)),
+      apvts (*this, nullptr, "EmulonX", createParameterLayout()),
+      isPart (asPart)
+{
+    for (int i = 0; i < numParts; ++i)
+        partInfos[(size_t) i].channel = i + 1;
     masterDb = apvts.getRawParameterValue (masterParamId);
     for (int i = 0; i < numMacros; ++i)
         macroValues[i] = apvts.getRawParameterValue (macroParamId (i));
@@ -118,7 +130,12 @@ bool EmulonXProcessor::needsEmbedding() const
 bool EmulonXProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto out = layouts.getMainOutputChannelSet();
-    return out == AudioChannelSet::stereo() || out == AudioChannelSet::mono();
+    if (out != AudioChannelSet::stereo() && out != AudioChannelSet::mono())
+        return false;
+    for (int b = 1; b < layouts.outputBuses.size(); ++b)
+        if (const auto& set = layouts.outputBuses.getReference (b); ! set.isDisabled() && set != AudioChannelSet::stereo())
+            return false;
+    return layouts.inputBuses.isEmpty() || layouts.getMainInputChannelSet().isDisabled();
 }
 
 void EmulonXProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
@@ -131,6 +148,19 @@ void EmulonXProcessor::prepareToPlay (double sampleRate, int maxBlockSize)
     processedMidi.ensureSize (8192);
     arpMidi.ensureSize (8192);
     loadMeasurer.reset (sampleRate, maxBlockSize);
+    preparedBlock = jmax (1, maxBlockSize);
+    hostMidi.ensureSize (8192);
+    partMidi.ensureSize (8192);
+    partBuffer.setSize (2, preparedBlock, false, true, false);
+    {
+        const SpinLock::ScopedLockType sl (partsLock);
+        for (auto& p : parts)
+            if (p != nullptr)
+            {
+                p->setRateAndBufferSizeDetails (sampleRate, maxBlockSize);
+                p->prepareToPlay (sampleRate, maxBlockSize);
+            }
+    }
     masterGain.reset (sampleRate, 0.02);
     masterGain.setCurrentAndTargetValue (dbToGain (masterDb->load()));
     for (auto* g : { &partGainL, &partGainR })
@@ -163,6 +193,91 @@ static int applyVelocityCurve (int v, int curve)
 void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midi)
 {
     ScopedNoDenormals noDenormals;
+    const int n = buffer.getNumSamples();
+    buffer.clear();
+    const bool arranger = ! isPart && arrangerOn.load();
+    if (arranger)
+    {
+        hostMidi.clear();
+        hostMidi.addEvents (midi, 0, n, 0);   // each part gets the DAW's MIDI as it came in
+    }
+    auto mainOut = getBusBuffer (buffer, false, 0);
+    renderOwnPart (mainOut, midi);
+    if (! arranger)
+        return;
+
+    bool anySolo = partSolo[0].load();
+    for (int k = 1; k < numParts; ++k)
+        anySolo = anySolo || (parts[(size_t) k] != nullptr && partSolo[k].load());
+    auto silent = [&] (int k) { return partMute[k].load() || (anySolo && ! partSolo[k].load()); };
+    auto destination = [&] (int k) -> AudioBuffer<float>
+    {
+        const int o = partOutput[k].load();
+        if (o > 0 && o < getBusCount (false))
+            if (auto b = getBusBuffer (buffer, false, o); b.getNumChannels() > 0)
+                return b;
+        return mainOut;
+    };
+    auto addTo = [n] (AudioBuffer<float>& dest, const float* l, const float* r)
+    {
+        if (dest.getNumChannels() >= 2)
+        {
+            FloatVectorOperations::add (dest.getWritePointer (0), l, n);
+            FloatVectorOperations::add (dest.getWritePointer (1), r, n);
+        }
+        else if (dest.getNumChannels() == 1)
+        {
+            FloatVectorOperations::addWithMultiply (dest.getWritePointer (0), l, 0.5f, n);
+            FloatVectorOperations::addWithMultiply (dest.getWritePointer (0), r, 0.5f, n);
+        }
+    };
+
+    // part 1 (this one): already in the main out; silence or move it if needed
+    {
+        partPeak[0].store (jmax (partPeak[0].load(), mainOut.getNumChannels() > 0 ? mainOut.getMagnitude (0, n) : 0.0f));
+        auto dest = destination (0);
+        if (silent (0))
+            mainOut.clear();
+        else if (mainOut.getNumChannels() > 0 && dest.getNumChannels() > 0 && dest.getReadPointer (0) != mainOut.getReadPointer (0))
+        {
+            const float* l = mainOut.getReadPointer (0);
+            const float* r = mainOut.getNumChannels() > 1 ? mainOut.getReadPointer (1) : l;
+            addTo (dest, l, r);
+            mainOut.clear();
+        }
+    }
+
+    // parts 2..16 (the master volume is the plugin's: it applies to them too)
+    const float masterNow = dbToGain (masterDb->load());
+    const float m0 = childMaster, step = (masterNow - m0) / (float) jmax (1, n);
+    childMaster = masterNow;
+    const SpinLock::ScopedLockType sl (partsLock);
+    partBuffer.setSize (2, n, false, false, true);
+    for (int k = 1; k < numParts; ++k)
+    {
+        auto* p = parts[(size_t) k].get();
+        if (p == nullptr)
+            continue;
+        partMidi.clear();
+        partMidi.addEvents (hostMidi, 0, n, 0);
+        p->setPlayHead (getPlayHead());
+        p->processBlock (partBuffer, partMidi);
+        for (int c = 0; c < 2; ++c)
+        {
+            float* d = partBuffer.getWritePointer (c);
+            for (int i = 0; i < n; ++i)
+                d[i] *= m0 + step * (float) i;
+        }
+        partPeak[k].store (jmax (partPeak[k].load(), partBuffer.getMagnitude (0, n)));
+        if (silent (k))
+            continue;
+        auto dest = destination (k);
+        addTo (dest, partBuffer.getReadPointer (0), partBuffer.getReadPointer (1));
+    }
+}
+
+void EmulonXProcessor::renderOwnPart (AudioBuffer<float>& buffer, MidiBuffer& midi)
+{
     const int n = buffer.getNumSamples();
     AudioProcessLoadMeasurer::ScopedTimer timer (loadMeasurer, n);
 
@@ -257,13 +372,17 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
             }
 
     // Channel filter and velocity curve, then the arpeggiator (if it is on).
-    const int channel = setMidiChannel.load(), curve = setVelocityCurve.load();
+    const int pc = partChannel.load();
+    const int channel = pc >= 0 ? pc : setMidiChannel.load(), curve = setVelocityCurve.load();
+    const int keyLo = partKeyLo.load(), keyHi = partKeyHi.load();
     processedMidi.clear();
     for (const auto meta : midi)
     {
         auto msg = meta.getMessage();
         if (channel > 0 && msg.getChannel() > 0 && msg.getChannel() != channel)
             continue;
+        if (msg.isNoteOn() && (msg.getNoteNumber() < keyLo || msg.getNoteNumber() > keyHi))
+            continue;   // outside the part's key range (note-offs always pass)
         if (msg.isNoteOn())
             msg = MidiMessage::noteOn (msg.getChannel(), msg.getNoteNumber(), (uint8) applyVelocityCurve (msg.getVelocity(), curve));
         processedMidi.addEvent (msg, jlimit (0, n - 1, meta.samplePosition));
@@ -1608,7 +1727,7 @@ void EmulonXProcessor::setMacroName (int index, const String& name)
 //== Project save / load ==========================================================
 // Layout: "EMXS", version, XML (parameters + zone list), then optionally the whole
 // preset with its samples, so the project works even if the sample files move.
-void EmulonXProcessor::getStateInformation (MemoryBlock& dest)
+void EmulonXProcessor::getPartState (MemoryBlock& dest)
 {
     MemoryBlock xmlBin;
     if (auto xml = apvts.copyState().createXml())
@@ -1638,10 +1757,11 @@ void EmulonXProcessor::getStateInformation (MemoryBlock& dest)
         out.write (packed.getData(), packed.getSize());
 }
 
-void EmulonXProcessor::setStateInformation (const void* data, int size)
+int EmulonXProcessor::setPartState (const void* data, int size)
 {
     std::unique_ptr<XmlElement> xml;
     MemoryBlock packed;
+    int consumed = size;
 
     if (size >= 8 && std::memcmp (data, "EMXS", 4) == 0)
     {
@@ -1656,6 +1776,7 @@ void EmulonXProcessor::setStateInformation (const void* data, int size)
         const auto packedSize = in.readInt64();
         if (packedSize > 0 && packedSize <= size)
             in.readIntoMemoryBlock (packed, (ssize_t) packedSize);
+        consumed = (int) in.getPosition();
     }
     else
     {
@@ -1663,7 +1784,7 @@ void EmulonXProcessor::setStateInformation (const void* data, int size)
     }
 
     if (xml == nullptr || ! xml->hasTagName (apvts.state.getType()))
-        return;
+        return consumed;
 
     apvts.replaceState (ValueTree::fromXml (*xml));
     partVolumeDb.store (jlimit (-60.0f, 6.0f, (float) (double) apvts.state.getProperty ("partVolume", 0.0)));
@@ -1680,6 +1801,278 @@ void EmulonXProcessor::setStateInformation (const void* data, int size)
         std::weak_ptr<bool> weak = alive;
         MessageManager::callAsync ([this, weak, packed] { if (! weak.expired()) restoreZonesFromState (packed); });
     }
+    return consumed;
+}
+
+// The main instance adds the Arranger after its own part: "EMXR", size, then the parts.
+void EmulonXProcessor::getStateInformation (MemoryBlock& dest)
+{
+    getPartState (dest);
+    if (isPart)
+        return;
+    MemoryBlock arr;
+    {
+        MemoryOutputStream out (arr, false);
+        out.writeInt (1);
+        out.writeBool (arrangerOn.load());
+        out.writeInt (editedPart);
+        for (int k = 0; k < numParts; ++k)
+        {
+            const auto& pi = partInfos[(size_t) k];
+            out.writeInt (pi.channel);
+            out.writeInt (pi.keyLo);
+            out.writeInt (pi.keyHi);
+            out.writeBool (pi.mute);
+            out.writeBool (pi.solo);
+            out.writeInt (pi.output);
+            MemoryBlock st;
+            if (k > 0 && parts[(size_t) k] != nullptr)
+                parts[(size_t) k]->getPartState (st);
+            out.writeInt64 ((int64) st.getSize());
+            out.write (st.getData(), st.getSize());
+        }
+    }
+    MemoryOutputStream out (dest, true);
+    out.write ("EMXR", 4);
+    out.writeInt64 ((int64) arr.getSize());
+    out.write (arr.getData(), arr.getSize());
+}
+
+void EmulonXProcessor::setStateInformation (const void* data, int size)
+{
+    const int used = setPartState (data, size);
+    if (isPart)
+        return;
+    MemoryBlock arr;
+    if (used >= 0 && size - used >= 12 && std::memcmp (static_cast<const char*> (data) + used, "EMXR", 4) == 0)
+    {
+        MemoryInputStream in (static_cast<const char*> (data) + used + 4, (size_t) (size - used - 4), false);
+        const auto len = in.readInt64();
+        if (len > 0 && len <= size)
+            in.readIntoMemoryBlock (arr, (ssize_t) len);
+    }
+    if (MessageManager::existsAndIsCurrentThread())
+        applyArrangerState (arr);
+    else
+    {
+        std::weak_ptr<bool> weak = alive;
+        MessageManager::callAsync ([this, weak, arr] { if (! weak.expired()) applyArrangerState (arr); });
+    }
+}
+
+void EmulonXProcessor::applyArrangerState (const MemoryBlock& arr)
+{
+    // back to part 1 first, so no open editor still shows a part that goes away
+    if (editedPart != 0)
+    {
+        editedPart = 0;
+        sendSynchronousChangeMessage();
+    }
+    for (int k = 1; k < numParts; ++k)
+        clearPart (k);
+    std::array<PartInfo, numParts> infos;
+    for (int k = 0; k < numParts; ++k)
+        infos[(size_t) k].channel = k + 1;
+    bool on = false;
+    int edited = 0;
+    if (arr.getSize() > 8)
+    {
+        MemoryInputStream in (arr, false);
+        in.readInt();   // version
+        on = in.readBool();
+        edited = jlimit (0, numParts - 1, in.readInt());
+        for (int k = 0; k < numParts && ! in.isExhausted(); ++k)
+        {
+            auto& pi = infos[(size_t) k];
+            pi.channel = jlimit (0, 16, in.readInt());
+            pi.keyLo = jlimit (0, 127, in.readInt());
+            pi.keyHi = jlimit (pi.keyLo, 127, in.readInt());
+            pi.mute = in.readBool();
+            pi.solo = in.readBool();
+            pi.output = jlimit (0, numOutputs - 1, in.readInt());
+            const auto len = in.readInt64();
+            if (len > 0 && len <= (int64) arr.getSize())
+            {
+                MemoryBlock st;
+                in.readIntoMemoryBlock (st, (ssize_t) len);
+                if (k > 0)
+                    if (auto* p = makePart (k))
+                        p->setPartState (st.getData(), (int) st.getSize());
+            }
+        }
+    }
+    for (int k = 0; k < numParts; ++k)
+        storePartInfo (k, infos[(size_t) k]);
+    setArrangerOn (on);
+    if (edited > 0 && parts[(size_t) edited] != nullptr)
+        setEditedPart (edited);
+    ++arrangerVersion;
+    sendChangeMessage();
+}
+
+//== Arranger =====================================================================
+EmulonXProcessor* EmulonXProcessor::getPart (int index) noexcept
+{
+    if (index == 0)
+        return this;
+    return isPositiveAndBelow (index, numParts) ? parts[(size_t) index].get() : nullptr;
+}
+
+bool EmulonXProcessor::isPartUsed (int index) const noexcept
+{
+    return index == 0 || (isPositiveAndBelow (index, numParts) && parts[(size_t) index] != nullptr);
+}
+
+EmulonXProcessor& EmulonXProcessor::getEditedPart() noexcept
+{
+    auto* p = getPart (editedPart);
+    return p != nullptr ? *p : *this;
+}
+
+EmulonXProcessor* EmulonXProcessor::makePart (int index)
+{
+    if (isPart || ! isPositiveAndBelow (index, numParts) || index == 0)
+        return index == 0 ? this : nullptr;
+    if (parts[(size_t) index] != nullptr)
+        return parts[(size_t) index].get();
+    auto p = std::make_unique<EmulonXProcessor> (true);
+    p->setRateAndBufferSizeDetails (currentSampleRate, preparedBlock);
+    p->prepareToPlay (currentSampleRate, preparedBlock);
+    p->setPresetName ("Init");
+    auto* raw = p.get();
+    {
+        const SpinLock::ScopedLockType sl (partsLock);
+        parts[(size_t) index] = std::move (p);
+    }
+    storePartInfo (index, partInfos[(size_t) index]);
+    ++arrangerVersion;
+    return raw;
+}
+
+void EmulonXProcessor::setArrangerOn (bool on)
+{
+    if (isPart)
+        return;
+    arrangerOn.store (on);
+    storePartInfo (0, partInfos[0]);   // part 1 follows its own channel only while the Arranger runs
+    if (! on)
+    {
+        for (auto& p : parts)
+            if (p != nullptr)
+                p->panic();
+        if (editedPart != 0)
+        {
+            editedPart = 0;
+            sendSynchronousChangeMessage();
+        }
+    }
+    apvts.state.setProperty ("arranger", on, nullptr);
+    ++arrangerVersion;
+    sendChangeMessage();
+}
+
+void EmulonXProcessor::setEditedPart (int index)
+{
+    if (isPart || ! isPositiveAndBelow (index, numParts))
+        return;
+    if (index > 0)
+    {
+        makePart (index);
+        if (! arrangerOn.load())
+            setArrangerOn (true);
+    }
+    if (index == editedPart)
+        return;
+    editedPart = index;
+    ++arrangerVersion;
+    sendSynchronousChangeMessage();   // the editor switches to that part right away
+}
+
+void EmulonXProcessor::clearPart (int index)
+{
+    if (isPart || ! isPositiveAndBelow (index, numParts))
+        return;
+    if (index == 0)
+    {
+        newPreset();
+        return;
+    }
+    if (parts[(size_t) index] == nullptr)
+        return;
+    if (editedPart == index)
+    {
+        editedPart = 0;
+        sendSynchronousChangeMessage();
+    }
+    std::unique_ptr<EmulonXProcessor> gone;
+    {
+        const SpinLock::ScopedLockType sl (partsLock);
+        gone = std::move (parts[(size_t) index]);
+    }
+    // deleted a moment later: an open editor lets go of its old pages first
+    retiredParts.push_back (std::move (gone));
+    std::weak_ptr<bool> weak = alive;
+    MessageManager::callAsync ([this, weak] { if (! weak.expired()) retiredParts.clear(); });
+    partPeak[index].store (0.0f);
+    ++arrangerVersion;
+    sendChangeMessage();
+}
+
+void EmulonXProcessor::copyPartTo (int from, int to)
+{
+    auto* src = getPart (from);
+    if (src == nullptr || from == to || ! isPositiveAndBelow (to, numParts))
+        return;
+    MemoryBlock st;
+    src->getPartState (st);
+    if (auto* dst = makePart (to))
+        dst->setPartState (st.getData(), (int) st.getSize());
+    ++arrangerVersion;
+    sendChangeMessage();
+}
+
+EmulonXProcessor::PartInfo EmulonXProcessor::getPartInfo (int index) const noexcept
+{
+    return partInfos[(size_t) jlimit (0, numParts - 1, index)];
+}
+
+void EmulonXProcessor::setPartInfo (int index, PartInfo pi)
+{
+    if (isPart || ! isPositiveAndBelow (index, numParts))
+        return;
+    pi.channel = jlimit (0, 16, pi.channel);
+    pi.keyLo = jlimit (0, 127, pi.keyLo);
+    pi.keyHi = jlimit (pi.keyLo, 127, pi.keyHi);
+    pi.output = jlimit (0, numOutputs - 1, pi.output);
+    storePartInfo (index, pi);
+    ++arrangerVersion;
+    sendChangeMessage();
+}
+
+void EmulonXProcessor::storePartInfo (int index, const PartInfo& pi)
+{
+    partInfos[(size_t) index] = pi;
+    partMute[index].store (pi.mute);
+    partSolo[index].store (pi.solo);
+    partOutput[index].store (pi.output);
+    if (index == 0)
+    {
+        const bool on = arrangerOn.load();
+        partChannel.store (on ? pi.channel : -1);
+        partKeyLo.store (on ? pi.keyLo : 0);
+        partKeyHi.store (on ? pi.keyHi : 127);
+    }
+    else if (auto* p = parts[(size_t) index].get())
+    {
+        p->partChannel.store (pi.channel);
+        p->partKeyLo.store (pi.keyLo);
+        p->partKeyHi.store (pi.keyHi);
+    }
+}
+
+float EmulonXProcessor::takePartPeak (int index) noexcept
+{
+    return isPositiveAndBelow (index, numParts) ? partPeak[index].exchange (0.0f) : 0.0f;
 }
 } // namespace emx
 

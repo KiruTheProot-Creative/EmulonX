@@ -95,12 +95,15 @@ class EmulonXProcessor final : public juce::AudioProcessor,
                                private juce::Timer
 {
 public:
-    EmulonXProcessor();
+    /** asPart: one of the Arranger's extra parts (made by the main instance; no extra outputs, no parts of its own). */
+    explicit EmulonXProcessor (bool asPart = false);
     ~EmulonXProcessor() override;
 
     //== AudioProcessor ==========================================================
     void prepareToPlay (double sampleRate, int maxBlockSize) override;
     void releaseResources() override {}
+    bool canAddBus (bool isInput) const override    { return ! isInput && ! isPart; }
+    bool canRemoveBus (bool isInput) const override { return ! isInput && ! isPart; }
     bool isBusesLayoutSupported (const BusesLayout&) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     using AudioProcessor::processBlock;
@@ -266,7 +269,42 @@ public:
     /** Notes held on MIDI input or on the on-screen keyboard. The editor's keyboard plays
         through this, and it is safe to use from any thread. */
     juce::MidiKeyboardState keyboardState;
-    int getKeyboardChannel() const noexcept { return juce::jmax (1, setMidiChannel.load()); }
+    int getKeyboardChannel() const noexcept
+    {
+        const int pc = partChannel.load();
+        return pc > 0 ? pc : juce::jmax (1, setMidiChannel.load());
+    }
+
+    //== Arranger (V3): up to 16 presets at once, each on its own MIDI channel ==========
+    // Part 1 is this instance; parts 2..16 are full instances of their own (made when used), so
+    // every part has the whole engine: zones, effects, arpeggiator, machine, macros.
+    static constexpr int numParts = 16, numOutputs = 16;
+    struct PartInfo
+    {
+        int channel = 1;              // 1..16 (0 = every channel)
+        int keyLo = 0, keyHi = 127;   // the notes it plays
+        bool mute = false, solo = false;
+        int output = 0;               // 0 = main out, k = Out k+1 (falls back to main when the DAW has it off)
+    };
+    bool isArrangerOn() const noexcept { return arrangerOn.load(); }
+    void setArrangerOn (bool on);
+    /** The part (0 = this one); null if that part is empty. */
+    EmulonXProcessor* getPart (int index) noexcept;
+    bool isPartUsed (int index) const noexcept;
+    int getEditedPartIndex() const noexcept { return editedPart; }
+    /** The part the editor shows and the keyboard plays. */
+    EmulonXProcessor& getEditedPart() noexcept;
+    /** Makes the part (Init preset) if it is empty, then edits it. */
+    void setEditedPart (int index);
+    void clearPart (int index);
+    /** Copies the edited part's whole state (preset, FX, arp, machine) into another part. */
+    void copyPartTo (int from, int to);
+    PartInfo getPartInfo (int index) const noexcept;
+    void setPartInfo (int index, PartInfo);
+    /** Goes up whenever parts are made, cleared or changed (the Arranger tab refreshes). */
+    int getArrangerVersion() const noexcept { return arrangerVersion; }
+    /** Recent level of a part (0..1, for the Arranger's meters). */
+    float takePartPeak (int index) noexcept;
 
     /** Audio files add zones; a preset replaces the current one; a bank opens in the bank list. */
     void loadFiles (const juce::Array<juce::File>&);
@@ -296,6 +334,7 @@ public:
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    static BusesProperties makeBuses (bool asPart);
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;   // settings changed
     void applySettings();
@@ -381,6 +420,28 @@ private:
     std::atomic<bool> setStealQuietest { false }, panicRequested { false };
     std::atomic<bool> setMono { false }, setLegato { true };
     std::atomic<float> setGlide { 0.0f };
+
+    // Arranger
+    void renderOwnPart (juce::AudioBuffer<float>&, juce::MidiBuffer&);
+    void getPartState (juce::MemoryBlock&);
+    int setPartState (const void*, int);   // returns the bytes it read
+    EmulonXProcessor* makePart (int index);
+    void storePartInfo (int index, const PartInfo&);
+    void applyArrangerState (const juce::MemoryBlock&);
+    const bool isPart;
+    std::array<std::unique_ptr<EmulonXProcessor>, numParts> parts;   // [0] stays empty (that's this)
+    std::vector<std::unique_ptr<EmulonXProcessor>> retiredParts;
+    juce::SpinLock partsLock;
+    float childMaster = 1.0f;
+    std::atomic<bool> arrangerOn { false };
+    int editedPart = 0, arrangerVersion = 0, preparedBlock = 512;
+    std::atomic<int> partChannel { -1 }, partKeyLo { 0 }, partKeyHi { 127 };   // routing of this instance (-1 = from the settings)
+    std::array<PartInfo, numParts> partInfos;
+    std::atomic<int> partOutput[numParts] {};
+    std::atomic<bool> partMute[numParts] {}, partSolo[numParts] {};
+    std::atomic<float> partPeak[numParts] {};
+    juce::MidiBuffer hostMidi, partMidi;
+    juce::AudioBuffer<float> partBuffer;
 
     // Audio
     SamplerEngine engine;
