@@ -847,6 +847,23 @@ int main (int argc, char** argv)
         check (same && worstDiff < 1.0e-5f, "preset save + load keeps zones, macros, FX and audio (24-bit)",
                saveErr + back.errors.joinIntoString ("; ") + " diff " + String (worstDiff, 7));
 
+        //== V3 preset info (type, author, notes, tags) ==============================
+        {
+            auto withInfo = save;
+            withInfo.info.type = "Glass Pad";
+            withInfo.info.author = "Kiru";
+            withInfo.info.description = "Mod wheel opens it";
+            withInfo.info.tags = "warm, slow";
+            withInfo.info.created = "2026-10-26";
+            String e;
+            auto b = loader::presetToBytes (withInfo, e);
+            auto r2 = loader::loadPresetFromMemory (b, "info-test", "?");
+            const auto got = PresetInfo::fromJson (r2.info);
+            check (got.type == "Glass Pad" && got.author == "Kiru" && got.description == "Mod wheel opens it" && got.tags == "warm, slow"
+                   && got.created == "2026-10-26" && PresetInfo::fromJson (back.info).isEmpty(),
+                   "preset info (type, made by, notes, tags) is saved and loaded", e);
+        }
+
         //== Bank: two presets in one .emxb ========================================
         MemoryBlock p1 = loader::presetToBytes (save, saveErr);
         save.name = "Second";

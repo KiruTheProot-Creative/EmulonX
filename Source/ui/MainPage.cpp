@@ -174,16 +174,19 @@ void MainPage::paint (Graphics& g)
         g.drawText (src.number >= 0 ? String (src.number).paddedLeft ('0', 3) : String ("---"), top, Justification::centredLeft, false);
         t.removeFromTop (6.0f);
         auto name = proc.getPresetName();
-        const auto cat = categoryOf (name);
-        if (cat.isNotEmpty())
+        const auto& info = proc.getPresetInfo();
+        const auto prefix = categoryOf (name);
+        if (prefix.isNotEmpty())
             name = name.fromFirstOccurrenceOf (":", false, false).trim();
+        const auto cat = info.type.isNotEmpty() ? info.type.toUpperCase() : prefix;   // the type from the Save window wins
         g.setFont (theme::font (22.0f, 700, 0.06f));
         nameArea = t.removeFromTop (30.0f);
         g.drawFittedText (name.toUpperCase(), nameArea.toNearestInt(), Justification::centredLeft, 1, 0.7f);
         t.removeFromTop (6.0f);
         g.setColour (ledCol.withAlpha (0.75f));
         g.setFont (theme::font (10.0f, 700, 0.14f));
-        g.drawText ((cat.isNotEmpty() ? cat : String ("NO CATEGORY")) + (src.bank.isNotEmpty() ? "  -  " + src.bank.toUpperCase() : String()),
+        g.drawText ((cat.isNotEmpty() ? cat : String ("NO CATEGORY")) + (src.bank.isNotEmpty() ? "  -  " + src.bank.toUpperCase() : String())
+                        + (info.author.isNotEmpty() ? "  -  BY " + info.author.toUpperCase() : String()),
                     t.removeFromTop (16.0f), Justification::centredLeft, true);
     }
 

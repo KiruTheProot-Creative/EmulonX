@@ -629,6 +629,7 @@ PresetToSave EmulonXProcessor::makePresetToSave() const
     p.fx = fxToJson (false);
     p.arp = arpSettings.toJson();
     p.machine = machineSettings.toJson();
+    p.info = presetInfo;
     p.voice = voiceSettings.toJson();
     if (splice.on)
         p.splice = splice.toJson();
@@ -689,6 +690,12 @@ void EmulonXProcessor::setPresetName (const String& n)
     publish();
 }
 
+void EmulonXProcessor::setPresetInfo (const PresetInfo& i)
+{
+    presetInfo = i;
+    publish();
+}
+
 void EmulonXProcessor::newPreset()
 {
     clearUndo();
@@ -696,6 +703,7 @@ void EmulonXProcessor::newPreset()
     presetName = "Init";
     presetFile = File();
     presetSource = {};
+    presetInfo = {};
     fxSetup = fx::Setup();
     arpSettings = ArpSettings();
     voiceSettings = VoiceSettings();
@@ -1286,6 +1294,7 @@ void EmulonXProcessor::addLoaded (LoadResult&& r, bool autoMapAfter, const File&
         zones.clear();
         splice = SpliceState();
         presetName = r.presetName;
+        presetInfo = PresetInfo::fromJson (r.info);
         presetFile = loader::isPresetFile (fromFile) ? fromFile : File();
         presetSource = {};   // a bank load fills this in afterwards
         if (r.interp >= 0)
@@ -1592,6 +1601,7 @@ void EmulonXProcessor::writeZonesToState()
     apvts.state.removeChild (apvts.state.getChildWithName (zonesId), nullptr);
     apvts.state.appendChild (zt, nullptr);
     apvts.state.setProperty ("presetName", presetName, nullptr);
+    apvts.state.setProperty ("presetInfo", presetInfo.isEmpty() ? String() : JSON::toString (presetInfo.toJson(), true), nullptr);
     apvts.state.setProperty ("presetFile", presetFile.getFullPathName(), nullptr);
     apvts.state.setProperty ("fx", JSON::toString (fxToJson (true), true), nullptr);
     apvts.state.setProperty ("arp", JSON::toString (arpSettings.toJson(), true), nullptr);
@@ -1611,6 +1621,7 @@ void EmulonXProcessor::restoreZonesFromState (const MemoryBlock& embedded)
     }
     zones.clear();
     presetName = apvts.state.getProperty ("presetName", "Init").toString();
+    presetInfo = PresetInfo::fromJson (JSON::parse (apvts.state.getProperty ("presetInfo", "").toString()));
     presetFile = File (apvts.state.getProperty ("presetFile", "").toString());
     const auto zt = apvts.state.getChildWithName (zonesId);
     interp = (Interp) jlimit (0, 2, (int) zt.getProperty ("interp", 2));

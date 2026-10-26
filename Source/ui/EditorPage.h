@@ -136,6 +136,9 @@ public:
 
     static constexpr float laneStep = 54.0f, keysHeight = 84.0f, labelsHeight = 14.0f;
 
+    /** STACK: every zone gets its own lane (the V2 view). OVERLAP: key x velocity, zones on top of each other (see-through). */
+    static inline bool stacked = false;   // shared by every window
+
 private:
     struct KeyRect { float x, w; bool black; };
     KeyRect keyRect (int note) const;
@@ -254,6 +257,7 @@ private:
     // KEYMAP
     KeymapView keymap;
     ValueBox rootBox { "ROOT" }, loKeyBox { "LOW KEY" }, hiKeyBox { "HIGH KEY" }, loVelBox { "LOW VEL" }, hiVelBox { "HIGH VEL" };
+    juce::TextButton stackButton { "STACK" }, overlapButton { "OVERLAP" };
     juce::TextButton addZoneButton { "+ ADD ZONE" }, autoMapButton { "AUTO MAP" }, dupButton { "DUPLICATE" }, deleteButton { "DELETE" };
     ValueBox sliceKeyBox { "KEY" }, sliceLenBox { "LENGTH" };
     juce::TextButton sliceOnlyButton { "PLAY SLICE ONLY" }, toEndButton { "PLAY TO END" };

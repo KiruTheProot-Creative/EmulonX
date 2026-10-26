@@ -42,11 +42,10 @@ const Colour warpYellow { 0xffffcc33 };
 const Colour amber { 0xffffb030 };
 } // namespace
 
-Colour zoneColour (int index)
+Colour zoneColour (int)
 {
-    const float accentHue = theme::hue (0xffff2a2a).getHue();
-    const float h = std::fmod (accentHue + (float) index * (137.508f / 360.0f), 1.0f);
-    return Colour::fromHSL (h, 0.62f, 0.46f, 1.0f);
+    // every zone in the skin's accent colour (the selected one stands out by its outline and brightness)
+    return theme::hue (0xffd8222c);
 }
 
 //==================================================================================
@@ -774,8 +773,8 @@ void KeymapView::layoutLanes()
         }
         numLanes = jmax (1, (int) laneEnd.size());
     }
-    laneH = laneStep;
     keysTop = (float) getHeight() - keysHeight - labelsHeight;
+    laneH = jmin (laneStep, (keysTop - 4.0f - 10.0f) / (float) jmax (1, numLanes));
 }
 
 float KeymapView::velY (int velocity) const
@@ -789,6 +788,7 @@ KeymapView::Drag KeymapView::edgeAt (Rectangle<float> r, Point<float> p) const
 {
     if (p.x < r.getX() + 6.0f) return Drag::resizeLo;
     if (p.x > r.getRight() - 6.0f) return Drag::resizeHi;
+    if (stacked) return Drag::move;   // lanes: no velocity edges
     if (p.y < r.getY() + 5.0f) return Drag::resizeVelHi;
     if (p.y > r.getBottom() - 5.0f) return Drag::resizeVelLo;
     return Drag::move;
@@ -818,8 +818,9 @@ int KeymapView::getPreferredHeight()
         }
         count = jlimit (1, 6, (int) laneEnd.size());
     }
-    (void) count;
-    const float mapH = proc.isSplicer() ? 110.0f : 150.0f;   // key x velocity map
+    float mapH = proc.isSplicer() ? 110.0f : 150.0f;   // key x velocity map
+    if (stacked && ! proc.isSplicer())
+        mapH = jmax (64.0f, (float) count * laneStep + 10.0f);   // one lane per row of zones (more than 6 get squeezed)
     return roundToInt (mapH + 6.0f + keysHeight + labelsHeight);
 }
 
@@ -833,6 +834,11 @@ Rectangle<float> KeymapView::barRect (size_t i) const
         // slices side by side, one semitone wide each (the keyboard below shows which key plays which)
         const float step = (float) getWidth() / (float) jmax (1, lastNote - firstNote + 1);
         return { (float) (p.loKey - firstNote) * step + 1.0f, 5.0f, jmax (4.0f, step - 2.0f), keysTop - 16.0f };
+    }
+    if (stacked)
+    {
+        const float top = 5.0f + (float) (i < lanes.size() ? lanes[i] : 0) * laneH;
+        return { a.x + 1.0f, top, jmax (6.0f, b.x + b.w - a.x - 2.0f), laneH - 5.0f };
     }
     const float top = velY (p.hiVel + 1), bottom = velY (p.loVel);
     return { a.x + 1.0f, top, jmax (6.0f, b.x + b.w - a.x - 2.0f), jmax (6.0f, bottom - top) };
@@ -888,9 +894,11 @@ void KeymapView::paint (Graphics& g)
                     sounding = held[(size_t) n];
                 const auto c = zoneColour ((int) i);
                 // see-through, so overlapping zones (velocity layers, stacked keys) all stay visible
-                g.setColour (c.withAlpha (splicer ? (on ? 1.0f : 0.82f) : (on ? 0.72f : 0.42f)).brighter (sounding ? 0.35f : 0.0f));
+                const bool solid = splicer || stacked;
+                const auto fill = on ? c.brighter (0.25f) : c.darker (0.35f);
+                g.setColour (fill.withAlpha (solid ? (on ? 1.0f : 0.85f) : (on ? 0.72f : 0.42f)).brighter (sounding ? 0.35f : 0.0f));
                 g.fillRoundedRectangle (r, 4.0f);
-                g.setColour (on ? Colours::white : c.brighter (0.4f).withAlpha (0.9f));
+                g.setColour (on ? Colours::white : c.brighter (0.5f).withAlpha (0.8f));
                 g.drawRoundedRectangle (r.reduced (on ? 1.0f : 0.5f), 4.0f, on ? 2.0f : 1.0f);
 
                 const auto tc = theme::textOn (c);
@@ -1095,7 +1103,7 @@ void KeymapView::mouseDrag (const MouseEvent& e)
         const int d = jlimit (-dragLo, 127 - dragHi, roundToInt ((float) e.getDistanceFromDragStartX() / (keyW * 7.0f / 12.0f)));
         p.loKey = dragLo + d;
         p.hiKey = dragHi + d;
-        if (std::abs (e.getDistanceFromDragStartY()) > 6)   // dragging up / down moves the velocity window
+        if (! stacked && std::abs (e.getDistanceFromDragStartY()) > 6)   // dragging up / down moves the velocity window
         {
             const int dv = jlimit (1 - dragLoVel, 127 - dragHiVel, -roundToInt ((float) e.getDistanceFromDragStartY() / jmax (0.5f, velStep)));
             p.loVel = dragLoVel + dv;
@@ -1482,6 +1490,10 @@ EditorPage::EditorPage (EmulonXProcessor& p)
                                       proc.loadFiles (fc.getResults());
                               });
     };
+    stackButton.setTooltip ("Stack: every zone on its own lane, side by side");
+    overlapButton.setTooltip ("Overlap: key across, velocity up - zones lie on top of each other, see-through");
+    stackButton.onClick = [this] { KeymapView::stacked = true; refresh(); resized(); };
+    overlapButton.onClick = [this] { KeymapView::stacked = false; refresh(); resized(); };
     autoMapButton.setTooltip ("Spread the zones across the keyboard by their root notes");
     autoMapButton.onClick = [this] { proc.autoMap(); };
     dupButton.setTooltip ("Copy this zone (same sample and settings)");
@@ -1507,7 +1519,7 @@ EditorPage::EditorPage (EmulonXProcessor& p)
                    &findHitsButton, &sensBox, &evenButtons[0], &evenButtons[1], &evenButtons[2], &evenButtons[3], &firstKeyBox, &toZonesButton,
                    &copyEnvButton, &semi, &tune, &keepSpeed, &grain, &gain, &pan, &attack, &decay, &sustain, &release,
                    &polyButton, &monoButton, &legatoButton, &glide,
-                   &keymap, &rootBox, &loKeyBox, &hiKeyBox, &loVelBox, &hiVelBox, &addZoneButton, &autoMapButton, &dupButton, &deleteButton,
+                   &keymap, &stackButton, &overlapButton, &rootBox, &loKeyBox, &hiKeyBox, &loVelBox, &hiVelBox, &addZoneButton, &autoMapButton, &dupButton, &deleteButton,
                    &sliceKeyBox, &sliceLenBox, &sliceOnlyButton, &toEndButton };
     for (auto& b : shapeButtons)
         stackItems.push_back (&b);
@@ -1741,6 +1753,8 @@ void EditorPage::refresh()
     glide.setEnabled (vs.mono);
 
     //== KEYMAP
+    stackButton.setToggleState (KeymapView::stacked, dontSendNotification);
+    overlapButton.setToggleState (! KeymapView::stacked, dontSendNotification);
     for (Component* c : { (Component*) &rootBox, (Component*) &loKeyBox, (Component*) &hiKeyBox, (Component*) &loVelBox, (Component*) &hiVelBox,
                           (Component*) &dupButton, (Component*) &deleteButton, (Component*) &autoMapButton })
         c->setEnabled (has);
@@ -2083,7 +2097,8 @@ void EditorPage::layoutStack()
         auto head = inner.removeFromTop (headH);
         headArea[2] = head.toFloat();
         texts.push_back ({ head.toFloat(), "KEYMAP|" + String (splicer ? "one slice per key - click a slice or play its key"
-                                                                       : "key across, velocity up - drag to move, edges resize - click again for the zone below - shift-click a key sets the root"),
+                                                                       : KeymapView::stacked ? "every zone on its own lane - drag to move, edges resize - shift-click a key sets the root"
+                                                                                             : "key across, velocity up - drag to move, edges resize - click again for the zone below - shift-click a key sets the root"),
                            false, Justification::centredLeft, 2 });
         if (shown[2])
         {
@@ -2114,6 +2129,11 @@ void EditorPage::layoutStack()
             }
             else
             {
+                {
+                    auto row = side.removeFromTop (24);
+                    buttons (row, { &stackButton, &overlapButton }, 0);
+                    side.removeFromTop (8);
+                }
                 text (side.removeFromTop (14), z != nullptr ? "ZONE " + String (proc.getSelectedIndex() + 1) + "  -  drag the values" : String ("NO ZONE"));
                 side.removeFromTop (4);
                 pair (rootBox, nullptr);

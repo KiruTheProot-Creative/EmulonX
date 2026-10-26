@@ -78,30 +78,12 @@ void EmulonXEditor::Root::showSaveMenu()
                               [&proc] (const FileChooser& fc) { if (! fc.getResults().isEmpty()) proc.loadFiles (fc.getResults()); });
     });
     m.addSeparator();
-    auto saveAs = [this, &proc]
-    {
-        const auto start = proc.getSettings().getUserPresetFolder().getChildFile (loader::safeFileName (proc.getPresetName()) + ".emxp");
-        chooser = std::make_unique<FileChooser> ("Save preset", start, "*.emxp");
-        chooser->launchAsync (FileBrowserComponent::saveMode | FileBrowserComponent::canSelectFiles | FileBrowserComponent::warnAboutOverwriting,
-                              [&proc] (const FileChooser& fc)
-                              {
-                                  auto f = fc.getResult();
-                                  if (f == File())
-                                      return;
-                                  if (! f.hasFileExtension ("emxp"))
-                                      f = f.withFileExtension ("emxp");
-                                  proc.savePresetAs (f);
-                              });
-    };
-    m.addItem ("Save preset", [&proc, saveAs]
+    m.addItem ("Save preset...", [this] { showSaveDialog (true); });
     {
         const auto f = proc.getPresetFile();
-        if (f != File() && f.getParentDirectory().isDirectory() && f.getFileNameWithoutExtension() == loader::safeFileName (proc.getPresetName()))
-            proc.savePresetAs (f);
-        else
-            saveAs();
-    });
-    m.addItem ("Save preset as...", saveAs);
+        const bool canQuick = f.existsAsFile() && f.getFileNameWithoutExtension() == loader::safeFileName (proc.getPresetName());
+        m.addItem ("Quick save" + (canQuick ? " (replace " + f.getFileName() + ")" : String()), canQuick, false, [&proc, f] { proc.savePresetAs (f); });
+    }
     m.addSeparator();
     m.addItem ("Merge presets into a bank (.emxb)...", [this, &proc]
     {
@@ -134,6 +116,25 @@ void EmulonXEditor::Root::showSaveMenu()
                               });
     });
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (&saveButton));
+}
+
+void EmulonXEditor::Root::showSaveDialog (bool show)
+{
+    if (! show)
+    {
+        saveDialog.reset();
+        return;
+    }
+    saveDialog = std::make_unique<SavePresetDialog> (proc);
+    saveDialog->onClose = [this]
+    {
+        // closing from inside one of its own callbacks: delete it afterwards
+        Component::SafePointer<Root> safe (this);
+        MessageManager::callAsync ([safe] { if (safe != nullptr) safe->showSaveDialog (false); });
+    };
+    addAndMakeVisible (*saveDialog);
+    saveDialog->setBounds (getLocalBounds());
+    saveDialog->focusFirst();
 }
 
 void EmulonXEditor::Root::showPartMenu()
@@ -205,6 +206,8 @@ void EmulonXEditor::Root::resized()
         p->setBounds (r);
     if (settingsPanel != nullptr)
         settingsPanel->setBounds (getLocalBounds());
+    if (saveDialog != nullptr)
+        saveDialog->setBounds (getLocalBounds());
 }
 
 void EmulonXEditor::Root::paint (Graphics& g)

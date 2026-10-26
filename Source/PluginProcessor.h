@@ -162,6 +162,9 @@ public:
     struct PresetSource { juce::String bank; int number = -1; };
     const PresetSource& getPresetSource() const noexcept { return presetSource; }
     void setPresetName (const juce::String&);
+    /** Type, author, notes and tags (filled in by the Save Preset window). */
+    const PresetInfo& getPresetInfo() const noexcept { return presetInfo; }
+    void setPresetInfo (const PresetInfo&);
     void newPreset();
     /** Saves the current preset (samples packed inside) in the background. */
     void savePresetAs (const juce::File&);
@@ -383,6 +386,7 @@ private:
     juce::String presetName { "Init" }, lastMessage, bankName { "My Bank" };
     juce::File presetFile;
     PresetSource presetSource;
+    PresetInfo presetInfo;
     fx::Setup fxSetup;
     ArpSettings arpSettings;
     VoiceSettings voiceSettings;

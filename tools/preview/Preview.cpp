@@ -570,7 +570,32 @@ int main (int argc, char** argv)
         save ("preview-editor-splicer-folded");
         ed.setPanelShown (0, true);
         proc.setSplicer (false);
+        // V3: keymap in OVERLAP and STACK mode (sample and voice folded so it is in view)
+        ed.setPanelShown (0, false);
+        ed.setPanelShown (1, false);
+        ed.scrollTo (100000);
+        save ("preview-keymap-overlap");
+        emx::KeymapView::stacked = true;
+        ed.setPanelShown (2, true);
+        ed.scrollTo (100000);
+        save ("preview-keymap-stack");
+        emx::KeymapView::stacked = false;
+        ed.setPanelShown (0, true);
+        ed.setPanelShown (1, true);
+        ed.scrollTo (0);
         editor.showPage (0);
+        // V3: the Save Preset window
+        {
+            emx::PresetInfo info;
+            info.type = "Pad"; info.author = "Kiru"; info.tags = "glass, slow, wide";
+            info.description = "Mod wheel opens the filter. Macro 2 adds space.";
+            proc.setPresetInfo (info);
+            editor.showSaveDialog();
+            save ("preview-save-dialog");
+            editor.closeSaveDialog();
+            save ("preview-main-type");
+            proc.setPresetInfo ({});
+        }
     }
     editor.showPage (3);
     save ("preview-arp");

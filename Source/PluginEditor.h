@@ -18,6 +18,7 @@
 #include "ui/PlayKeys.h"
 #include "ui/MachinePage.h"
 #include "ui/ArrangerPage.h"
+#include "ui/SavePresetDialog.h"
 #include "ui/Theme.h"
 
 namespace emx
@@ -37,6 +38,8 @@ public:
     void setUiScale (float scale);
     void showPage (int index) { root->showPage (index); }
     void showSettings (bool show, int page = 0);
+    void showSaveDialog()  { root->showSaveDialog (true); }
+    void closeSaveDialog() { root->showSaveDialog (false); }
     Explorer& getExplorer() noexcept { return root->explorer; }
     FxPage& getFxPage() noexcept { return root->fxPage; }
     EditorPage& getEditorPage() noexcept { return root->editorPage; }
@@ -68,6 +71,7 @@ private:
         void showPage (int index);
         void showSaveMenu();
         void showPartMenu();
+        void showSaveDialog (bool show);
 
         // V3 tabs: MAIN, EDITOR, PROCESSOR, ARPEGGIATOR, MACHINE, ARRANGER
         static constexpr int numPages = 6;
@@ -88,6 +92,7 @@ private:
         ArrangerPage arrangerPage;
         PlayKeys keys;
         std::unique_ptr<SettingsPanel> settingsPanel;
+        std::unique_ptr<SavePresetDialog> saveDialog;
         std::unique_ptr<juce::FileChooser> chooser;
         juce::Rectangle<float> titleArea;
         int page = 0;

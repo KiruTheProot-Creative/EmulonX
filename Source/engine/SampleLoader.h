@@ -28,10 +28,41 @@ struct LoadResult
     juce::var arp, voice;        // arpeggiator and mono / poly settings (may be void)
     juce::var splice;            // splicer mode: first key, cuts (may be void)
     juce::var machine;           // V3 Machine: pads and step patterns (may be void)
+    juce::var info;              // V3: type, author, description, tags (may be void)
     juce::StringArray errors;
 };
 
 /** Everything needed to write a preset file. */
+/** What the Save Preset window fills in: the preset's type (free text), who made it, notes, tags. */
+struct PresetInfo
+{
+    juce::String type, author, description, tags;
+    juce::String created;   // ISO date of the first save (kept on later saves)
+    bool isEmpty() const noexcept { return type.isEmpty() && author.isEmpty() && description.isEmpty() && tags.isEmpty() && created.isEmpty(); }
+    juce::var toJson() const
+    {
+        auto* o = new juce::DynamicObject();
+        if (type.isNotEmpty())        o->setProperty ("type", type);
+        if (author.isNotEmpty())      o->setProperty ("author", author);
+        if (description.isNotEmpty()) o->setProperty ("description", description);
+        if (tags.isNotEmpty())        o->setProperty ("tags", tags);
+        if (created.isNotEmpty())     o->setProperty ("created", created);
+        return juce::var (o);
+    }
+    static PresetInfo fromJson (const juce::var& j)
+    {
+        PresetInfo i;
+        if (! j.isObject())
+            return i;
+        i.type = j.getProperty ("type", "").toString().trim().substring (0, 32);
+        i.author = j.getProperty ("author", "").toString().trim().substring (0, 48);
+        i.description = j.getProperty ("description", "").toString().substring (0, 1000);
+        i.tags = j.getProperty ("tags", "").toString().trim().substring (0, 200);
+        i.created = j.getProperty ("created", "").toString().trim().substring (0, 32);
+        return i;
+    }
+};
+
 struct PresetToSave
 {
     juce::String name;
@@ -39,6 +70,7 @@ struct PresetToSave
     std::vector<LoadedZone> zones;
     MacroList macros;
     juce::var fx, arp, voice, splice, machine;
+    PresetInfo info;
 };
 
 struct BankInfo
