@@ -524,15 +524,16 @@ int main (int argc, char** argv)
         for (int i = 0; i < 30; ++i) { m.clear(); proc.processBlock (b, m); }   // let the note start (playhead)
     }
     const char* pages[] { "main", "editor", "fx" };
+    const int pageIds[] { emx::EmulonXEditor::pageMain, emx::EmulonXEditor::pageEditor, emx::EmulonXEditor::pageProcessor };
     for (int p = 0; p < 3; ++p)
     {
-        editor.showPage (p);
+        editor.showPage (pageIds[p]);
         save (String ("preview-") + pages[p] + "-100");
     }
     {
         // V2 editor: scrolled to the keymap, the WARP tab, then the splicer
         auto& ed = editor.getEditorPage();
-        editor.showPage (1);
+        editor.showPage (2);
         ed.scrollTo (400);
         save ("preview-editor-scrolled");
         // V3: the EMU engine panels on a zone (filter, 6-stage envelopes, LFOs, cords)
@@ -588,19 +589,18 @@ int main (int argc, char** argv)
         {
             emx::PresetInfo info;
             info.type = "Pad"; info.author = "Kiru"; info.tags = "glass, slow, wide";
-            info.description = "Mod wheel opens the filter. Macro 2 adds space.";
-            proc.setPresetInfo (info);
-            editor.showSaveDialog();
-            save ("preview-save-dialog");
-            editor.closeSaveDialog();
+                        proc.setPresetInfo (info);
+            editor.showPage (emx::EmulonXEditor::pageSaver);
+            save ("preview-saver");
+            editor.showPage (emx::EmulonXEditor::pageMain);
             save ("preview-main-type");
             proc.setPresetInfo ({});
         }
     }
-    editor.showPage (3);
+    editor.showPage (4);
     save ("preview-arp");
     // V3: Machine (4 x 4, then 8 x 8)
-    editor.showPage (4);
+    editor.showPage (5);
     save ("preview-machine");
     {
         auto m = proc.getMachineSettings();
@@ -614,7 +614,7 @@ int main (int argc, char** argv)
     proc.addFx (0, emx::fx::Type::spectral);
     proc.addFx (emx::EmulonXProcessor::auxChainId (0), emx::fx::Type::reverb);
     proc.setAuxSend (0, 0.25f);
-    editor.showPage (2);
+    editor.showPage (3);
     save ("preview-processor-spectral");
     editor.getFxPage().setChannel (emx::EmulonXProcessor::auxChainId (0));
     save ("preview-processor-aux");
@@ -688,7 +688,7 @@ int main (int argc, char** argv)
                     && std::abs (copy.getPart (9)->getPartVolume() + 8.5f) < 0.01f, "the project keeps each part's settings");
             report (copy.getPart (2) != nullptr && copy.getPart (2)->getZones().size() == proc.getZones().size(), "a part's preset comes back with the project");
         }
-        editor.showPage (5);
+        editor.showPage (6);
         save ("preview-arranger");
         proc.setEditedPart (2);
         save ("preview-arranger-part3");
@@ -698,10 +698,10 @@ int main (int argc, char** argv)
         for (int k = 1; k < emx::EmulonXProcessor::numParts; ++k)
             proc.clearPart (k);
         proc.setArrangerOn (false);
-        editor.showPage (5);
+        editor.showPage (6);
         save ("preview-arranger-single");
     }
-    editor.showPage (2);
+    editor.showPage (3);
     save ("preview-fx-master");
     {
         // Change envelope 1 the way its buttons do, without switching envelope tabs.
@@ -761,6 +761,7 @@ int main (int argc, char** argv)
         save ("preview-settings-customization-blue");
         editor.showSettings (false);
         const char* pageNames[] { "main", "editor", "fx", "arp" };
+        const int pageIds[] { emx::EmulonXEditor::pageMain, emx::EmulonXEditor::pageEditor, emx::EmulonXEditor::pageProcessor, emx::EmulonXEditor::pageArp };
         for (auto [deg, name] : { std::pair<float, const char*> { -122.0f, "blue" }, { 117.0f, "green" }, { -89.0f, "purple" } })
         {
             st->setHueShift (deg);
@@ -770,7 +771,7 @@ int main (int argc, char** argv)
             std::printf ("hue %s: first repaint incl. recolouring %.0f ms\n", name, Time::getMillisecondCounterHiRes() - t0);
             for (int pg = 0; pg < 4; ++pg)
             {
-                editor.showPage (pg);
+                editor.showPage (pageIds[pg]);
                 save (String ("preview-hue-") + name + "-" + pageNames[pg]);
             }
         }
@@ -785,7 +786,7 @@ int main (int argc, char** argv)
             MessageManager::getInstance()->runDispatchLoopUntil (80);
             for (int pg = 0; pg < 4; ++pg)
             {
-                editor.showPage (pg);
+                editor.showPage (pageIds[pg]);
                 save (String ("preview-") + sname + "-" + pageNames[pg]);
             }
             editor.showPage (0);
@@ -814,6 +815,7 @@ int main (int argc, char** argv)
         if (const auto extra = SystemStats::getEnvironmentVariable ("EMX_PREVIEW_SKINS", {}); extra.isNotEmpty())
             skinFiles.addArray (emx::skin::findSkins (StringArray (extra)));
         const char* pageNames[] { "main", "editor", "fx", "arp" };
+        const int pageIds[] { emx::EmulonXEditor::pageMain, emx::EmulonXEditor::pageEditor, emx::EmulonXEditor::pageProcessor, emx::EmulonXEditor::pageArp };
         for (auto& f : skinFiles)
         {
             st->useCustomSkin (f);
@@ -824,7 +826,7 @@ int main (int argc, char** argv)
             const auto tag = File::createLegalFileName (f.getFileNameWithoutExtension().toLowerCase().replaceCharacter (' ', '-'));
             for (int pg = 0; pg < 4; ++pg)
             {
-                editor.showPage (pg);
+                editor.showPage (pageIds[pg]);
                 save ("preview-skinfile-" + tag + "-" + pageNames[pg]);
             }
             editor.showPage (0);

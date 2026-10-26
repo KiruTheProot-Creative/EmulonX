@@ -16,6 +16,7 @@ EmulonXEditor::Root::Root (EmulonXEditor& e, EmulonXProcessor& p)
       masterBar (e.proc),   // the master volume is the plugin's, for every part
       explorer (p),
       mainPage (p),
+      saverPage (p),
       editorPage (p),
       fxPage (p),
       arpPage (p),
@@ -26,10 +27,10 @@ EmulonXEditor::Root::Root (EmulonXEditor& e, EmulonXProcessor& p)
     // on the Machine tab the keyboard shows which keys the pads play
     keys.keyTint = [this] (int note)
     {
-        return page == 4 && proc.getMachineSettings().padForNote (note) >= 0 ? theme::red.withAlpha (0.55f) : Colours::transparentBlack;
+        return page == pageMachine && proc.getMachineSettings().padForNote (note) >= 0 ? theme::red.withAlpha (0.55f) : Colours::transparentBlack;
     };
-    pages[0] = &mainPage; pages[1] = &editorPage; pages[2] = &fxPage;
-    pages[3] = &arpPage;  pages[4] = &machinePage; pages[5] = &arrangerPage;
+    pages[pageMain] = &mainPage;   pages[pageSaver] = &saverPage;     pages[pageEditor] = &editorPage; pages[pageProcessor] = &fxPage;
+    pages[pageArp] = &arpPage;     pages[pageMachine] = &machinePage; pages[pageArranger] = &arrangerPage;
     for (int i = 0; i < numPages; ++i)
     {
         auto& b = tabs[i];
@@ -51,7 +52,7 @@ EmulonXEditor::Root::Root (EmulonXEditor& e, EmulonXProcessor& p)
                           (Component*) &voicesLed, (Component*) &cpuLed, (Component*) &gear, (Component*) &explorer, (Component*) &keys })
         addAndMakeVisible (c);
 
-    showPage (0);
+    showPage (pageMain);
 }
 
 void EmulonXEditor::Root::showPage (int index)
@@ -62,7 +63,7 @@ void EmulonXEditor::Root::showPage (int index)
         tabs[i].setToggleState (i == page, dontSendNotification);
         pages[i]->setVisible (i == page);
     }
-    keys.setVisible (page != 1);   // the Editor has its own keyboard and needs the height
+    keys.setVisible (page != pageEditor);   // the Editor has its own keyboard and needs the height
     resized();
 }
 
@@ -78,12 +79,9 @@ void EmulonXEditor::Root::showSaveMenu()
                               [&proc] (const FileChooser& fc) { if (! fc.getResults().isEmpty()) proc.loadFiles (fc.getResults()); });
     });
     m.addSeparator();
-    m.addItem ("Save preset...", [this] { showSaveDialog (true); });
-    {
-        const auto f = proc.getPresetFile();
-        const bool canQuick = f.existsAsFile() && f.getFileNameWithoutExtension() == loader::safeFileName (proc.getPresetName());
-        m.addItem ("Quick save" + (canQuick ? " (replace " + f.getFileName() + ")" : String()), canQuick, false, [&proc, f] { proc.savePresetAs (f); });
-    }
+    m.addItem ("Save preset", [this] { saverPage.getPresetPanel().save(); });
+    m.addItem ("Save preset as...", [this] { saverPage.getPresetPanel().saveAs(); });
+    m.addItem ("Open the SAVER tab (preset info, bank list)", [this] { showPage (pageSaver); });
     m.addSeparator();
     m.addItem ("Merge presets into a bank (.emxb)...", [this, &proc]
     {
@@ -118,25 +116,6 @@ void EmulonXEditor::Root::showSaveMenu()
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (&saveButton));
 }
 
-void EmulonXEditor::Root::showSaveDialog (bool show)
-{
-    if (! show)
-    {
-        saveDialog.reset();
-        return;
-    }
-    saveDialog = std::make_unique<SavePresetDialog> (proc);
-    saveDialog->onClose = [this]
-    {
-        // closing from inside one of its own callbacks: delete it afterwards
-        Component::SafePointer<Root> safe (this);
-        MessageManager::callAsync ([safe] { if (safe != nullptr) safe->showSaveDialog (false); });
-    };
-    addAndMakeVisible (*saveDialog);
-    saveDialog->setBounds (getLocalBounds());
-    saveDialog->focusFirst();
-}
-
 void EmulonXEditor::Root::showPartMenu()
 {
     auto& main = owner.proc;
@@ -152,7 +131,7 @@ void EmulonXEditor::Root::showPartMenu()
         m.addItem (label, true, k == main.getEditedPartIndex(), [&main, k] { main.setEditedPart (k); });
     }
     m.addSeparator();
-    m.addItem ("Open the Arranger", [this] { showPage (5); });
+    m.addItem ("Open the Arranger", [this] { showPage (pageArranger); });
     m.showMenuAsync (PopupMenu::Options().withTargetComponent (&partButton));
 }
 
@@ -206,8 +185,6 @@ void EmulonXEditor::Root::resized()
         p->setBounds (r);
     if (settingsPanel != nullptr)
         settingsPanel->setBounds (getLocalBounds());
-    if (saveDialog != nullptr)
-        saveDialog->setBounds (getLocalBounds());
 }
 
 void EmulonXEditor::Root::paint (Graphics& g)
@@ -433,8 +410,8 @@ void EmulonXEditor::filesDropped (const StringArray& files, int, int)
     if (! list.isEmpty())
     {
         root->proc.loadFiles (list);
-        if (root->page != 1)
-            root->showPage (0);
+        if (root->page != pageEditor)
+            root->showPage (pageMain);
     }
 }
 

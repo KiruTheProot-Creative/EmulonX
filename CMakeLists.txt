@@ -101,7 +101,7 @@ set(EMX_SOURCES
     Source/ui/EmuEditor.cpp
     Source/ui/MachinePage.cpp
     Source/ui/ArrangerPage.cpp
-    Source/ui/SavePresetDialog.cpp
+    Source/ui/SaverPage.cpp
     Source/ui/SkinFile.cpp
     Source/ui/SkinDraw.cpp)
 

@@ -718,6 +718,11 @@ void EmulonXProcessor::newPreset()
 
 void EmulonXProcessor::savePresetAs (const File& file)
 {
+    // the preset gets who made it (the last name typed on the SAVER tab) and the date of its first save
+    if (presetInfo.author.isEmpty())
+        presetInfo.author = settings->properties().getValue ("presetAuthor").trim();
+    if (presetInfo.created.isEmpty())
+        presetInfo.created = Time::getCurrentTime().toISO8601 (true).substring (0, 10);
     auto p = makePresetToSave();
     if (p.zones.empty())
     {
