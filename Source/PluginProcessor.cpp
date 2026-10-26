@@ -327,8 +327,32 @@ void EmulonXProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& mid
                 mixR[i] += busData[b][1][i];
             }
         }
+        // AUX buses: sent before the whole-preset chain, fully wet, back in after it
+        bool auxUsed[2] {};
+        if (fxs != nullptr)
+            for (int k = 0; k < 2; ++k)
+                if (! fxs->aux[k].modules.empty() && fxs->auxSend[k] > 0.0001f)
+                {
+                    auxUsed[k] = true;
+                    const float s = fxs->auxSend[k];
+                    for (int i = 0; i < len; ++i)
+                    {
+                        auxL[k][i] = mixL[i] * s;
+                        auxR[k][i] = mixR[i] * s;
+                    }
+                }
         if (fxs != nullptr && ! fxs->master.modules.empty())
             fxEngine.processChain (fxs->master, mixL, mixR, len);
+        for (int k = 0; k < 2; ++k)
+            if (auxUsed[k])
+            {
+                fxEngine.processChain (fxs->aux[k], auxL[k], auxR[k], len);
+                for (int i = 0; i < len; ++i)
+                {
+                    mixL[i] += auxL[k][i];
+                    mixR[i] += auxR[k][i];
+                }
+            }
 
         // Explorer preview: plays the sample once at its own pitch (not through the effects).
         if (audioPreview != nullptr)

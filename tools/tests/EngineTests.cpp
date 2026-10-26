@@ -536,9 +536,15 @@ static int exbRender (const File& bank, int preset, int note, double hold, doubl
     int nextId = 1;
     if (r.fx.isObject() && SystemStats::getEnvironmentVariable ("EMX_NOFX", {}).isEmpty())
         fxs.master = fx::chainFromJson (r.fx["chain"], idMap, nextId, 48000.0);
-    if (SystemStats::getEnvironmentVariable ("EMX_NOAUX", {}).isNotEmpty())   // keep the chorus, leave out the bank's aux effects
-        fxs.master.erase (std::remove_if (fxs.master.begin(), fxs.master.end(), [] (const fx::Module& m)
-                              { return m.type == fx::Type::delay || m.type == fx::Type::reverb || m.type == fx::Type::util; }), fxs.master.end());
+    if (r.fx.isObject() && SystemStats::getEnvironmentVariable ("EMX_NOFX", {}).isEmpty())
+        if (auto* aux = r.fx["aux"].getArray())
+            for (int k = 0; k < jmin (2, aux->size()); ++k)
+            {
+                fxs.aux[k] = fx::chainFromJson ((*aux)[k], idMap, nextId, 48000.0);
+                fxs.auxSend[k] = (float) (double) r.fx["auxSend"][k];
+            }
+    if (SystemStats::getEnvironmentVariable ("EMX_NOAUX", {}).isNotEmpty())   // leave out the bank's aux effects
+        fxs.auxSend[0] = fxs.auxSend[1] = 0.0f;
     auto snap = fx::Snapshot::build (fxs, {});
     fx::Engine fe;
     fe.setSnapshot (snap.get());
@@ -550,7 +556,18 @@ static int exbRender (const File& bank, int preset, int note, double hold, doubl
             e.noteOff (note);
         e.render (buf.getWritePointer (0, pos), buf.getWritePointer (1, pos), N);
         fe.beginBlock (N, 48000.0, 120.0, 1, pos < offAt, knobs, 16, 0.0f);
-        fe.processChain (snap->master, buf.getWritePointer (0, pos), buf.getWritePointer (1, pos), N);
+        float* L = buf.getWritePointer (0, pos);
+        float* R = buf.getWritePointer (1, pos);
+        float aL[2][N], aR[2][N];   // the AUX buses, as the plugin runs them
+        for (int k = 0; k < 2; ++k)
+            for (int i = 0; i < N; ++i) { aL[k][i] = L[i] * snap->auxSend[k]; aR[k][i] = R[i] * snap->auxSend[k]; }
+        fe.processChain (snap->master, L, R, N);
+        for (int k = 0; k < 2; ++k)
+            if (! snap->aux[k].modules.empty() && snap->auxSend[k] > 0.0001f)
+            {
+                fe.processChain (snap->aux[k], aL[k], aR[k], N);
+                for (int i = 0; i < N; ++i) { L[i] += aL[k][i]; R[i] += aR[k][i]; }
+            }
     }
     std::printf ("  fx: %s\n", JSON::toString (r.fx, true).toRawUTF8());
     out.deleteFile();

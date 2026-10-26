@@ -12,6 +12,8 @@ const fx::Chain* EmulonXProcessor::getFxChain (int chainId) const
 {
     if (chainId == 0)
         return &fxSetup.master;
+    if (chainId == auxChainId (0) || chainId == auxChainId (1))
+        return &fxSetup.aux[chainId == auxChainId (0) ? 0 : 1];
     for (auto& z : zones)
         if (z.id == chainId)
             return &z.fx;
@@ -33,7 +35,23 @@ fx::Module* EmulonXProcessor::findFx (int moduleId, int* chainId)
                 if (chainId != nullptr) *chainId = z.id;
                 return &m;
             }
+    for (int k = 0; k < 2; ++k)
+        for (auto& m : fxSetup.aux[k])
+            if (m.id == moduleId)
+            {
+                if (chainId != nullptr) *chainId = auxChainId (k);
+                return &m;
+            }
     return nullptr;
+}
+
+void EmulonXProcessor::setAuxSend (int bus, float amount)
+{
+    if (bus < 0 || bus > 1)
+        return;
+    pushUndo ("auxsend" + String (bus));
+    fxSetup.auxSend[bus] = jlimit (0.0f, 1.0f, amount);
+    publishFx (false);
 }
 
 const fx::Module* EmulonXProcessor::findFxModule (int moduleId, int* chainId) const
@@ -75,6 +93,8 @@ void EmulonXProcessor::publishFx (bool structureChanged)
 void EmulonXProcessor::addFx (int chainId, fx::Type type)
 {
     fx::Chain* chain = chainId == 0 ? &fxSetup.master : nullptr;
+    if (chainId == auxChainId (0) || chainId == auxChainId (1))
+        chain = &fxSetup.aux[chainId == auxChainId (0) ? 0 : 1];
     for (auto& z : zones)
         if (z.id == chainId)
             chain = &z.fx;
@@ -97,6 +117,8 @@ void EmulonXProcessor::removeFx (int moduleId)
     bool found = erase (fxSetup.master);
     for (auto& z : zones)
         found = erase (z.fx) || found;
+    for (auto& c : fxSetup.aux)
+        found = erase (c) || found;
     if (! found)
         return;
     auto& r = fxSetup.routes;
@@ -121,7 +143,7 @@ void EmulonXProcessor::moveFx (int moduleId, int delta)
             }
         return false;
     };
-    if (move (fxSetup.master))
+    if (move (fxSetup.master) || move (fxSetup.aux[0]) || move (fxSetup.aux[1]))
         return;
     for (auto& z : zones)
         if (move (z.fx))
@@ -220,7 +242,8 @@ void EmulonXProcessor::setEnvelope (int index, const fx::Envelope& e)
         return;
     pushUndo ("env" + String (index));
     const bool typeChanged = fxSetup.envelopes[(size_t) index].ahdsr != e.ahdsr
-                          || fxSetup.envelopes[(size_t) index].sync != e.sync;
+                          || fxSetup.envelopes[(size_t) index].sync != e.sync
+                          || fxSetup.envelopes[(size_t) index].kind != e.kind;
     fxSetup.envelopes[(size_t) index] = e;
     publishFx (typeChanged);
 }
@@ -378,6 +401,11 @@ var EmulonXProcessor::fxToJson (bool withZoneChains) const
     o->setProperty ("bpm", fxSetup.bpm);
     o->setProperty ("volume", std::round (jmax (-60.0f, masterDb->load()) * 100.0f) / 100.0f);
     o->setProperty ("chain", fx::chainToJson (fxSetup.master));
+    if (! fxSetup.aux[0].empty() || ! fxSetup.aux[1].empty() || fxSetup.auxSend[0] > 0.0f || fxSetup.auxSend[1] > 0.0f)
+    {
+        o->setProperty ("aux", Array<var> { fx::chainToJson (fxSetup.aux[0]), fx::chainToJson (fxSetup.aux[1]) });
+        o->setProperty ("auxSend", Array<var> { fxSetup.auxSend[0], fxSetup.auxSend[1] });
+    }
     Array<var> mods;
     for (auto& r : fxSetup.routes)
     {
@@ -441,6 +469,12 @@ void EmulonXProcessor::applyFxJson (const var& j, const std::vector<var>& zoneCh
     if (j.isObject())
     {
         fxSetup.master = fx::chainFromJson (j["chain"], idMap, nextFxId, currentSampleRate);
+        if (auto* aux = j["aux"].getArray())
+            for (int k = 0; k < jmin (2, aux->size()); ++k)
+                fxSetup.aux[k] = fx::chainFromJson ((*aux)[k], idMap, nextFxId, currentSampleRate);
+        if (auto* sends = j["auxSend"].getArray())
+            for (int k = 0; k < jmin (2, sends->size()); ++k)
+                fxSetup.auxSend[k] = jlimit (0.0f, 1.0f, (float) (double) (*sends)[k]);
         if (auto* mods = j["mods"].getArray())
             for (auto& q : *mods)
             {

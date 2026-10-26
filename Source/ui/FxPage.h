@@ -57,6 +57,8 @@ private:
 
     // Chain side
     juce::ComboBox channelBox, addBox;
+    std::unique_ptr<class ValueBox> auxSendBox;   // V3: shown on the AUX channels
+    static constexpr int auxBoxId = 900001;       // channel box ids of AUX 1 / AUX 2
     LedLabel bpmBox { 9.0f };
     LedDisplay bpmLed;
     juce::Viewport chainView;
@@ -66,7 +68,7 @@ private:
     // Envelope side
     juce::OwnedArray<juce::TextButton> envTabs;
     juce::TextButton envAdd { "+" }, envRemove { "X" }, typeShape { "SHAPE" }, typeAhdsr { "AHDSR" };
-    juce::ComboBox shapeBox, gridBox;
+    juce::ComboBox shapeBox, gridBox, typeBox, kindBox;   // typeBox: SHAPE / AHDSR / STEPS / RANDOM (V3)
     std::unique_ptr<EnvelopeGraph> graph;
     juce::OwnedArray<juce::Component> envOptions;
     std::vector<std::function<void (const fx::Envelope&)>> envSyncers;

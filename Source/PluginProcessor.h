@@ -214,8 +214,11 @@ public:
     void redo();
 
     //== FX, envelopes and modulation (FX tab) ===================================
-    /** chainId 0 = the whole-preset chain, otherwise a zone id. */
+    /** chainId 0 = the whole-preset chain, auxChainId (0 / 1) = the AUX buses, otherwise a zone id. */
     const fx::Chain* getFxChain (int chainId) const;
+    static constexpr int auxChainId (int bus) noexcept { return -1 - bus; }
+    /** How much of the sound goes to AUX 1 / AUX 2 (0..1). */
+    void setAuxSend (int bus, float amount);
     const fx::Setup& getFxSetup() const noexcept { return fxSetup; }
     /** Goes up when effects are added, removed, moved or change mode (the FX tab rebuilds then). */
     int getFxStructureVersion() const noexcept { return fxStructure; }
@@ -378,6 +381,7 @@ private:
     static constexpr int subBlock = 64, maxBuses = 32;
     float busData[maxBuses][2][subBlock] {};
     float mixL[subBlock] {}, mixR[subBlock] {};
+    float auxL[2][subBlock] {}, auxR[2][subBlock] {};
     double currentSampleRate = 44100.0;
     juce::AudioProcessLoadMeasurer loadMeasurer;
     juce::SmoothedValue<float> masterGain;

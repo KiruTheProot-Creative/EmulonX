@@ -9,7 +9,7 @@
 
 namespace emx::fx
 {
-enum class Type { filter, morph, eq, dist, comp, chorus, phaser, delay, reverb, util, count };
+enum class Type { filter, morph, eq, dist, comp, chorus, phaser, delay, reverb, util, spectral, count };
 inline constexpr int numTypes = (int) Type::count;
 inline constexpr int maxSlots = 8;   // knobs per effect
 

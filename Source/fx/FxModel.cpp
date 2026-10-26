@@ -195,7 +195,15 @@ Chain chainFromJson (const var& json, std::map<String, int>& idMap, int& nextId,
 var envelopeToJson (const Envelope& e)
 {
     auto* o = new juce::DynamicObject();
-    o->setProperty ("type", e.ahdsr ? "ahdsr" : "shape");
+    o->setProperty ("type", e.kind == Envelope::steps ? "steps" : e.kind == Envelope::random ? "random" : e.ahdsr ? "ahdsr" : "shape");
+    {
+        juce::Array<var> st;
+        for (auto v : e.stepValues)
+            st.add (v);
+        o->setProperty ("steps", st);
+        o->setProperty ("numSteps", e.numSteps);
+        o->setProperty ("randomType", e.randomType);
+    }
     juce::Array<var> pts;
     for (auto& p : e.points)
     {
@@ -226,6 +234,12 @@ Envelope envelopeFromJson (const var& j)
     if (! j.isObject())
         return e;
     e.ahdsr = j["type"].toString() == "ahdsr";
+    e.kind = j["type"].toString() == "steps" ? Envelope::steps : j["type"].toString() == "random" ? Envelope::random : Envelope::classic;
+    if (auto* st = j["steps"].getArray())
+        for (int i = 0; i < juce::jmin (16, st->size()); ++i)
+            e.stepValues[(size_t) i] = juce::jlimit (0.0f, 1.0f, (float) (double) (*st)[i]);
+    if (j.hasProperty ("numSteps")) e.numSteps = juce::jlimit (1, 16, (int) j["numSteps"]);
+    if (j.hasProperty ("randomType")) e.randomType = juce::jlimit (0, 3, (int) j["randomType"]);
     if (auto* arr = j["pts"].getArray(); arr != nullptr && arr->size() >= 2)
     {
         e.points.clear();

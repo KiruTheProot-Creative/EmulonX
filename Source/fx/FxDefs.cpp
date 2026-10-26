@@ -119,12 +119,12 @@ std::vector<TypeDef> buildDefs()
 
     d[(int) Type::comp] = { Type::comp, "comp", "Compressor", { "Compressor", "Limiter", "OTT" }, 0,
         { ab ("a", 0), ab ("b", 1), ab ("c", 2), ab ("d", 3), fixed (P ("out", "OUTPUT", -24, 24, 0, Fmt::db)),
-          fixed (P ("mix", "MIX", 0, 1, 1, Fmt::pct)) },
+          fixed (P ("mix", "MIX", 0, 1, 1, Fmt::pct)), ab ("e", 4) },
         { { M ("THRESHOLD", -60, 0, -18, Fmt::db), M ("RATIO", 1, 20, 4, Fmt::ratio, true),
             M ("ATTACK", 0.1f, 100, 10, Fmt::ms, true), M ("RELEASE", 10, 1000, 150, Fmt::ms, true) },
           { M ("CEILING", -24, 0, -1, Fmt::db), M ("RELEASE", 5, 500, 60, Fmt::ms, true), M ("INPUT", 0, 24, 0, Fmt::db) },
           { M ("TIME", 0, 1, 0.5f, Fmt::pct), M ("UPWARD", 0, 1, 1, Fmt::pct), M ("DOWNWARD", 0, 1, 1, Fmt::pct),
-            M ("INPUT", -12, 24, 0, Fmt::db) } } };
+            M ("INPUT", -12, 24, 0, Fmt::db), M ("INTENSITY", 0, 2, 1, Fmt::pct) } } };
 
     d[(int) Type::chorus] = { Type::chorus, "chorus", "Chorus", { "Chorus", "Flanger", "Ensemble" }, 0,
         { fixed (P ("rate", "RATE", 0.05f, 10, 0.8f, Fmt::hz2, true)), fixed (P ("depth", "DEPTH", 0, 1, 0.5f, Fmt::pct)),
@@ -143,6 +143,10 @@ std::vector<TypeDef> buildDefs()
           fixed (P ("pre", "PRE-DELAY", 0, 250, 10, Fmt::ms)), fixed (P ("damp", "DAMPING", 1000, 20000, 7000, Fmt::hz, true)),
           fixed (P ("lo", "LOW CUT", 20, 1000, 120, Fmt::hz, true)), fixed (P ("width", "WIDTH", 0, 1, 1, Fmt::pct)),
           fixed (P ("mix", "MIX", 0, 1, 0.25f, Fmt::pct)) }, {} };
+
+    d[(int) Type::spectral] = { Type::spectral, "spectral", "Spectral", { "Spectral" }, 0,
+        { fixed (P ("reso", "RESONANCE", 0, 1, 0.4f, Fmt::pct)), fixed (P ("smear", "SMEAR", 0, 1, 0.3f, Fmt::pct)),
+          fixed (P ("tilt", "TILT", -1, 1, 0, Fmt::bi)), fixed (P ("mix", "MIX", 0, 1, 0.5f, Fmt::pct)) }, {} };
 
     d[(int) Type::util] = { Type::util, "util", "Utility", { "Stereo" }, 0,
         { fixed (P ("gain", "GAIN", -36, 12, 0, Fmt::db)), fixed (P ("pan", "PAN", -1, 1, 0, Fmt::pan)),
@@ -171,7 +175,7 @@ const TypeDef* defByKey (const String& key)
 const std::array<Type, numTypes>& addOrder()
 {
     static const std::array<Type, numTypes> order { Type::filter, Type::morph, Type::eq, Type::dist, Type::comp,
-                                                    Type::chorus, Type::phaser, Type::delay, Type::reverb, Type::util };
+                                                    Type::chorus, Type::phaser, Type::delay, Type::reverb, Type::spectral, Type::util };
     return order;
 }
 

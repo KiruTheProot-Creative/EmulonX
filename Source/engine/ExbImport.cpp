@@ -397,22 +397,24 @@ AuxFx readAuxFx (const MemoryBlock& mb, const std::vector<TocEntry>& toc)
     return a;
 }
 
-/** Adds the aux effects as sends: `send` = how much of the dry sound reaches aux 1 (reverb) and aux 2 (delay). */
-void addAux (Array<var>& chain, const AuxFx& a, const float send[2], double bpm)
+/** The bank's aux effects as Emulon X's two AUX buses (fully wet; the send levels carry the amounts). */
+void buildAux (const AuxFx& a, const float send[2], Array<var>& aux1, Array<var>& aux2, float sends[2])
 {
-    double dryGain = 1.0;
-    auto mixFor = [&dryGain] (double s)
+    sends[0] = sends[1] = 0.0f;
+    if (a.hasReverb)
     {
-        const double m = s / (1.0 + s);   // our effects cross-fade; this keeps the dry level and adds `s` of wet
-        dryGain *= 1.0 - m;
-        return m;
-    };
-    if (a.hasDelay && send[1] > 0.005f)
+        const double decay = 0.3 * std::pow (100.0, jlimit (0.0, 1.0, (double) a.reverb[2]));
+        const double damp = 20000.0 * std::pow (2.0, -4.0 * jlimit (0.0, 1.0, a.reverb[7] / 100.0));
+        aux1.add (fxModule ("reverb", 1, { { "size", jlimit (0.1, 1.0, 0.3 + a.reverb[4]) }, { "decay", jlimit (0.2, 15.0, decay) },
+                                           { "pre", jlimit (0.0, 250.0, (double) a.reverb[6]) }, { "damp", jlimit (1000.0, 20000.0, damp) },
+                                           { "lo", 80.0 }, { "width", 1.0 }, { "mix", 1.0 } }));
+        sends[0] = jlimit (0.0f, 1.0f, send[0] * a.reverb[1] / 100.0f);
+    }
+    if (a.hasDelay)
     {
-        const double beat = 60000.0 / bpm;
         const double hi = 1500.0 * std::pow (20000.0 / 1500.0, jlimit (0.0, 1.0, (double) a.delay[6]));
-        auto m = fxModule ("delay", 1, { { "time", beat * 0.75 }, { "fb", jlimit (0.0, 0.95, a.delay[5] / 100.0) }, { "a", 1.0 }, { "b", 0.0 },
-                                         { "lo", 60.0 }, { "hi", hi }, { "mix", mixFor (send[1] * a.delay[1] / 100.0) } });
+        auto m = fxModule ("delay", 1, { { "time", 375.0 }, { "fb", jlimit (0.0, 0.95, a.delay[5] / 100.0) }, { "a", 1.0 }, { "b", 0.0 },
+                                         { "lo", 60.0 }, { "hi", hi }, { "mix", 1.0 } });
         if (a.delay[0] > 0.5f)
             if (auto* st = m["settings"].getDynamicObject())
             {
@@ -422,18 +424,9 @@ void addAux (Array<var>& chain, const AuxFx& a, const float send[2], double bpm)
                 st->setProperty ("den", 8);
                 st->setProperty ("dot", 1);
             }
-        chain.add (m);
+        aux2.add (m);
+        sends[1] = jlimit (0.0f, 1.0f, send[1] * a.delay[1] / 100.0f);
     }
-    if (a.hasReverb && send[0] > 0.005f)
-    {
-        const double decay = 0.3 * std::pow (100.0, jlimit (0.0, 1.0, (double) a.reverb[2]));
-        const double damp = 20000.0 * std::pow (2.0, -4.0 * jlimit (0.0, 1.0, a.reverb[7] / 100.0));
-        chain.add (fxModule ("reverb", 1, { { "size", jlimit (0.1, 1.0, 0.3 + a.reverb[4]) }, { "decay", jlimit (0.2, 15.0, decay) },
-                                            { "pre", jlimit (0.0, 250.0, (double) a.reverb[6]) }, { "damp", jlimit (1000.0, 20000.0, damp) },
-                                            { "lo", 80.0 }, { "width", 1.0 }, { "mix", mixFor (send[0] * a.reverb[1] / 100.0) } }));
-    }
-    if (dryGain < 0.999)
-        chain.add (fxModule ("util", 0, { { "gain", Decibels::gainToDecibels (1.0 / dryGain) }, { "pan", 0.0 }, { "width", 1.0 } }));
 }
 } // namespace
 
@@ -758,13 +751,14 @@ LoadResult loadPreset (const File& bankIn, int presetNumber)
             }
         send[0] = jlimit (0.0f, 1.0f, send[0]);
         send[1] = jlimit (0.0f, 1.0f, send[1]);
-        addAux (chain, readAuxFx (mb, toc), send, 120.0);
-        if (! chain.isEmpty())
-        {
-            auto* fxo = new DynamicObject();
-            fxo->setProperty ("chain", chain);
-            r.fx = var (fxo);
-        }
+        Array<var> aux1, aux2;
+        float sends[2];
+        buildAux (readAuxFx (mb, toc), send, aux1, aux2, sends);
+        auto* fxo = new DynamicObject();
+        fxo->setProperty ("chain", chain);
+        fxo->setProperty ("aux", Array<var> { var (aux1), var (aux2) });
+        fxo->setProperty ("auxSend", Array<var> { sends[0], sends[1] });
+        r.fx = var (fxo);
     }
     if (r.zones.empty() && r.errors.isEmpty())
         r.errors.add (preset->name + ": no playable zones" + (missing > 0 ? " (its samples aren't in this sound set)" : ""));

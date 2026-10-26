@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #include "FxPage.h"
+#include "EditorPage.h"
 #include <optional>
 #include "Theme.h"
 #include "../PluginProcessor.h"
@@ -460,6 +461,58 @@ public:
             g.fillRect (geo.p, std::round (geo.Y ((float) i / G)), geo.W - 2 * geo.p, 1.0f);
         }
 
+        if (E->kind == fx::Envelope::steps)
+        {
+            // step bars (drag them), the current step lit
+            const int n = jlimit (1, 16, E->numSteps);
+            const float bw = (geo.W - 2 * geo.p) / (float) n;
+            const int cur = lastStage >= 0 ? jlimit (0, n - 1, (int) (lastX * (float) n)) : -1;
+            for (int i = 0; i < n; ++i)
+            {
+                const float v = E->stepValues[(size_t) i];
+                auto bar = Rectangle<float> (geo.X ((float) i / (float) n) + 2.0f, geo.Y (v), bw - 4.0f, geo.Y (0) - geo.Y (v));
+                g.setGradientFill (ColourGradient::vertical (theme::hue (i == cur ? 0xffff8080 : 0xffff3a3a), bar.getY(),
+                                                             theme::hue (0xff7a1018), bar.getBottom()));
+                g.fillRect (bar);
+                g.setColour (Colours::white.withAlpha (i == cur ? 0.9f : 0.5f));
+                g.fillRect (bar.withHeight (2.0f));
+            }
+            return;
+        }
+        if (E->kind == fx::Envelope::random)
+        {
+            // a picture of the chosen kind of randomness, and the value right now
+            Random r (7);
+            Path p;
+            float prev = 0.5f, y = 0.5f;
+            const int segs = 12;
+            for (int i = 0; i <= segs * 8; ++i)
+            {
+                const float u = (float) i / (float) (segs * 8);
+                if (i % 8 == 0)
+                {
+                    prev = y;
+                    const float step = r.nextFloat() - 0.5f;
+                    y = E->randomType == fx::Envelope::drift ? jlimit (0.0f, 1.0f, prev + step * 0.35f)
+                      : E->randomType == fx::Envelope::brownian ? jlimit (0.0f, 1.0f, prev + step * 0.12f) : r.nextFloat();
+                }
+                const float f = (float) (i % 8) / 8.0f;
+                const float v = E->randomType == fx::Envelope::sampleHold ? y
+                              : E->randomType == fx::Envelope::smooth ? prev + (y - prev) * (0.5f - 0.5f * std::cos (f * MathConstants<float>::pi))
+                              : prev + (y - prev) * f;
+                if (i == 0) p.startNewSubPath (geo.X (u), geo.Y (v)); else p.lineTo (geo.X (u), geo.Y (v));
+            }
+            g.setColour (theme::red.withAlpha (0.35f));
+            g.strokePath (p, PathStrokeType (4.0f));
+            g.setColour (theme::hue (0xffff4040));
+            g.strokePath (p, PathStrokeType (1.6f));
+            if (lastStage >= 0)
+            {
+                g.setColour (Colours::white);
+                g.fillEllipse (geo.W - geo.p - 10.0f, geo.Y (lastV) - 5.0f, 10.0f, 10.0f);
+            }
+            return;
+        }
         Path line, fill;
         std::vector<Point<float>> pts;
         if (! E->ahdsr)
@@ -556,12 +609,27 @@ public:
                                                                                     : MouseCursor::CrosshairCursor);
     }
 
+    void setStepAt (Point<float> pos)
+    {
+        const auto* cur = env();
+        if (cur == nullptr || cur->kind != fx::Envelope::steps)
+            return;
+        const auto geo = geometry();
+        const int n = jlimit (1, 16, cur->numSteps);
+        const int i = jlimit (0, n - 1, (int) (geo.iX (pos.x) * (float) n));
+        auto E = *cur;
+        E.stepValues[(size_t) i] = jlimit (0.0f, 1.0f, geo.iY (pos.y));
+        proc.setEnvelope (page.getSelectedEnvelope(), E);
+    }
+
     void mouseDown (const MouseEvent& e) override
     {
         dragging = {};
         const auto* E = env();
         if (E == nullptr)
             return;
+        if (E->kind == fx::Envelope::steps) { setStepAt (e.position); return; }
+        if (E->kind == fx::Envelope::random) return;
         const auto geo = geometry();
         if (auto h = pick (*E, geo, e.position))
         {
@@ -574,6 +642,11 @@ public:
     void mouseDrag (const MouseEvent& e) override
     {
         const auto* cur = env();
+        if (cur != nullptr && cur->kind == fx::Envelope::steps)
+        {
+            setStepAt (e.position);
+            return;
+        }
         if (cur == nullptr || dragging.kind == 0)
             return;
         auto E = *cur;
@@ -614,7 +687,7 @@ public:
     void mouseDoubleClick (const MouseEvent& e) override
     {
         const auto* cur = env();
-        if (cur == nullptr || cur->ahdsr)
+        if (cur == nullptr || cur->ahdsr || cur->kind != fx::Envelope::classic)
             return;
         auto E = *cur;
         const auto geo = geometry();
@@ -873,7 +946,17 @@ FxPage::FxPage (EmulonXProcessor& p)
       bpmLed ([this] { return "SYNC " + String (proc.getFxEngine().bpmUsed.load(), 1); }, 8.5f)
 {
     channelBox.setTooltip ("Which channel you are editing: the whole preset, or one zone's own effects");
-    channelBox.onChange = [this] { setChannel (channelBox.getSelectedId() == 1 ? 0 : channelBox.getSelectedId() - 1); };
+    channelBox.onChange = [this]
+    {
+        const int id = channelBox.getSelectedId();
+        setChannel (id == 1 ? 0 : id >= auxBoxId ? EmulonXProcessor::auxChainId (id - auxBoxId) : id - 1);
+    };
+    auxSendBox = std::make_unique<ValueBox>();
+    auxSendBox->setRange (0.0, 100.0, 0.5);
+    auxSendBox->format = [] (double v) { return "SEND " + String (v, v < 10.0 ? 1 : 0) + "%"; };
+    auxSendBox->onChange = [this] (double v) { proc.setAuxSend (channel == EmulonXProcessor::auxChainId (0) ? 0 : 1, (float) (v / 100.0)); };
+    auxSendBox->setTooltip ("How much of the whole sound goes to this AUX bus (drag up / down, double-click to type)");
+    addChildComponent (*auxSendBox);
     addAndMakeVisible (channelBox);
 
     addBox.setTextWhenNothingSelected ("+ ADD EFFECT");
@@ -922,6 +1005,30 @@ FxPage::FxPage (EmulonXProcessor& p)
     };
     typeShape.onClick = [setType] { setType (false); };
     typeAhdsr.onClick = [setType] { setType (true); };
+    // V3: one list for the four kinds (shape, AHDSR, steps for arp-style patterns, random)
+    typeBox.addItem ("SHAPE", 1);
+    typeBox.addItem ("AHDSR", 2);
+    typeBox.addItem ("STEPS (ARP)", 3);
+    typeBox.addItem ("RANDOM", 4);
+    typeBox.setTooltip ("Shape: draw it.  AHDSR: per note.  Steps: a step pattern (like an arpeggio).  Random: new values in time");
+    typeBox.onChange = [this]
+    {
+        const int t = typeBox.getSelectedId();
+        if (t <= 0) return;
+        auto e = proc.getFxSetup().envelopes[(size_t) envIndex];
+        e.ahdsr = t == 2;
+        e.kind = t == 3 ? fx::Envelope::steps : t == 4 ? fx::Envelope::random : fx::Envelope::classic;
+        proc.setEnvelope (envIndex, e);
+    };
+    kindBox.onChange = [this]
+    {
+        const int v = kindBox.getSelectedId();
+        if (v <= 0) return;
+        auto e = proc.getFxSetup().envelopes[(size_t) envIndex];
+        if (e.kind == fx::Envelope::steps) e.numSteps = v;
+        else                               e.randomType = v - 1;
+        proc.setEnvelope (envIndex, e);
+    };
     shapeBox.setTextWhenNothingSelected ("LOAD SHAPE...");
     int sid = 1;
     for (auto& [name, pts] : fx::shapeLibrary())
@@ -944,7 +1051,7 @@ FxPage::FxPage (EmulonXProcessor& p)
         e.grid = gridBox.getSelectedId() - 1;
         proc.setEnvelope (envIndex, e);
     };
-    for (Component* c : { (Component*) &envAdd, (Component*) &envRemove, (Component*) &typeShape, (Component*) &typeAhdsr,
+    for (Component* c : { (Component*) &envAdd, (Component*) &envRemove, (Component*) &typeBox, (Component*) &kindBox,
                           (Component*) &shapeBox, (Component*) &gridBox })
         addAndMakeVisible (c);
 
@@ -1004,7 +1111,14 @@ void FxPage::rebuildChannelBox()
     const auto& zs = proc.getZones();
     for (size_t i = 0; i < zs.size(); ++i)
         channelBox.addItem ("ZONE " + String ((int) i + 1) + " - " + zs[i].name.toUpperCase() + count (zs[i].fx), zs[i].id + 1);
-    channelBox.setSelectedId (channel == 0 ? 1 : channel + 1, dontSendNotification);
+    channelBox.addSectionHeading ("AUX FX (SHARED SENDS)");
+    for (int k = 0; k < 2; ++k)
+        channelBox.addItem ("AUX " + String (k + 1) + count (proc.getFxSetup().aux[k]), auxBoxId + k);
+    const bool aux = channel < 0;
+    channelBox.setSelectedId (channel == 0 ? 1 : aux ? auxBoxId + (channel == EmulonXProcessor::auxChainId (0) ? 0 : 1) : channel + 1, dontSendNotification);
+    auxSendBox->setVisible (aux);
+    bpmBox.setVisible (! aux);
+    bpmLed.setVisible (! aux);
 }
 
 void FxPage::rebuild()
@@ -1059,8 +1173,24 @@ void FxPage::rebuildEnvelopeOptions()
     if (envIndex >= (int) envs.size())
         return;
     const auto& E = envs[(size_t) envIndex];
-    shapeBox.setVisible (! E.ahdsr);
-    gridBox.setVisible (! E.ahdsr);
+    const bool classicShape = ! E.ahdsr && E.kind == fx::Envelope::classic;
+    shapeBox.setVisible (classicShape);
+    gridBox.setVisible (classicShape);
+    kindBox.setVisible (E.kind != fx::Envelope::classic);
+    kindBox.clear (dontSendNotification);
+    if (E.kind == fx::Envelope::steps)
+    {
+        for (int n : { 2, 3, 4, 6, 8, 12, 16 })
+            kindBox.addItem (String (n) + " STEPS", n);
+        kindBox.setTooltip ("How many steps the pattern has (drag the bars to set each step)");
+    }
+    else if (E.kind == fx::Envelope::random)
+    {
+        const char* names[] { "SAMPLE & HOLD", "SMOOTH", "DRIFT", "BROWNIAN" };
+        for (int i = 0; i < 4; ++i)
+            kindBox.addItem (names[i], i + 1);
+        kindBox.setTooltip ("Sample & hold: jumps.  Smooth: glides.  Drift: wanders.  Brownian: small random walk");
+    }
 
     auto editEnv = [this] (std::function<void (fx::Envelope&)> f)
     {
@@ -1157,6 +1287,8 @@ void FxPage::syncEnvelopeOptions()
     const auto& E = envs[(size_t) envIndex];
     typeShape.setToggleState (! E.ahdsr, dontSendNotification);
     typeAhdsr.setToggleState (E.ahdsr, dontSendNotification);
+    typeBox.setSelectedId (E.kind == fx::Envelope::steps ? 3 : E.kind == fx::Envelope::random ? 4 : E.ahdsr ? 2 : 1, dontSendNotification);
+    kindBox.setSelectedId (E.kind == fx::Envelope::steps ? E.numSteps : E.randomType + 1, dontSendNotification);
     gridBox.setSelectedId (E.grid + 1, dontSendNotification);
     for (auto& f : envSyncers)
         f (E);
@@ -1208,6 +1340,8 @@ void FxPage::syncValues()
 {
     if (! bpmBox.isBeingEdited())
         bpmBox.setText (String (roundToInt (proc.getFxSetup().bpm)), dontSendNotification);
+    if (channel < 0)
+        auxSendBox->setValue (proc.getFxSetup().auxSend[channel == EmulonXProcessor::auxChainId (0) ? 0 : 1] * 100.0);
     for (auto* c : cards)
         c->sync();
     destinations->syncValues();
@@ -1240,6 +1374,7 @@ void FxPage::resized()
         row.removeFromLeft (8);
         addBox.setBounds (row.removeFromLeft (130));
         bpmLed.setBounds (row.removeFromRight (78));
+        auxSendBox->setBounds (bpmLed.getBounds().withLeft (bpmLed.getX() - 45));
         row.removeFromRight (5);
         bpmBox.setBounds (row.removeFromRight (40));
         c.removeFromTop (4);
@@ -1273,12 +1408,12 @@ void FxPage::resized()
         }
         e.removeFromTop (6);
         auto row2 = e.removeFromTop (24);
-        typeShape.setBounds (row2.removeFromLeft (62));
-        row2.removeFromLeft (4);
-        typeAhdsr.setBounds (row2.removeFromLeft (62));
+        typeBox.setBounds (row2.removeFromLeft (122));
+        row2.removeFromLeft (6);
         gridBox.setBounds (row2.removeFromRight (88));
         row2.removeFromRight (5);
         shapeBox.setBounds (row2.removeFromRight (120));
+        kindBox.setBounds (row2.removeFromLeft (jmin (row2.getWidth(), 150)));
         e.removeFromTop (6);
         graphArea = e.removeFromTop (150).toFloat();
         graph->setBounds (graphArea.toNearestInt());
@@ -1301,6 +1436,7 @@ void FxPage::paint (Graphics& g)
     g.drawText ("CHANNEL", channelLabel, Justification::centredLeft, false);
     g.setFont (theme::font (7.5f, 500, 0.06f));
     g.drawText (channel == 0 ? "RUNS ON EVERYTHING, AFTER THE ZONE CHANNELS."
+                : channel < 0 ? "A SHARED SEND: THE SOUND GOES IN AT THE SEND LEVEL, THE EFFECTS RUN FULLY WET."
                              : "RUNS ONLY ON THIS ZONE, BEFORE THE WHOLE-PRESET CHAIN.",
                 hintArea, Justification::centredLeft, true);
     theme::drawLed (g, chainListArea, {});

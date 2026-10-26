@@ -26,6 +26,8 @@ struct Snapshot
 
     std::vector<ChainRT> zoneChains;   // only zones that have effects
     ChainRT master;
+    ChainRT aux[2];
+    float auxSend[2] {};
     std::vector<Envelope> envelopes;
     std::vector<RouteRT> volumeRoutes;  // modulation of the master volume
     struct ZonePitchRT { int zoneId; float baseNorm; std::vector<RouteRT> routes; };
@@ -87,7 +89,11 @@ private:
     float wheel = 0.0f;
     int outIndex = 0;
 
-    struct EnvState { bool gate = false, trig = false; juce::int64 t0 = 0, tr0 = 0; float l0 = 0, lr = 0, last = 0; };
+    struct EnvState
+    {
+        bool gate = false, trig = false; juce::int64 t0 = 0, tr0 = 0; float l0 = 0, lr = 0, last = 0;
+        juce::int64 cycle = -1; float rPrev = 0.5f, rNext = 0.5f; juce::uint32 seed = 12345u;   // random kind
+    };
     EnvState env[maxEnvelopes];
     float envNow[maxEnvelopes] {};
 };

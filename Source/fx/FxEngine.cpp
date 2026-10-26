@@ -42,6 +42,11 @@ std::shared_ptr<Snapshot> Snapshot::build (const Setup& setup, const std::vector
             s->zoneChains.push_back (std::move (c));
         }
     convert (setup.master, s->master);
+    for (int k = 0; k < 2; ++k)
+    {
+        convert (setup.aux[k], s->aux[k]);
+        s->auxSend[k] = juce::jlimit (0.0f, 1.0f, setup.auxSend[k]);
+    }
     for (auto& r : setup.routes)
         if (r.target.isMaster())
             s->volumeRoutes.push_back ({ 0, r.source.kind, r.source.index, r.amount });
@@ -122,7 +127,55 @@ void Engine::beginBlock (int numSamples, double sampleRate, double bpm, juce::ui
         const auto& E = snap->envelopes[(size_t) i];
         auto& s = env[i];
         float v = 0.0f, x = 0.0f;
-        if (E.ahdsr)
+        if (E.kind == Envelope::steps || E.kind == Envelope::random)
+        {
+            // timed like a shape: one period = one step (steps) or one new value (random)
+            const double period = juce::jmax (0.001, E.sync ? syncSeconds (E.num, E.den, E.dot, bpmNow) : 1.0 / E.hz);
+            double t = (double) (E.trigger == Envelope::retrig ? T - s.t0 : T) / sr / period;
+            const int count = juce::jlimit (1, 16, E.numSteps);
+            if (E.kind == Envelope::steps)
+            {
+                if (! E.loop)
+                    t = juce::jmin (t, (double) count - 0.0001);
+                const auto idx = (juce::int64) std::floor (t);
+                v = E.stepValues[(size_t) (idx % count)];
+                x = (float) ((double) (idx % count) + (t - std::floor (t))) / (float) count;
+            }
+            else
+            {
+                const auto cyc = (juce::int64) std::floor (t);
+                auto rnd = [&s]
+                {
+                    s.seed = s.seed * 1664525u + 1013904223u;
+                    return (float) ((s.seed >> 8) & 0xffffff) / (float) 0xffffff;
+                };
+                if (cyc != s.cycle)
+                {
+                    // a new value every period (several at once if a block skipped some)
+                    const int steps = s.cycle < 0 ? 1 : (int) juce::jlimit ((juce::int64) 1, (juce::int64) 8, cyc - s.cycle);
+                    for (int k = 0; k < steps; ++k)
+                    {
+                        s.rPrev = s.rNext;
+                        switch (E.randomType)
+                        {
+                            case Envelope::drift:    s.rNext = juce::jlimit (0.0f, 1.0f, s.rPrev + (rnd() - 0.5f) * 0.35f); break;
+                            case Envelope::brownian: s.rNext = juce::jlimit (0.0f, 1.0f, s.rPrev + (rnd() - 0.5f) * 0.12f); break;
+                            default:                 s.rNext = rnd(); break;
+                        }
+                    }
+                    s.cycle = cyc;
+                }
+                const float frac = (float) (t - std::floor (t));
+                switch (E.randomType)
+                {
+                    case Envelope::sampleHold: v = s.rNext; break;
+                    case Envelope::smooth:     v = s.rPrev + (s.rNext - s.rPrev) * (0.5f - 0.5f * std::cos (frac * juce::MathConstants<float>::pi)); break;
+                    default:                   v = s.rPrev + (s.rNext - s.rPrev) * frac; break;   // drift / brownian glide
+                }
+                x = frac;
+            }
+        }
+        else if (E.ahdsr)
         {
             if (s.gate)
             {

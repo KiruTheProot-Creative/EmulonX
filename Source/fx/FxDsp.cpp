@@ -385,7 +385,9 @@ public:
         else
         {
             // OTT: three bands, each pushed down above and pulled up below its target.
-            const double t = v[0], up = v[1], dn = v[2], ig = dbToGain (v[3]), K = sqrt2;
+            // INTENSITY (0..200 %) scales both the upward and the downward push
+            const double inten = juce::jlimit (0.0, 2.0, (double) v[6]);
+            const double t = v[0], up = v[1] * inten, dn = v[2] * inten, ig = dbToGain (v[3]), K = sqrt2;
             const Svf c1 = svc (88.3, K, sr), c2 = svc (2500.0, K, sr);
             const double ac = std::exp (-1.0 / ((1 + 20 * t) * 0.001 * sr)), rc = std::exp (-1.0 / ((20 + 400 * t) * 0.001 * sr));
             static constexpr double TD[3] { -17, -16, -18 }, TU[3] { -33, -34, -33 };
@@ -438,6 +440,173 @@ public:
 
 private:
     double e = 0, g = 1, be[3] {}, sv[2][4][2] {};
+};
+
+//== Spectral: resonance (peaks pushed up), smear (partials held on) and tilt, in the frequency domain
+class Spectral final : public Processor
+{
+public:
+    static constexpr int N = 1024, H = 256, bins = N / 2 + 1;
+
+    void prepare (double) override
+    {
+        win.resize (N);
+        for (int i = 0; i < N; ++i)
+            win[(size_t) i] = (float) (0.5 - 0.5 * std::cos (twoPi * i / N));
+        for (auto& c : ch)
+        {
+            c.in.assign (N, 0.0f);
+            c.out.assign (N, 0.0f);
+            c.dry.assign (N, 0.0f);
+            c.held.assign (bins, 0.0);
+        }
+        re.assign (N, 0.0);
+        im.assign (N, 0.0);
+        mag.assign (bins, 0.0);
+        w = 0;
+        hop = 0;
+    }
+
+    void process (const float* v, const Settings&, float* L, float* R, int n, double sr, double) noexcept override
+    {
+        if (win.empty())
+            return;
+        reso = juce::jlimit (0.0, 1.0, (double) v[0]);
+        smear = juce::jlimit (0.0, 1.0, (double) v[1]);
+        tilt = juce::jlimit (-1.0, 1.0, (double) v[2]);
+        const double mix = juce::jlimit (0.0, 1.0, (double) v[3]);
+        // smear: how long a partial keeps sounding after it stops (50 ms .. 6 s)
+        const double holdSec = 0.05 * std::pow (120.0, smear);
+        holdCoef = smear < 0.01 ? 0.0 : std::pow (0.001, (double) H / (sr * holdSec));
+        for (int i = 0; i < n; ++i)
+        {
+            float* io[2] { L + i, R + i };
+            for (int c = 0; c < 2; ++c)
+            {
+                auto& s = ch[c];
+                const float x = *io[c];
+                const float dryOut = s.dry[(size_t) w];   // the dry sound, delayed like the wet one
+                s.dry[(size_t) w] = x;
+                s.in[(size_t) w] = x;
+                const float wet = s.out[(size_t) w];
+                s.out[(size_t) w] = 0.0f;
+                *io[c] = (float) (dryOut * (1.0 - mix) + wet * mix);
+            }
+            w = (w + 1) % N;
+            if (++hop == H)
+            {
+                hop = 0;
+                frame (ch[0]);
+                frame (ch[1]);
+            }
+        }
+    }
+
+private:
+    struct Ch { std::vector<float> in, out, dry; std::vector<double> held; };
+
+    static void fft (std::vector<double>& xr, std::vector<double>& xi, bool inverse) noexcept
+    {
+        const int n = (int) xr.size();
+        for (int i = 1, j = 0; i < n; ++i)
+        {
+            int bit = n >> 1;
+            for (; j & bit; bit >>= 1) j ^= bit;
+            j ^= bit;
+            if (i < j) { std::swap (xr[(size_t) i], xr[(size_t) j]); std::swap (xi[(size_t) i], xi[(size_t) j]); }
+        }
+        for (int len = 2; len <= n; len <<= 1)
+        {
+            const double ang = twoPi / len * (inverse ? 1.0 : -1.0);
+            const double wr = std::cos (ang), wi = std::sin (ang);
+            for (int i = 0; i < n; i += len)
+            {
+                double cr = 1.0, ci = 0.0;
+                for (int k = 0; k < len / 2; ++k)
+                {
+                    const size_t a = (size_t) (i + k), b = (size_t) (i + k + len / 2);
+                    const double tr = xr[b] * cr - xi[b] * ci, ti = xr[b] * ci + xi[b] * cr;
+                    xr[b] = xr[a] - tr; xi[b] = xi[a] - ti;
+                    xr[a] += tr; xi[a] += ti;
+                    const double nr = cr * wr - ci * wi;
+                    ci = cr * wi + ci * wr;
+                    cr = nr;
+                }
+            }
+        }
+    }
+
+    void frame (Ch& c) noexcept
+    {
+        for (int k = 0; k < N; ++k)
+        {
+            re[(size_t) k] = c.in[(size_t) ((w + k) % N)] * win[(size_t) k];   // oldest first
+            im[(size_t) k] = 0.0;
+        }
+        fft (re, im, false);
+        double eIn = 0.0;
+        for (int b = 0; b < bins; ++b)
+        {
+            mag[(size_t) b] = std::sqrt (re[(size_t) b] * re[(size_t) b] + im[(size_t) b] * im[(size_t) b]);
+            eIn += mag[(size_t) b] * mag[(size_t) b];
+        }
+        // resonance: each bin against its neighbourhood (+-6 bins), peaks pushed up
+        double eOut = 0.0;
+        std::array<double, bins> gain {};
+        double run = 0.0;
+        for (int b = 0; b < juce::jmin (bins, 7); ++b) run += mag[(size_t) b];
+        int lo = 0, hi = juce::jmin (bins, 7);
+        for (int b = 0; b < bins; ++b)
+        {
+            while (hi < juce::jmin (bins, b + 7)) run += mag[(size_t) hi++];
+            while (lo < b - 6) run -= mag[(size_t) lo++];
+            const double avg = run / juce::jmax (1, hi - lo) + 1e-9;
+            double g = reso > 0.001 ? juce::jmin (8.0, std::pow ((mag[(size_t) b] + 1e-9) / avg, reso * 2.0)) : 1.0;
+            if (std::abs (tilt) > 0.001)
+                g *= juce::jlimit (0.1, 10.0, std::pow ((b + 1) / 48.0, tilt * 0.6));
+            gain[(size_t) b] = g;
+            eOut += (mag[(size_t) b] * g) * (mag[(size_t) b] * g);
+        }
+        const double norm = eOut > 1e-18 ? std::sqrt (eIn / eOut) : 1.0;
+        for (int b = 0; b < bins; ++b)
+        {
+            double m = mag[(size_t) b] * gain[(size_t) b] * norm;
+            if (holdCoef > 0.0)
+            {
+                c.held[(size_t) b] = juce::jmax (m, c.held[(size_t) b] * holdCoef);   // smear: partials fade slowly
+                m = c.held[(size_t) b];
+            }
+            const double k = mag[(size_t) b] > 1e-12 ? m / mag[(size_t) b] : 0.0;
+            if (mag[(size_t) b] <= 1e-12 && m > 0.0)
+            {
+                // a held partial whose input went silent: give it a phase that keeps turning
+                const double ph = twoPi * b * (double) H / N * (double) (++turn % 4096);
+                re[(size_t) b] = m * std::cos (ph);
+                im[(size_t) b] = m * std::sin (ph);
+            }
+            else
+            {
+                re[(size_t) b] *= k;
+                im[(size_t) b] *= k;
+            }
+            if (b > 0 && b < N / 2)
+            {
+                re[(size_t) (N - b)] = re[(size_t) b];
+                im[(size_t) (N - b)] = -im[(size_t) b];
+            }
+        }
+        fft (re, im, true);
+        const double scale = 1.0 / (N * 1.5);   // inverse FFT size, and Hann x Hann at 75 % overlap
+        for (int k = 0; k < N; ++k)
+            c.out[(size_t) ((w + k) % N)] += (float) (re[(size_t) k] * win[(size_t) k] * scale);
+    }
+
+    std::vector<float> win;
+    Ch ch[2];
+    std::vector<double> re, im, mag;
+    int w = 0, hop = 0;
+    juce::uint32 turn = 0;
+    double reso = 0.4, smear = 0.3, tilt = 0.0, holdCoef = 0.0;
 };
 
 //== 3-band EQ ======================================================================
@@ -947,6 +1116,7 @@ std::unique_ptr<Processor> createProcessor (Type t, double sr)
         case Type::dist:   p = std::make_unique<Distortion>(); break;
         case Type::delay:  p = std::make_unique<Delay>(); break;
         case Type::filter: p = std::make_unique<Filter>(); break;
+        case Type::spectral: p = std::make_unique<Spectral>(); break;
         case Type::count:  break;
     }
     if (p != nullptr)
